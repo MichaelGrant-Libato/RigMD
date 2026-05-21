@@ -172,19 +172,12 @@ recommendations
 
 | Name | GitHub | Responsibilities |
 |---|---|---|
-<<<<<<< Updated upstream
-| Libato, Michael Grant | Frontend | ProfilePage, IntakePage, routing, AppContext |
-| Macansantos, Axcelson | Frontend | ResultPage, HistoryPage, all reusable components |
-| Ruperez, Raymart | Backend | FastAPI setup, all routers, Pydantic schemas |
-| Maestrado, Ralph Keane | Backend | diagnostic_engine, advisory_module, ai_explainer |
-| Labaya, Godwin | Database | Supabase setup, SQLAlchemy models, repositories, Alembic migrations |
-=======
+
 | Libato, Michael Grant | @username | Backend — diagnostic_engine, advisory_module, ai_explainer |
 | Macansantos, Axcelson | @username | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
 | Ruperez, Raymart | @username | Backend — FastAPI setup, all routers, Pydantic schemas |
 | Maestrado, Ralph Keane | @username | Frontend — ProfilePage, IntakePage, routing, AppContext |
 | Labaya, Godwin | @username | Frontend — ResultPage, HistoryPage, all reusable components |
->>>>>>> Stashed changes
 
 ---
 
