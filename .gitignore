@@ -1,51 +1,61 @@
-# Python
+# ============================================================
+#  RigMD .gitignore
+#  React + FastAPI + PostgreSQL (Supabase)
+# ============================================================
+
+# SECRETS — never commit these
+.env
+.env.*
+!.env.example
+secrets.py
+config.ini
+
+# FRONTEND — React / Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.eslintcache
+
+# BACKEND — Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.so
+venv/
+env/
+.venv/
+backend/venv/
+backend/.venv/
 *.egg
 *.egg-info/
 dist/
 build/
-*.spec
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Virtual environment
-venv/
-env/
-.venv/
-.env/
-
-# Environment variables / API keys (NEVER commit these)
-.env
-*.env
-config.ini
-secrets.py
+# ALEMBIC
+database/migrations/versions/*.pyc
 
 # IDE
 .vscode/
 .idea/
 *.suo
 *.user
-
-# OS
-.DS_Store
+*.swp
+*.swo
+*.DS_Store
 Thumbs.db
 desktop.ini
 
-# PyInstaller output
-*.exe
-*.app
-
-# SQLite database files (local only)
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
+# LOGS
 *.log
 logs/
 
-# Test outputs
+# MISC
+*.bak
+*.tmp
 test_results/
-*.coverage
