@@ -174,11 +174,11 @@ recommendations
 
 | Name | GitHub | Responsibilities |
 |---|---|---|
-| Libato, Michael Grant | @username | Backend — diagnostic_engine, advisory_module, ai_explainer |
-| Macansantos, Axcelson | @username | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
-| Ruperez, Raymart | @username | Backend — FastAPI setup, all routers, Pydantic schemas |
-| Maestrado, Ralph Keane | @username | Frontend — ProfilePage, IntakePage, routing, AppContext |
-| Labaya, Godwin | @username | Frontend — ResultPage, HistoryPage, all reusable components |
+| Libato, Michael Grant | @michaelgrantlibato7@gmail.com | Backend — diagnostic_engine, advisory_module, ai_explainer |
+| Macansantos, Axcelson | @axcelsonmacansantos@gmail.com | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
+| Ruperez, Raymart | @raymartruperez@gmail.com | Backend — FastAPI setup, all routers, Pydantic schemas |
+| Maestrado, Ralph Keane | @maestradoralphkeane@gmail.com | Frontend — ProfilePage, IntakePage, routing, AppContext |
+| Labaya, Godwin | @glabaya123@gmail.com | Frontend — ResultPage, HistoryPage, all reusable components |
 
 ---
 
@@ -326,7 +326,3 @@ psycopg2-binary==2.9.10
 - The Supabase connection string contains the live database password — treat it like an API key and never commit it to version control.
 
 ---
-
-## License
-
-For academic use only — AY 2025–2026, IT 332.
