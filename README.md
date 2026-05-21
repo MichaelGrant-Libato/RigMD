@@ -155,11 +155,11 @@ recommendations
 
 | Member | Layer | Responsibilities |
 |---|---|---|
-| Libato, Michael Grant | Frontend | ProfilePage, IntakePage, routing, AppContext |
-| Macansantos, Axcelson | Frontend | ResultPage, HistoryPage, all reusable components |
+| Maestrado, Ralph Keane | Frontend | ProfilePage, IntakePage, routing, AppContext |
+| Labaya, Godwin | Frontend | ResultPage, HistoryPage, all reusable components |
 | Ruperez, Raymart | Backend | FastAPI setup, all routers, Pydantic schemas |
-| Maestrado, Ralph Keane | Backend | diagnostic_engine, advisory_module, ai_explainer |
-| Labaya, Godwin | Database | Supabase setup, SQLAlchemy models, repositories, Alembic migrations |
+| Libato, Michael Grant | Backend | diagnostic_engine, advisory_module, ai_explainer |
+| Macansantos, Axcelson| Database | Supabase setup, SQLAlchemy models, repositories, Alembic migrations |
 
 ---
 
