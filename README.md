@@ -4,6 +4,23 @@
 
 ---
 
+## What is RigMD?
+
+RigMD is a web application that helps non-technical desktop PC owners identify probable causes of Windows-observable performance symptoms and decide on a clearly classified next action — without needing a technical background to interpret the results.
+
+---
+
+## Features
+
+- System Profile Module (manual entry)
+- Structured OS Symptom Intake (guided session, 8+ data points)
+- Internal Diagnostic Interpretation Engine (rule-based + AI-assisted)
+- Advisory Action Module (Monitor / Maintain / Troubleshoot / Escalate)
+- Transparent Result Dashboard with warning signs reference table
+- Session History & Recurring Pattern Detection (PostgreSQL via Supabase)
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -14,7 +31,7 @@
 
 ---
 
-## Architecture
+## System Architecture
 
 ```
 React (localhost:5173)
@@ -111,81 +128,70 @@ rigmd/
 
 ```
 profiles
-├── id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── cpu_model       VARCHAR
-├── ram_capacity    VARCHAR
-├── storage_type    VARCHAR
-├── storage_capacity VARCHAR
-├── os_version      VARCHAR
-├── gpu_driver      VARCHAR
-├── chipset_driver  VARCHAR
-├── system_age      VARCHAR
-└── created_at      TIMESTAMP DEFAULT now()
+├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
+├── cpu_model         VARCHAR
+├── ram_capacity      VARCHAR
+├── storage_type      VARCHAR
+├── storage_capacity  VARCHAR
+├── os_version        VARCHAR
+├── gpu_driver        VARCHAR
+├── chipset_driver    VARCHAR
+├── system_age        VARCHAR
+└── created_at        TIMESTAMP DEFAULT now()
 
 sessions
-├── id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── profile_id      UUID REFERENCES profiles(id)
-├── symptom_type    VARCHAR
+├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
+├── profile_id        UUID REFERENCES profiles(id)
+├── symptom_type      VARCHAR
 ├── affected_activity VARCHAR
-├── frequency       VARCHAR
-├── severity        VARCHAR
-├── duration        VARCHAR
-├── recent_changes  TEXT
-├── system_state    VARCHAR
-├── warning_signs   TEXT
+├── frequency         VARCHAR
+├── severity          VARCHAR
+├── duration          VARCHAR
+├── recent_changes    TEXT
+├── system_state      VARCHAR
+├── warning_signs     TEXT
 ├── diagnosed_category VARCHAR
-├── action_category VARCHAR
-├── confidence_label VARCHAR
-├── ai_explanation  TEXT
-├── is_recurring    BOOLEAN DEFAULT false
-└── created_at      TIMESTAMP DEFAULT now()
+├── action_category   VARCHAR
+├── confidence_label  VARCHAR
+├── ai_explanation    TEXT
+├── is_recurring      BOOLEAN DEFAULT false
+└── created_at        TIMESTAMP DEFAULT now()
 
 recommendations
-├── id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── session_id      UUID REFERENCES sessions(id)
-├── warning_sign    VARCHAR
-├── threshold       VARCHAR
+├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
+├── session_id        UUID REFERENCES sessions(id)
+├── warning_sign      VARCHAR
+├── threshold         VARCHAR
 ├── recommended_action TEXT
-└── created_at      TIMESTAMP DEFAULT now()
+└── created_at        TIMESTAMP DEFAULT now()
 ```
 
 ---
 
-## Team Roles
+## Team Members
 
-| Member | Layer | Responsibilities |
+| Name | GitHub | Responsibilities |
 |---|---|---|
-| Maestrado, Ralph Keane | Frontend | ProfilePage, IntakePage, routing, AppContext |
-| Labaya, Godwin | Frontend | ResultPage, HistoryPage, all reusable components |
-| Ruperez, Raymart | Backend | FastAPI setup, all routers, Pydantic schemas |
-| Libato, Michael Grant | Backend | diagnostic_engine, advisory_module, ai_explainer |
-| Macansantos, Axcelson| Database | Supabase setup, SQLAlchemy models, repositories, Alembic migrations |
+
+| Libato, Michael Grant | @username | Backend — diagnostic_engine, advisory_module, ai_explainer |
+| Macansantos, Axcelson | @username | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
+| Ruperez, Raymart | @username | Backend — FastAPI setup, all routers, Pydantic schemas |
+| Maestrado, Ralph Keane | @username | Frontend — ProfilePage, IntakePage, routing, AppContext |
+| Labaya, Godwin | @username | Frontend — ResultPage, HistoryPage, all reusable components |
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js 18+ and npm
 - Python 3.11+
-- A Supabase account (free tier at supabase.com)
+- Access to the team Discord (for environment variables)
 
 ---
 
-### 1. Supabase setup (database member)
-
-1. Go to [supabase.com](https://supabase.com) → New project
-2. Name it `rigmd` → set a strong database password → create
-3. Go to **Project Settings → Database → Connection string → URI**
-4. Copy the connection string — it looks like:
-   ```
-   postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
-   ```
-5. Share the connection string securely with the team (use a private Discord message — never commit it)
-
----
-
-### 2. Clone the repository (everyone)
+### 1. Clone the repository (everyone)
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/rigmd.git
@@ -197,7 +203,7 @@ git checkout -b feature/your-module-name
 
 ---
 
-### 3. Backend setup
+### 2. Backend setup (everyone)
 
 ```bash
 cd backend
@@ -206,33 +212,41 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create `backend/.env` from the example:
+Create your local `.env` file from the template:
+
 ```bash
 copy .env.example .env
-# then open .env and fill in your values
 ```
 
+> Open the `.env` file and paste in the `GEMINI_API_KEY` and `DATABASE_URL`.  
+> Check the pinned messages in the team Discord for these credentials.
+
 Run the backend:
+
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
-API docs: `http://localhost:8000/docs`
+API docs available at: `http://localhost:8000/docs`
 
 ---
 
-### 4. Run database migrations (database member)
+### 3. Database migrations (Macansantos only)
+
+Once the SQLAlchemy models are written, make sure your backend virtual environment is active, then push the tables to Supabase:
 
 ```bash
 cd backend
 alembic upgrade head
 ```
 
-This creates all tables in your Supabase PostgreSQL database automatically.
+Verify the tables were created in **Supabase → Table Editor**.
 
 ---
 
-### 5. Frontend setup
+### 4. Frontend setup (everyone)
+
+Open a **second terminal window** (keep the backend running), then:
 
 ```bash
 cd frontend
@@ -240,7 +254,7 @@ npm install
 npm run dev
 ```
 
-App runs at: `http://localhost:5173`
+Frontend runs at: `http://localhost:5173`
 
 ---
 
@@ -261,10 +275,10 @@ App runs at: `http://localhost:5173`
 
 | Category | When it applies |
 |---|---|
-| **Monitor** | Mild, inconsistent symptoms |
-| **Maintain** | Thermal or software bloat indicators |
-| **Troubleshoot** | Symptoms after a driver or system update |
-| **Escalate for Professional Inspection** | Exceeds software-layer resolution |
+| **Monitor** | Mild, inconsistent symptoms with no clear pattern yet |
+| **Maintain** | Symptoms suggest thermal issues or software bloat |
+| **Troubleshoot** | Symptoms followed a recent driver, software, or system update |
+| **Escalate for Professional Inspection** | Conditions exceed software-layer resolution |
 
 ---
 
@@ -272,11 +286,12 @@ App runs at: `http://localhost:5173`
 
 | Branch | Purpose |
 |---|---|
-| `main` | Stable only — merged from dev |
-| `dev` | Active integration branch |
-| `feature/[name]` | Per-member feature branches |
+| `main` | Stable releases only — merged from dev after full review |
+| `dev` | Active integration branch — all features merge here first |
+| `feature/[name]` | Individual feature branches per member |
 
-### Commit format
+### Commit message format
+
 ```
 feat: add intake form step validation
 fix: correct advisory logic for boot failure
@@ -307,6 +322,6 @@ psycopg2-binary==2.9.10
 - Does not evaluate physical hardware or recommend component replacement.
 - All advisory output is probabilistic, not deterministic.
 - No user data is transmitted externally except the structured prompt sent to Gemini API.
-- The Supabase connection string contains your database password — treat it like an API key and never commit it.
+- The Supabase connection string contains the live database password — treat it like an API key and never commit it to version control.
 
 ---
