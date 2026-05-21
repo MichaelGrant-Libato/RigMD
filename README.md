@@ -2,6 +2,8 @@
 
 > A web application that interprets user-reported PC performance symptoms against a system profile to deliver action-classified diagnostic advisory output.
 
+**Team:** 2526-sem2-it332-11 | **Course:** IT 332 | **AY 2025–2026, Semester 2**
+
 ---
 
 ## What is RigMD?
@@ -172,7 +174,6 @@ recommendations
 
 | Name | GitHub | Responsibilities |
 |---|---|---|
-
 | Libato, Michael Grant | @username | Backend — diagnostic_engine, advisory_module, ai_explainer |
 | Macansantos, Axcelson | @username | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
 | Ruperez, Raymart | @username | Backend — FastAPI setup, all routers, Pydantic schemas |
@@ -325,3 +326,7 @@ psycopg2-binary==2.9.10
 - The Supabase connection string contains the live database password — treat it like an API key and never commit it to version control.
 
 ---
+
+## License
+
+For academic use only — AY 2025–2026, IT 332.
