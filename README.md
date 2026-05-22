@@ -170,6 +170,53 @@ recommendations
 
 ---
 
+---
+
+## Troubleshooting
+
+### Hardware Detection Shows "Unknown" or Generic Names
+
+**Problem**: CPU shows "AMD64 Family 23" instead of actual model, GPU shows "Unknown"
+
+**Solution**:
+1. Verify WMI packages are installed:
+```bash
+cd backend
+venv\Scripts\activate
+pip list | findstr "WMI pywin32"
+```
+
+2. If missing, install them:
+```bash
+pip install WMI pywin32
+```
+
+3. Restart the backend server
+
+4. Test hardware detection:
+```bash
+python backend\test_wmi.py
+```
+
+### Backend Won't Start - Database Error
+
+**Problem**: `ValueError: DATABASE_URL is not set in your .env file`
+
+**Solution**: The app now shows a warning instead of crashing. Hardware detection will work, but database features won't. To fix:
+1. Get the correct `DATABASE_URL` from your team
+2. Update `.env` file with the real connection string (remove `[YOUR-PASSWORD]` placeholder)
+
+### Frontend Shows "Connection Lost"
+
+**Problem**: Frontend can't reach backend
+
+**Solution**:
+1. Verify backend is running on `http://localhost:8000`
+2. Check CORS settings in `backend/main.py` match frontend URL
+3. If frontend is on a different port (e.g., 5174), update CORS origins
+
+---
+
 ## Team Members
 
 | Name | GitHub | Responsibilities |
@@ -213,6 +260,11 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+**⚠️ IMPORTANT**: Ensure `WMI` and `pywin32` are installed. These are **required** for hardware detection on Windows. If missing, run:
+```bash
+pip install WMI pywin32
+```
+
 Create your local `.env` file:
 
 ```bash
@@ -227,6 +279,8 @@ copy .env.example .env
 
 > Open the `.env` file and paste in the `GEMINI_API_KEY` and `DATABASE_URL`.  
 > Check the pinned messages in messenger for these credentials.
+
+**Note**: If you don't have a valid `DATABASE_URL`, the app will still run but database features won't work. Hardware detection will work independently.
 
 ---
 
@@ -328,15 +382,22 @@ docs: update API table in README
 ## Backend requirements.txt
 
 ```
-fastapi==0.115.0
-uvicorn==0.30.6
-sqlalchemy==2.0.36
-alembic==1.13.3
-pydantic==2.9.2
-python-dotenv==1.0.1
-google-generativeai==0.8.3
-psycopg2-binary==2.9.10
+fastapi==0.136.1
+uvicorn==0.47.0
+sqlalchemy==2.0.49
+alembic==1.18.4
+pydantic==2.13.4
+python-dotenv==1.2.2
+google-generativeai==0.8.6
+psycopg2-binary==2.9.12
+
+# Windows Hardware Detection (REQUIRED)
+WMI==1.5.1
+pywin32==311
+psutil==7.2.2
 ```
+
+**Note**: `WMI` and `pywin32` are **essential** for hardware detection on Windows. Without them, the system will only show generic hardware information.
 
 ---
 
@@ -347,5 +408,43 @@ psycopg2-binary==2.9.10
 - All advisory output is probabilistic, not deterministic.
 - No user data is transmitted externally except the structured prompt sent to Gemini API.
 - The Supabase connection string contains the live database password — treat it like an API key and never commit it to version control.
+
+---
+
+## Hardware Detection Requirements
+
+### Windows-Only Support
+RigMD uses **Windows Management Instrumentation (WMI)** for hardware detection. This means:
+- ✅ **Windows 10/11** - Fully supported
+- ❌ **Linux/Mac** - Not supported (WMI is Windows-only)
+
+### Required Packages for Hardware Detection
+The following packages are **critical** for hardware detection to work:
+
+```
+WMI==1.5.1          # Windows Management Instrumentation
+pywin32==311        # Python Windows extensions
+psutil==7.2.2       # System monitoring (cross-platform)
+```
+
+**Without these packages**, hardware detection will fail and show:
+- CPU: Generic names like "AMD64 Family 23 Model 113"
+- GPU: "Unknown"
+- Storage Type: "Unknown"
+
+### What Gets Detected
+When properly configured, RigMD detects:
+- ✅ **CPU**: Actual model name (e.g., "AMD Ryzen 5 3600")
+- ✅ **GPU**: Graphics card model and driver version
+- ✅ **RAM**: Total capacity and usage
+- ✅ **Storage**: All drives (C:, D:, etc.) with type detection (NVMe/SSD/HDD)
+- ✅ **OS**: Windows version and install date
+- ✅ **Motherboard**: Chipset information
+
+### Known Limitations
+- **VRAM Detection**: Some GPUs report incorrect VRAM values via WMI
+- **Admin Rights**: Not required for basic detection, but some features may need elevated permissions
+- **Corporate PCs**: IT policies may restrict WMI access
+- **Multiple GPUs**: Prioritizes dedicated GPUs over integrated graphics
 
 ---
