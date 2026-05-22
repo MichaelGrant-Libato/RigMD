@@ -213,31 +213,30 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create your local `.env` file from the template:
+Create your local `.env` file:
 
 ```bash
+# If .env.example exists:
 copy .env.example .env
+
+# Otherwise create .env manually with:
+# GEMINI_API_KEY=your_key_here
+# DATABASE_URL=your_supabase_connection_string
+# FRONTEND_URL=http://localhost:5173
 ```
 
 > Open the `.env` file and paste in the `GEMINI_API_KEY` and `DATABASE_URL`.  
 > Check the pinned messages in messenger for these credentials.
 
-Run the backend:
-
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-API docs available at: `http://localhost:8000/docs`
-
 ---
 
-### 3. Database migrations
+### 3. Database migrations (optional)
 
 Once the SQLAlchemy models are written, make sure your backend virtual environment is active, then push the tables to Supabase:
 
 ```bash
 cd backend
+venv\Scripts\activate
 alembic upgrade head
 ```
 
@@ -245,7 +244,31 @@ Verify the tables were created in **Supabase → Table Editor**.
 
 ---
 
-### 4. Frontend setup (everyone)
+### 4. Run the Backend
+
+**Option A: Using activated virtual environment (recommended)**
+
+```bash
+# From backend folder with venv activated
+cd backend
+venv\Scripts\activate
+cd ..
+uvicorn backend.main:app --reload --port 8000
+```
+
+**Option B: Direct path to uvicorn**
+
+```bash
+# From project root (rigmd folder)
+backend\venv\Scripts\uvicorn.exe backend.main:app --reload --port 8000
+```
+
+Backend runs at: `http://localhost:8000`  
+API docs available at: `http://localhost:8000/docs`
+
+---
+
+### 5. Frontend setup (everyone)
 
 Open a **second terminal window** (keep the backend running), then:
 
