@@ -232,7 +232,7 @@ API docs available at: `http://localhost:8000/docs`
 
 ---
 
-### 3. Database migrations (Macansantos only)
+### 3. Database migrations
 
 Once the SQLAlchemy models are written, make sure your backend virtual environment is active, then push the tables to Supabase:
 
