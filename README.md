@@ -197,8 +197,8 @@ recommendations
 ```bash
 git clone https://github.com/YOUR_USERNAME/rigmd.git
 cd rigmd
-git checkout dev
-git pull origin dev
+git checkout main
+git pull origin main
 git checkout -b feature/your-module-name
 ```
 
@@ -220,7 +220,7 @@ copy .env.example .env
 ```
 
 > Open the `.env` file and paste in the `GEMINI_API_KEY` and `DATABASE_URL`.  
-> Check the pinned messages in the team Discord for these credentials.
+> Check the pinned messages in messenger for these credentials.
 
 Run the backend:
 
