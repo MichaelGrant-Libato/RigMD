@@ -199,7 +199,7 @@ git clone https://github.com/YOUR_USERNAME/rigmd.git
 cd rigmd
 git checkout main
 git pull origin main
-git checkout -b feature/your-module-name
+git checkout -b feature/your-module-name (optional if planned to create new branch/module)
 ```
 
 ---
