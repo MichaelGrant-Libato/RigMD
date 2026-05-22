@@ -4,7 +4,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
  
-from database.database import Base
+from backend.database import Base
  
  
 class Recommendation(Base):
