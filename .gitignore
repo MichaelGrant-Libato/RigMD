@@ -1,61 +1,129 @@
 # ============================================================
 #  RigMD .gitignore
-#  React + FastAPI + PostgreSQL (Supabase)
+#  React + FastAPI + PostgreSQL/Supabase
 # ============================================================
 
-# SECRETS — never commit these
+
+# ============================================================
+#  SECRETS / ENVIRONMENT FILES
+#  Never commit real credentials, API keys, DB URLs, or tokens
+# ============================================================
+
 .env
 .env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Keep safe sample environment files
 !.env.example
+!backend/.env.example
+!frontend/.env.example
+
 secrets.py
 config.ini
+*.key
+*.pem
+*.crt
 
-# FRONTEND — React / Node
+
+# ============================================================
+#  FRONTEND — React / Vite / Node
+# ============================================================
+
 frontend/node_modules/
 frontend/dist/
 frontend/build/
 frontend/.vite/
 frontend/.eslintcache
 
-# BACKEND — Python
+# Keep package lock files tracked
+!frontend/package-lock.json
+!frontend/package.json
+
+
+# ============================================================
+#  BACKEND — Python / FastAPI
+# ============================================================
+
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.so
+
 venv/
 env/
 .venv/
 backend/venv/
+backend/env/
 backend/.venv/
+
 *.egg
 *.egg-info/
 dist/
 build/
+
 .mypy_cache/
 .pytest_cache/
 .coverage
 htmlcov/
 
-# ALEMBIC
-database/migrations/versions/*.pyc
 
-# IDE
+# ============================================================
+#  DATABASE / MIGRATIONS
+# ============================================================
+
+database/migrations/versions/*.pyc
+backend/database/migrations/versions/*.pyc
+
+
+# ============================================================
+#  IDE / EDITOR FILES
+# ============================================================
+
 .vscode/
 .idea/
 *.suo
 *.user
 *.swp
 *.swo
-*.DS_Store
+
+
+# ============================================================
+#  OS FILES
+# ============================================================
+
+.DS_Store
 Thumbs.db
 desktop.ini
 
-# LOGS
+
+# ============================================================
+#  LOGS
+# ============================================================
+
 *.log
 logs/
+backend/logs/
+frontend/logs/
 
-# MISC
+
+# ============================================================
+#  TEMP / BACKUP FILES
+# ============================================================
+
 *.bak
 *.tmp
+*.temp
+*.old
 test_results/
+
+
+# ============================================================
+#  LOCAL TESTING / CACHE
+# ============================================================
+
+.cache/
+coverage/
