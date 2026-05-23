@@ -1,11 +1,7 @@
-import HardwareDashboard from './pages/HardwareDashboard'
+import HardwareDashboard from './pages/HardwareDashboard';
 
 function App() {
-  return (
-    <div>
-      <HardwareDashboard />
-    </div>
-  )
+  return <HardwareDashboard />;
 }
 
-export default App
+export default App;

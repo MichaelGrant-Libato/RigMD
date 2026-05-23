@@ -1,175 +1,814 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { 
-    LayoutDashboard, Server, Stethoscope, History, Activity, AlertTriangle, 
-    FileText, Settings, HelpCircle, Bell, Search, Zap, Layers, Cpu, MemoryStick, 
-    HardDrive, Monitor, Terminal, Microchip, Calendar, Save, RefreshCw, RotateCcw, Database
+import {
+  Activity,
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Cpu,
+  FileText,
+  HardDrive,
+  History,
+  Info,
+  MemoryStick,
+  Monitor,
+  RefreshCw,
+  ShieldAlert,
+  Stethoscope,
+  Wrench,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
 
-interface HardwareStats {
-    os_version: string;
-    system_age: string;
-    chipset_driver: string;
-    storage_type: string;
-    cpu: { name: string; usage_percent: number; cores: number; threads: number; frequency_mhz: number; };
-    gpu: { name: string; driver: string; type: string; vram_gb: number; };
-    ram: { total_gb: number; used_gb: number; usage_percent: number; };
-    disk: { total_gb: number; usage_percent: number; };
+import AppSidebar from '../components/AppSidebar';
+import TopHeader from '../components/TopHeader';
+import SystemProfileView from './SystemProfileView';
+import DiagnosticHistoryView from './DiagnosticHistoryView';
+import RecurringPatternsView from './RecurringPatternsView';
+import WarningSignsView from './WarningSignsView';
+
+import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+
+interface DashboardMetricCardProps {
+  icon: LucideIcon;
+  title: string;
+  value: string;
+  subtitle: string;
+  footer: string;
+  tag: string;
+  tagColor: string;
+  iconColor: string;
+}
+
+interface QuickActionProps {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  primary?: boolean;
+  onClick: () => void;
+}
+
+const emptyDashboard: DashboardSummary = {
+  server_time: new Date().toISOString(),
+  totals: {
+    total_sessions: 0,
+    this_month_count: 0,
+    escalated_count: 0,
+  },
+  last_diagnosis: null,
+  current_action_status: null,
+  recurring_issues_count: 0,
+  warning_signs_active_count: 0,
+  action_distribution: [
+    { label: 'Monitor', count: 0 },
+    { label: 'Maintain', count: 0 },
+    { label: 'Troubleshoot', count: 0 },
+    { label: 'Escalate', count: 0 },
+  ],
+  session_frequency: [],
+  recent_warning_signs: [],
+  last_saved_session: null,
+};
+
+function formatTodayLabel() {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: '2-digit',
+    year: 'numeric',
+  }).format(new Date());
+}
+
+function formatLastUpdated(value: Date | null) {
+  if (!value) {
+    return 'Waiting for live hardware data';
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value);
+}
+
+function cleanValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return 'Detecting...';
+  }
+
+  if (String(value).toLowerCase() === 'unknown') {
+    return 'Detecting...';
+  }
+
+  return String(value);
+}
+
+function isDetected(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return false;
+  }
+
+  return String(value).toLowerCase() !== 'unknown';
+}
+
+function getActionColor(action: string | undefined | null) {
+  const value = (action ?? '').toLowerCase();
+
+  if (value.includes('monitor')) {
+    return 'border-blue-500/60 text-blue-400 bg-blue-500/10';
+  }
+
+  if (value.includes('maintain')) {
+    return 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10';
+  }
+
+  if (value.includes('troubleshoot')) {
+    return 'border-orange-500/60 text-orange-400 bg-orange-500/10';
+  }
+
+  if (value.includes('escalate')) {
+    return 'border-red-500/60 text-red-400 bg-red-500/10';
+  }
+
+  return 'border-cyan-500/60 text-cyan-400 bg-cyan-500/10';
+}
+
+function getWarningDotColor(index: number) {
+  if (index === 0) {
+    return 'bg-red-500';
+  }
+
+  if (index === 1) {
+    return 'bg-orange-500';
+  }
+
+  return 'bg-yellow-500';
+}
+
+function QuickActionButton({ icon: Icon, title, description, primary = false, onClick }: QuickActionProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group flex w-full items-center justify-between rounded-xl border p-4 text-left transition-all ${
+        primary
+          ? 'border-cyan-500/40 bg-cyan-500/90 text-[#041014] hover:bg-cyan-400'
+          : 'border-[#30363d] bg-[#1f2937]/60 text-gray-200 hover:border-cyan-500/40 hover:bg-[#1f2937]'
+      }`}
+    >
+      <div className="flex items-center gap-4">
+        <div
+          className={`rounded-lg p-2 ${
+            primary ? 'bg-[#041014]/10 text-[#041014]' : 'bg-[#0d1117] text-cyan-400'
+          }`}
+        >
+          <Icon size={20} />
+        </div>
+
+        <div>
+          <p className={`text-sm font-bold ${primary ? 'text-[#041014]' : 'text-white'}`}>{title}</p>
+          <p className={`text-xs ${primary ? 'text-[#062029]' : 'text-gray-500'}`}>{description}</p>
+        </div>
+      </div>
+
+      <ChevronRight size={18} className={primary ? 'text-[#041014]' : 'text-gray-500 group-hover:text-cyan-400'} />
+    </button>
+  );
+}
+
+function QuickActionPanel({ setActivePage }: { setActivePage: (page: PageKey) => void }) {
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+        <h3 className="font-semibold text-white">Quick Actions</h3>
+      </div>
+
+      <div className="space-y-3">
+        <QuickActionButton
+          icon={Stethoscope}
+          title="Start Full Guided Diagnosis"
+          description="Answer guided questions for a complete analysis"
+          primary
+          onClick={() => setActivePage('newDiagnosis')}
+        />
+
+        <QuickActionButton
+          icon={History}
+          title="View Diagnostic History"
+          description="Review past sessions and trends"
+          onClick={() => setActivePage('diagnosticHistory')}
+        />
+      </div>
+
+      <div className="mt-10 rounded-xl border border-[#30363d] bg-[#0d1117]/80 p-4 text-xs leading-relaxed text-gray-500">
+        RigMD provides probable diagnostic advisory only. Results do not replace professional hardware inspection.
+      </div>
+    </section>
+  );
+}
+
+function ProfileField({
+  icon: Icon,
+  label,
+  value,
+  warning = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  warning?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between border-b border-[#26303a] py-3 last:border-b-0">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="rounded-lg bg-[#0d1117] p-2 text-cyan-400">
+          <Icon size={16} />
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wider text-gray-500">{label}</p>
+          <p className="truncate text-sm font-semibold text-white">{value}</p>
+        </div>
+      </div>
+
+      {warning ? (
+        <Info size={16} className="shrink-0 text-orange-400" />
+      ) : (
+        <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
+      )}
+    </div>
+  );
+}
+
+function SystemStatusSummaryCard({
+  stats,
+  hardwareUpdatedAt,
+}: {
+  stats: HardwareStats | null;
+  hardwareUpdatedAt: Date | null;
+}) {
+  const profile = useMemo(() => {
+    const fields = [
+      stats?.cpu?.name,
+      stats?.ram?.total_gb,
+      stats?.disk?.total_gb,
+      stats?.os_version,
+      stats?.gpu?.driver,
+      stats?.chipset_driver,
+      stats?.system_age,
+    ];
+
+    const detectedFields = fields.filter(isDetected).length;
+    const profileComplete = Math.round((detectedFields / fields.length) * 100);
+
+    return {
+      profileName: 'Detected Desktop Profile',
+      lastUpdated: formatLastUpdated(hardwareUpdatedAt),
+      profileComplete,
+      processor: cleanValue(stats?.cpu?.name),
+      memory: stats?.ram?.total_gb ? `${stats.ram.total_gb} GB` : 'Detecting...',
+      storage:
+        stats?.disk?.total_gb && stats?.storage_type
+          ? `${stats.disk.total_gb} GB ${stats.storage_type}`
+          : 'Detecting...',
+      operatingSystem: cleanValue(stats?.os_version),
+      gpuDriver: cleanValue(stats?.gpu?.driver),
+      chipsetDriver: cleanValue(stats?.chipset_driver),
+      systemAge: cleanValue(stats?.system_age),
+    };
+  }, [stats, hardwareUpdatedAt]);
+
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            System Profile Active
+          </div>
+
+          <h3 className="text-xl font-bold text-white">{profile.profileName}</h3>
+          <p className="mt-1 text-sm text-gray-500">Last updated: {profile.lastUpdated}</p>
+        </div>
+
+        <div className="flex flex-col items-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-cyan-400 text-lg font-bold text-cyan-400">
+            {profile.profileComplete}%
+          </div>
+
+          <p className="mt-1 text-center text-[11px] text-gray-500">Profile Complete</p>
+        </div>
+      </div>
+
+      <div className="mb-5 h-px w-full bg-cyan-400/60" />
+
+      <div className="grid w-full grid-cols-1 gap-x-8 md:grid-cols-2">
+        <ProfileField icon={Cpu} label="Processor" value={profile.processor} />
+        <ProfileField icon={MemoryStick} label="Memory" value={profile.memory} />
+        <ProfileField icon={HardDrive} label="Storage" value={profile.storage} />
+        <ProfileField icon={Monitor} label="Operating System" value={profile.operatingSystem} />
+        <ProfileField icon={Zap} label="GPU Driver" value={profile.gpuDriver} />
+        <ProfileField icon={Zap} label="Chipset Driver" value={profile.chipsetDriver} warning />
+        <ProfileField icon={Calendar} label="System Age" value={profile.systemAge} />
+      </div>
+    </section>
+  );
+}
+
+function DashboardMetricCard({
+  icon: Icon,
+  title,
+  value,
+  subtitle,
+  footer,
+  tag,
+  tagColor,
+  iconColor,
+}: DashboardMetricCardProps) {
+  return (
+    <section className="min-w-0 rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <Icon size={20} className={iconColor} />
+        <span className={`rounded border px-2 py-1 text-xs font-bold uppercase ${tagColor}`}>{tag}</span>
+      </div>
+
+      <p className="text-xs uppercase tracking-wider text-gray-500">{title}</p>
+      <h3 className="mt-1 text-2xl font-bold text-white">{value}</h3>
+      <p className="text-sm text-gray-500">{subtitle}</p>
+
+      <div className="my-3 h-px w-full bg-cyan-400/40" />
+
+      <p className="truncate text-sm text-gray-300">{footer}</p>
+    </section>
+  );
+}
+
+function RecentActivityCard({ dashboard }: { dashboard: DashboardSummary }) {
+  const maxCount = Math.max(...dashboard.action_distribution.map((item) => item.count), 1);
+
+  const colorMap: Record<string, string> = {
+    Monitor: 'bg-blue-500',
+    Maintain: 'bg-emerald-500',
+    Troubleshoot: 'bg-orange-500',
+    Escalate: 'bg-red-500',
+  };
+
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-white">Action Category Distribution</h3>
+          <p className="text-sm text-gray-500">How your diagnoses have been categorized over time</p>
+        </div>
+
+        <p className="text-xs text-gray-500">All-time · {dashboard.totals.total_sessions} sessions</p>
+      </div>
+
+      <div className="flex h-52 items-end gap-10 border-b border-[#30363d] px-8 pb-0">
+        {dashboard.action_distribution.map((item) => (
+          <div key={item.label} className="flex flex-1 flex-col items-center justify-end gap-2">
+            <div
+              className={`w-full max-w-[76px] rounded-t ${colorMap[item.label] ?? 'bg-cyan-500'}`}
+              style={{
+                height: item.count === 0 ? '6px' : `${Math.max((item.count / maxCount) * 150, 12)}px`,
+              }}
+            />
+
+            <p className="text-xs text-gray-500">{item.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-400">
+        {dashboard.action_distribution.map((item) => (
+          <div key={item.label} className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${colorMap[item.label] ?? 'bg-cyan-500'}`} />
+            <span>
+              {item.label} <strong className="text-white">{item.count}</strong>
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SessionFrequencyCard({ dashboard }: { dashboard: DashboardSummary }) {
+  const points = dashboard.session_frequency.slice(-8);
+  const maxCount = Math.max(...points.map((item) => item.count), 1);
+
+  const pathData =
+    points.length > 0
+      ? points
+          .map((item, index) => {
+            const x = 10 + index * (280 / Math.max(points.length - 1, 1));
+            const y = 140 - (item.count / maxCount) * 110;
+
+            return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+          })
+          .join(' ')
+      : 'M 10 140 L 290 140';
+
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <h3 className="font-semibold text-white">Session Frequency</h3>
+      <p className="text-sm text-gray-500">Last 30 days</p>
+
+      <div className="mt-6 h-48">
+        <svg viewBox="0 0 300 170" className="h-full w-full">
+          <path
+            d={pathData}
+            fill="none"
+            stroke="#22d3ee"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          <line x1="10" y1="140" x2="290" y2="140" stroke="#30363d" />
+          <line x1="10" y1="100" x2="290" y2="100" stroke="#1f2937" strokeDasharray="4 4" />
+          <line x1="10" y1="60" x2="290" y2="60" stroke="#1f2937" strokeDasharray="4 4" />
+        </svg>
+      </div>
+
+      <div className="mt-4 flex items-end justify-between">
+        <div>
+          <p className="text-xs text-gray-500">Total sessions</p>
+          <p className="text-xl font-bold text-white">{dashboard.totals.total_sessions}</p>
+        </div>
+
+        <div className="text-right">
+          <p className="text-xs text-gray-500">This month</p>
+          <p className="text-xl font-bold text-cyan-400">{dashboard.totals.this_month_count}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActiveWarningSignsCard({
+  dashboard,
+  setActivePage,
+}: {
+  dashboard: DashboardSummary;
+  setActivePage: (page: PageKey) => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <div className="mb-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={16} className="text-orange-400" />
+          <h3 className="font-semibold text-white">Recent Warning Signs</h3>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setActivePage('warningSigns')}
+          className="text-xs font-semibold text-cyan-400 hover:text-cyan-300"
+        >
+          View all
+        </button>
+      </div>
+
+      {dashboard.recent_warning_signs.length === 0 ? (
+        <p className="text-sm text-gray-500">No warning signs recorded yet.</p>
+      ) : (
+        <div className="space-y-5">
+          {dashboard.recent_warning_signs.map((warning, index) => (
+            <div key={warning.id} className="flex items-start gap-3">
+              <span className={`mt-1.5 h-2 w-2 rounded-full ${getWarningDotColor(index)}`} />
+
+              <div>
+                <p className="text-sm font-semibold text-white">{warning.warning_sign}</p>
+                <p className="text-xs text-gray-500">{warning.display_date ?? 'No date available'}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LastSavedSessionCard({
+  dashboard,
+  setActivePage,
+}: {
+  dashboard: DashboardSummary;
+  setActivePage: (page: PageKey) => void;
+}) {
+  const session = dashboard.last_saved_session;
+
+  return (
+    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-5">
+      <div className="mb-5 flex items-center gap-2">
+        <FileText size={16} className="text-cyan-400" />
+        <h3 className="font-semibold text-white">Last Saved Session</h3>
+      </div>
+
+      {!session ? (
+        <p className="text-sm text-gray-500">No saved diagnostic session yet.</p>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-500">Symptom</p>
+            <p className="font-semibold text-white">{session.symptom_type}</p>
+          </div>
+
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-500">Probable Cause</p>
+            <p className="font-semibold text-white">{session.diagnosed_category}</p>
+          </div>
+
+          <div className="flex gap-2">
+            <span className={`rounded border px-2 py-1 text-xs font-bold uppercase ${getActionColor(session.action_category)}`}>
+              {session.action_category}
+            </span>
+
+            <span className="rounded border border-orange-500/50 bg-orange-500/10 px-2 py-1 text-xs font-bold uppercase text-orange-400">
+              {session.confidence_label}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Clock3 size={13} />
+            {session.display_date ?? 'No date available'}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setActivePage('diagnosticHistory')}
+            className="flex w-full items-center justify-between rounded-lg border border-[#30363d] bg-[#0d1117] px-4 py-2.5 text-sm font-semibold text-cyan-400 hover:border-cyan-500/40"
+          >
+            View Full Result
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HomeDashboardView({
+  stats,
+  dashboard,
+  hardwareUpdatedAt,
+  setActivePage,
+}: {
+  stats: HardwareStats | null;
+  dashboard: DashboardSummary;
+  hardwareUpdatedAt: Date | null;
+  setActivePage: (page: PageKey) => void;
+}) {
+  const lastDiagnosis = dashboard.last_diagnosis;
+  const currentAction = dashboard.current_action_status;
+
+  return (
+    <>
+      <TopHeader title="Home Dashboard" subtitle={`System overview and diagnostic status — ${formatTodayLabel()}`} />
+
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+        {dashboard.database_warning && (
+          <div className="mb-5 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-300">
+            Database dashboard data is not available yet. Check your Supabase connection and tables.
+          </div>
+        )}
+
+        <div className="grid w-full grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 space-y-5">
+            <SystemStatusSummaryCard stats={stats} hardwareUpdatedAt={hardwareUpdatedAt} />
+
+            <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+              <DashboardMetricCard
+                icon={Clock3}
+                title="Last Diagnosis"
+                value={
+                  lastDiagnosis?.days_ago !== null && lastDiagnosis?.days_ago !== undefined
+                    ? `${lastDiagnosis.days_ago} days ago`
+                    : 'No sessions'
+                }
+                subtitle={lastDiagnosis?.display_date ?? 'No saved diagnosis yet'}
+                footer={lastDiagnosis ? `${lastDiagnosis.symptom_type} → ${lastDiagnosis.diagnosed_category}` : 'Complete a diagnostic session first'}
+                tag={lastDiagnosis?.action_category ?? 'None'}
+                tagColor={getActionColor(lastDiagnosis?.action_category)}
+                iconColor="text-cyan-400"
+              />
+
+              <DashboardMetricCard
+                icon={Activity}
+                title="Current Action Status"
+                value={currentAction?.action_category ?? 'No action'}
+                subtitle={currentAction ? 'From last session' : 'No saved session yet'}
+                footer={currentAction?.diagnosed_category ?? 'Action status will appear after diagnosis'}
+                tag={currentAction?.action_category ?? 'None'}
+                tagColor={getActionColor(currentAction?.action_category)}
+                iconColor="text-emerald-400"
+              />
+
+              <DashboardMetricCard
+                icon={RefreshCw}
+                title="Recurring Issues"
+                value={String(dashboard.recurring_issues_count)}
+                subtitle="Detected patterns"
+                footer={dashboard.recurring_issues_count > 0 ? 'Recurring symptoms found in saved sessions' : 'No repeated symptoms detected'}
+                tag="Dynamic"
+                tagColor="border-orange-500/60 text-orange-400 bg-orange-500/10"
+                iconColor="text-orange-400"
+              />
+
+              <DashboardMetricCard
+                icon={ShieldAlert}
+                title="Warning Signs Active"
+                value={String(dashboard.warning_signs_active_count)}
+                subtitle="Recorded warnings"
+                footer={dashboard.warning_signs_active_count > 0 ? 'Warning signs exist in session records' : 'No warning signs recorded'}
+                tag={dashboard.warning_signs_active_count > 0 ? 'Review' : 'Clear'}
+                tagColor={
+                  dashboard.warning_signs_active_count > 0
+                    ? 'border-red-500/60 text-red-400 bg-red-500/10'
+                    : 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10'
+                }
+                iconColor={dashboard.warning_signs_active_count > 0 ? 'text-red-400' : 'text-emerald-400'}
+              />
+            </div>
+
+            <div className="grid w-full grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+              <RecentActivityCard dashboard={dashboard} />
+              <SessionFrequencyCard dashboard={dashboard} />
+            </div>
+          </div>
+
+          <aside className="min-w-0 space-y-5">
+            <QuickActionPanel setActivePage={setActivePage} />
+            <ActiveWarningSignsCard dashboard={dashboard} setActivePage={setActivePage} />
+            <LastSavedSessionCard dashboard={dashboard} setActivePage={setActivePage} />
+          </aside>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PlaceholderView({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <>
+      <TopHeader title={title} subtitle={subtitle} />
+
+      <div className="custom-scrollbar flex-1 overflow-y-auto p-8">
+        <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-8">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
+            <Wrench size={24} />
+          </div>
+
+          <h3 className="text-xl font-bold text-white">{title}</h3>
+
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-400">
+            This screen is ready for frontend implementation. The layout shell, sidebar, theme, and routing state are already prepared.
+          </p>
+        </section>
+      </div>
+    </>
+  );
 }
 
 export default function HardwareDashboard() {
-    const [stats, setStats] = useState<HardwareStats | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState('auto');
+  const [stats, setStats] = useState<HardwareStats | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
+  const [error, setError] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<PageKey>('home');
+  const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
+  const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
 
-    useEffect(() => {
-        const fetchHardware = async () => {
-            try {
-                const response = await axios.get('http://localhost:8000/api/hardware/live');
-                setStats(response.data);
-                setError(null);
-            } catch (err) {
-                setError("Connection lost. Ensure FastAPI is running on port 8000.");
-            }
-        };
+  const fetchHardware = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/hardware/live`);
 
-        fetchHardware();
-        const interval = setInterval(fetchHardware, 1500);
-        return () => clearInterval(interval);
-    }, []);
+      setStats(response.data);
+      setHardwareUpdatedAt(new Date());
+      setError(null);
+    } catch {
+      setError('Connection lost. Ensure FastAPI is running on port 8000.');
+    }
+  }, []);
 
-    const SidebarItem = ({ icon: Icon, label, active = false, badge = null }: any) => (
-        <div className={`flex items-center justify-between px-4 py-2.5 mb-1 rounded-lg cursor-pointer transition-colors ${active ? 'bg-[#1f2937] text-cyan-400 border-l-2 border-cyan-400 rounded-l-none' : 'text-gray-400 hover:text-gray-200 hover:bg-[#161b22]'}`}>
-            <div className="flex items-center gap-3">
-                <Icon size={18} />
-                <span className="text-sm font-medium">{label}</span>
-            </div>
-            {badge && <span className="text-xs font-bold text-cyan-500">{badge}</span>}
-        </div>
-    );
+  const refreshHardware = useCallback(async () => {
+    setIsRefreshingHardware(true);
 
-    const HardwareCard = ({ icon: Icon, title, value, confidence, confColor, subtitle }: any) => (
-        <div className="bg-[#161b22] p-4 rounded-xl border border-[#30363d] flex items-center justify-between">
-            <div className="flex items-center gap-4">
-                <div className="p-3 bg-[#0d1117] rounded-lg border border-[#30363d] text-cyan-400">
-                    <Icon size={24} />
-                </div>
-                <div>
-                    <p className="text-xs text-gray-400 mb-1">{title} {subtitle && <span className="text-[#30363d] mx-1">|</span>} {subtitle && <span className="text-cyan-600">{subtitle}</span>}</p>
-                    <p className="text-sm font-semibold text-gray-100">{value}</p>
-                </div>
-            </div>
-            <span className={`text-xs font-medium ${confColor}`}>{confidence}</span>
-        </div>
-    );
+    try {
+      await axios.post(`${API_BASE_URL}/api/hardware/refresh`);
+    } catch {
+      // Still fetch live hardware data even if cache refresh fails.
+    }
 
-    return (
-        <div className="flex h-screen bg-[#0d1117] text-gray-200 font-sans overflow-hidden">
-            {/* SIDEBAR */}
-            <aside className="w-64 bg-[#0d1117] border-r border-[#30363d] flex flex-col hidden md:flex shrink-0">
-                <div className="p-6 flex items-center gap-3">
-                    <Activity className="text-cyan-400" size={28} />
-                    <div>
-                        <h1 className="font-bold text-lg leading-tight">RigMD</h1>
-                        <p className="text-[10px] text-gray-500 uppercase tracking-wider">Diagnostic Support</p>
-                    </div>
-                </div>
+    await fetchHardware();
+    setIsRefreshingHardware(false);
+  }, [fetchHardware]);
 
-                <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
-                    <div className="mb-6">
-                        <p className="px-4 text-[11px] font-bold text-gray-500 mb-2 tracking-wider">OVERVIEW</p>
-                        <SidebarItem icon={LayoutDashboard} label="Home" />
-                        <SidebarItem icon={Server} label="System Profile" active={true} />
-                    </div>
-                    <div className="mb-6">
-                        <p className="px-4 text-[11px] font-bold text-gray-500 mb-2 tracking-wider">DIAGNOSTICS</p>
-                        <SidebarItem icon={Stethoscope} label="New Diagnosis" />
-                        <SidebarItem icon={History} label="Diagnostic History" badge="3" />
-                        <SidebarItem icon={Activity} label="Recurring Patterns" badge="2" />
-                        <SidebarItem icon={AlertTriangle} label="Warning Signs" badge="1" />
-                    </div>
-                </div>
-            </aside>
+  useEffect(() => {
+    fetchHardware();
 
-            {/* MAIN CONTENT */}
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
-                {/* HEADER */}
-                <header className="h-20 border-b border-[#30363d] flex items-center justify-between px-8 shrink-0">
-                    <div>
-                        <h2 className="text-xl font-bold text-white">System Profile</h2>
-                        <p className="text-sm text-gray-400">Enter or confirm your desktop PC specifications before running diagnostics</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 bg-[#161b22] border border-[#30363d] px-4 py-2 rounded-lg text-sm cursor-pointer">
-                            <Microchip size={16} className="text-cyan-400" />
-                            <span>RigMD Session</span>
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-2"></div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg text-sm font-medium">
-                            <Monitor size={16} /> Live Data
-                        </div>
-                        <button className="p-2 text-gray-400 hover:text-gray-200"><Bell size={20} /></button>
-                        <button className="p-2 text-gray-400 hover:text-gray-200"><Settings size={20} /></button>
-                        <div className="w-9 h-9 rounded-full bg-cyan-600 flex items-center justify-center text-sm font-bold text-white ml-2">MG</div>
-                    </div>
-                </header>
+    const interval = window.setInterval(fetchHardware, 1500);
 
-                {/* SCROLLABLE BODY */}
-                <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-                    
-                    {/* TABS */}
-                    <div className="flex gap-2 mb-6 mt-4">
-                        <button 
-                            onClick={() => setActiveTab('auto')}
-                            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'auto' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30' : 'text-gray-400 hover:bg-[#161b22] border border-transparent'}`}
-                        >
-                            <Zap size={16} /> Auto-Detected Telemetry
-                        </button>
-                        <button 
-                            onClick={() => setActiveTab('manual')}
-                            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'manual' ? 'bg-[#161b22] text-gray-200 border border-[#30363d]' : 'text-gray-400 hover:bg-[#161b22] border border-transparent'}`}
-                        >
-                            <Layers size={16} /> Manual Details
-                        </button>
-                    </div>
+    return () => window.clearInterval(interval);
+  }, [fetchHardware]);
 
-                    {/* AUTO-DETECTION RESULTS */}
-                    <section className="bg-[#161b22] border border-[#30363d] rounded-2xl p-6 mb-8">
-                        <div className="flex gap-3 mb-6">
-                            <Search className="text-cyan-400 shrink-0 mt-0.5" size={18} />
-                            <div>
-                                <h3 className="font-semibold text-gray-200 mb-1">Live Sensor Array</h3>
-                                <p className="text-sm text-gray-400">Values are queried directly from the Windows Management Instrumentation API and psutil ring buffers.</p>
-                            </div>
-                        </div>
+  useEffect(() => {
+    const fetchDashboard = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/dashboard/summary`);
 
-                        {error ? (
-                            <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-sm font-medium">{error}</div>
-                        ) : !stats ? (
-                            <div className="p-8 text-center text-gray-500 font-mono tracking-widest animate-pulse border border-dashed border-[#30363d] rounded-xl">ESTABLISHING WMI DATALINK...</div>
-                        ) : (
-                            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-                                <HardwareCard icon={Cpu} title="CPU" subtitle="Real-Time" value={`${stats.cpu.name} (${Math.round(stats.cpu.usage_percent)}% Load)`} confidence="High" confColor="text-emerald-400" />
-                                <HardwareCard icon={MemoryStick} title="RAM" subtitle="Real-Time" value={`${stats.ram.total_gb} GB (${stats.ram.usage_percent}% Allocated)`} confidence="High" confColor="text-emerald-400" />
-                                
-                                <HardwareCard icon={Monitor} title="GPU Model" subtitle={stats.gpu.type} value={stats.gpu.name} confidence="High" confColor="text-emerald-400" />
-                                <HardwareCard icon={Microchip} title="GPU Driver" value={stats.gpu.driver} confidence="High" confColor="text-emerald-400" />
-                                
-                                <HardwareCard icon={HardDrive} title="Storage Size (C:\)" subtitle="Real-Time" value={`${stats.disk.total_gb} GB Total (${stats.disk.usage_percent}% Full)`} confidence="High" confColor="text-emerald-400" />
-                                <HardwareCard icon={Database} title="Storage Type" value={stats.storage_type} confidence="Medium" confColor="text-cyan-400" />
-                                
-                                <HardwareCard icon={Terminal} title="OS Version" value={stats.os_version} confidence="High" confColor="text-emerald-400" />
-                                <HardwareCard icon={Layers} title="Chipset Proxy" value={stats.chipset_driver} confidence="Medium" confColor="text-cyan-400" />
-                                <HardwareCard icon={Calendar} title="System Age" subtitle="Since OS Install" value={stats.system_age} confidence="Medium" confColor="text-cyan-400" />
-                            </div>
-                        )}
+        setDashboard(response.data);
+      } catch {
+        setDashboard(emptyDashboard);
+      }
+    };
 
-                        <button className="flex items-center gap-2 px-5 py-2.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-lg text-sm font-semibold hover:bg-cyan-500/20 transition-colors mt-4">
-                            <Save size={16} /> Save Hardware Profile
-                        </button>
-                    </section>
-                </div>
-            </main>
-        </div>
-    );
+    fetchDashboard();
+
+    const interval = window.setInterval(fetchDashboard, 5000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const renderPage = () => {
+    switch (activePage) {
+      case 'home':
+        return (
+          <HomeDashboardView
+            stats={stats}
+            dashboard={dashboard}
+            hardwareUpdatedAt={hardwareUpdatedAt}
+            setActivePage={setActivePage}
+          />
+        );
+
+      case 'systemProfile':
+        return (
+          <SystemProfileView
+            stats={stats}
+            error={error}
+            hardwareUpdatedAt={hardwareUpdatedAt}
+            isRefreshingHardware={isRefreshingHardware}
+            onRefreshHardware={refreshHardware}
+          />
+        );
+
+      case 'diagnosticHistory':
+        return <DiagnosticHistoryView />;
+
+      case 'recurringPatterns':
+        return <RecurringPatternsView />;
+
+      case 'warningSigns':
+        return <WarningSignsView />;
+
+      case 'newDiagnosis':
+        return (
+          <PlaceholderView
+            title="New Diagnosis"
+            subtitle="Guided symptom intake workflow will be implemented here"
+          />
+        );
+
+      case 'reports':
+        return (
+          <PlaceholderView
+            title="Reports"
+            subtitle="Technician-ready diagnostic report output"
+          />
+        );
+
+      case 'settings':
+        return <PlaceholderView title="Settings" subtitle="Application preferences and configuration" />;
+
+      case 'help':
+        return <PlaceholderView title="Help / Scope" subtitle="Supported diagnostic scope and limitations" />;
+
+      default:
+        return (
+          <HomeDashboardView
+            stats={stats}
+            dashboard={dashboard}
+            hardwareUpdatedAt={hardwareUpdatedAt}
+            setActivePage={setActivePage}
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-[#0b1017] font-sans text-gray-200">
+      <AppSidebar activePage={activePage} setActivePage={setActivePage} dashboard={dashboard} />
+
+      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-[#0b1017]">
+        {renderPage()}
+      </main>
+    </div>
+  );
 }
