@@ -1,25 +1,100 @@
 # RigMD — PC Diagnostic Decision Support System
 
-> A web application that interprets user-reported PC performance symptoms against a system profile to deliver action-classified diagnostic advisory output.
+> A Windows desktop PC diagnostic advisory system that detects hardware/software profile data, interprets user-reported symptoms, tracks diagnostic history, identifies recurring patterns, and provides action-classified advisory output.
 
-**Team:** 2526-sem2-it332-11 | **Course:** IT 332 | **AY 2025–2026, Semester 2**
+**Team:** 2526-sem2-it332-11  
+**Course:** IT 332  
+**AY:** 2025–2026, Semester 2
 
+---
+
+## Team Members
+
+| Name | Role | Responsibilities |
+|---|---|---|
+| Libato, Michael Grant | Backend Developer | Diagnostic engine, advisory module, AI explainer |
+| Macansantos, Axelson | Database Developer | Supabase setup, SQLAlchemy models, Alembic migrations |
+| Ruperez, Raymart | Backend Developer | FastAPI setup, routers, Pydantic schemas |
+| Maestrado, Ralph Keane | Frontend Developer | Profile page, intake page, routing, app context |
+| Labaya, Godwin | Frontend Developer | Result page, history page, reusable components |
+
+---
 ---
 
 ## What is RigMD?
 
-RigMD is a web application that helps non-technical desktop PC owners identify probable causes of Windows-observable performance symptoms and decide on a clearly classified next action — without needing a technical background to interpret the results.
+RigMD is a diagnostic support system for desktop PC users who experience Windows-observable performance symptoms.
+
+It helps users understand possible causes of PC issues by connecting:
+
+- Live detected system profile data
+- Structured symptom intake
+- Diagnostic interpretation
+- Recommended action category
+- Diagnostic history
+- Recurring pattern detection
+- Warning signs reference
+
+RigMD does not replace professional hardware inspection. It provides probable advisory output to help users decide the next action.
 
 ---
 
-## Features
+## Core Features
 
-- System Profile Module (manual entry)
-- Structured OS Symptom Intake (guided session, 8+ data points)
-- Internal Diagnostic Interpretation Engine (rule-based + AI-assisted)
-- Advisory Action Module (Monitor / Maintain / Troubleshoot / Escalate)
-- Transparent Result Dashboard with warning signs reference table
-- Session History & Recurring Pattern Detection (PostgreSQL via Supabase)
+### Home Dashboard
+
+- Shows live system profile summary
+- Shows latest diagnostic status
+- Shows current action status
+- Shows recurring issue count
+- Shows warning signs count
+- Shows action category distribution
+- Shows session frequency overview
+- Provides quick actions for diagnosis and history
+
+### System Profile
+
+- Automatically detects desktop PC information
+- Detects CPU, RAM, GPU, storage, OS, GPU driver, chipset, and system age
+- Uses live hardware data from the FastAPI backend
+- Allows hardware data refresh
+
+### New Diagnosis
+
+- Guided symptom intake workflow
+- Collects structured symptom data
+- Sends diagnosis request to backend diagnostic engine
+- Saves completed sessions into the database
+
+### Diagnostic History
+
+- Displays saved diagnostic sessions
+- Supports action category filters
+- Supports search and sorting
+- Opens a session detail panel
+- Shows symptom, probable cause, action, confidence, warning signs, and recommended next step
+
+### Recurring Patterns
+
+- Detects repeated symptoms
+- Detects repeated probable causes
+- Shows recurring issue count
+- Shows worsening trends
+- Shows action escalation
+- Shows total occurrences
+- Displays pattern timeline
+
+### Warning Signs
+
+- Provides a reference guide for observable PC warning indicators
+- Shows warning sign meaning, threshold, category, and recommended action
+- Highlights warning signs observed in saved sessions
+- Supports category filters, search, and observed-only mode
+
+### Reports
+
+- Placeholder for technician-ready diagnostic report output
+- Intended to summarize saved diagnostic sessions for review or repair consultation
 
 ---
 
@@ -27,205 +102,173 @@ RigMD is a web application that helps non-technical desktop PC owners identify p
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, Vite, Tailwind CSS, React Router v6, Axios |
-| Backend | Python 3.11+, FastAPI, Uvicorn, Gemini API |
-| Database | PostgreSQL via Supabase, SQLAlchemy, Alembic |
+| Frontend | React, Vite, TypeScript, Tailwind CSS, Axios, Lucide React |
+| Backend | Python, FastAPI, Uvicorn |
+| Database | PostgreSQL via Supabase |
+| ORM | SQLAlchemy |
+| Environment Config | python-dotenv, Vite environment variables |
+| Hardware Detection | WMI, pywin32, psutil |
+| AI Support | Gemini API |
 
 ---
 
 ## System Architecture
 
+```txt
+React + Vite Frontend
+http://localhost:5173
+        |
+        | Axios HTTP Requests
+        v
+FastAPI Backend
+http://localhost:8000
+        |
+        | SQLAlchemy ORM
+        v
+Supabase PostgreSQL Database
 ```
-React (localhost:5173)
-    ↕ HTTP / REST API (Axios)
-FastAPI (localhost:8000)
-    ↕ SQLAlchemy ORM + psycopg2
-PostgreSQL (Supabase cloud)
-```
+
+Hardware detection works through the backend using Windows system APIs and local machine telemetry.
 
 ---
 
 ## Project Structure
 
-```
-rigmd/
+```txt
+RigMD/
 │
-├── frontend/                        # React + Vite + Tailwind
-│   ├── public/
-│   ├── src/
-│   │   ├── api/
-│   │   │   └── axiosClient.js       # Axios base config
-│   │   ├── components/
-│   │   │   ├── Navbar.jsx
-│   │   │   ├── ActionBadge.jsx
-│   │   │   ├── WarningTable.jsx
-│   │   │   ├── ConfidenceBadge.jsx
-│   │   │   └── SessionCard.jsx
-│   │   ├── pages/
-│   │   │   ├── ProfilePage.jsx
-│   │   │   ├── IntakePage.jsx
-│   │   │   ├── ResultPage.jsx
-│   │   │   └── HistoryPage.jsx
-│   │   ├── hooks/
-│   │   │   ├── useProfile.js
-│   │   │   └── useSession.js
-│   │   ├── context/
-│   │   │   └── AppContext.jsx
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── index.html
-│   ├── vite.config.js
-│   ├── tailwind.config.js
-│   └── package.json
-│
-├── backend/                         # FastAPI + Uvicorn
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── profile.py               # /api/profile
-│   │   ├── session.py               # /api/session
-│   │   ├── diagnose.py              # /api/diagnose
-│   │   └── history.py               # /api/history
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── diagnostic_engine.py
-│   │   ├── advisory_module.py
-│   │   └── ai_explainer.py
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── profile_schema.py
-│   │   ├── session_schema.py
-│   │   └── diagnosis_schema.py
-│   ├── main.py
-│   ├── config.py
-│   └── requirements.txt
-│
-├── database/                        # SQLAlchemy + Supabase PostgreSQL
-│   ├── __init__.py
-│   ├── database.py                  # Engine and session setup
+├── backend/
 │   ├── models/
-│   │   ├── __init__.py
 │   │   ├── profile_model.py
-│   │   ├── session_model.py
-│   │   └── recommendation_model.py
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── profile_repository.py
-│   │   └── session_repository.py
-│   └── migrations/                  # Alembic migration files
+│   │   ├── recommendation_model.py
+│   │   └── session_model.py
+│   │
+│   ├── routers/
+│   │   ├── dashboard.py
+│   │   ├── hardware.py
+│   │   ├── history.py
+│   │   ├── recurring.py
+│   │   └── warning_signs.py
+│   │
+│   ├── schemas/
+│   │   ├── diagnosis_schema.py
+│   │   └── profile_schema.py
+│   │
+│   ├── services/
+│   │   └── diagnostic_engine.py
+│   │
+│   ├── config.py
+│   ├── database.py
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── test.py
+│   └── test_wmi.py
 │
-├── tests/
-│   ├── test_diagnostic_engine.py
-│   ├── test_advisory_module.py
-│   └── scenarios/
-│       └── scenario_01.json
+├── frontend/
+│   ├── public/
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   │
+│   ├── src/
+│   │   ├── assets/
+│   │   │   └── hero.png
+│   │   │
+│   │   ├── components/
+│   │   │   ├── AppSidebar.tsx
+│   │   │   └── TopHeader.tsx
+│   │   │
+│   │   ├── pages/
+│   │   │   ├── DiagnosticHistoryView.tsx
+│   │   │   ├── HardwareDashboard.tsx
+│   │   │   ├── RecurringPatternsView.tsx
+│   │   │   ├── ReportsView.tsx
+│   │   │   ├── SystemProfileView.tsx
+│   │   │   └── WarningSignsView.tsx
+│   │   │
+│   │   ├── types/
+│   │   │   └── rigmd.ts
+│   │   │
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── index.css
+│   │   ├── main.jsx
+│   │   └── vite-env.d.ts
+│   │
+│   ├── .env
+│   ├── .gitignore
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── postcss.config.js
+│   ├── tailwind.config.js
+│   └── vite.config.js
 │
-├── .env.example
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## Database Schema (Supabase / PostgreSQL)
+## Database Schema
 
-```
+RigMD uses three main tables.
+
+### profiles
+
+Stores the detected or saved desktop PC profile.
+
+```txt
 profiles
-├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── cpu_model         VARCHAR
-├── ram_capacity      VARCHAR
-├── storage_type      VARCHAR
-├── storage_capacity  VARCHAR
-├── os_version        VARCHAR
-├── gpu_driver        VARCHAR
-├── chipset_driver    VARCHAR
-├── system_age        VARCHAR
-└── created_at        TIMESTAMP DEFAULT now()
+├── id
+├── cpu_model
+├── ram_capacity
+├── storage_type
+├── storage_capacity
+├── os_version
+├── gpu_driver
+├── chipset_driver
+├── system_age
+└── created_at
+```
 
+### sessions
+
+Stores each completed diagnostic session.
+
+```txt
 sessions
-├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── profile_id        UUID REFERENCES profiles(id)
-├── symptom_type      VARCHAR
-├── affected_activity VARCHAR
-├── frequency         VARCHAR
-├── severity          VARCHAR
-├── duration          VARCHAR
-├── recent_changes    TEXT
-├── system_state      VARCHAR
-├── warning_signs     TEXT
-├── diagnosed_category VARCHAR
-├── action_category   VARCHAR
-├── confidence_label  VARCHAR
-├── ai_explanation    TEXT
-├── is_recurring      BOOLEAN DEFAULT false
-└── created_at        TIMESTAMP DEFAULT now()
+├── id
+├── profile_id
+├── symptom_type
+├── affected_activity
+├── frequency
+├── severity
+├── duration
+├── recent_changes
+├── system_state
+├── warning_signs
+├── diagnosed_category
+├── action_category
+├── confidence_label
+├── ai_explanation
+├── is_recurring
+└── created_at
+```
 
+### recommendations
+
+Stores warning sign rows and recommended actions connected to a diagnostic session.
+
+```txt
 recommendations
-├── id                UUID PRIMARY KEY DEFAULT gen_random_uuid()
-├── session_id        UUID REFERENCES sessions(id)
-├── warning_sign      VARCHAR
-├── threshold         VARCHAR
-├── recommended_action TEXT
-└── created_at        TIMESTAMP DEFAULT now()
+├── id
+├── session_id
+├── warning_sign
+├── threshold
+├── recommended_action
+└── created_at
 ```
-
----
-
----
-
-## Troubleshooting
-
-### Hardware Detection Shows "Unknown" or Generic Names
-
-**Problem**: CPU shows "AMD64 Family 23" instead of actual model, GPU shows "Unknown"
-
-**Solution**:
-1. Verify WMI packages are installed:
-```bash
-cd backend
-venv\Scripts\activate
-pip list | findstr "WMI pywin32"
-```
-
-2. If missing, install them:
-```bash
-pip install WMI pywin32
-```
-
-3. Restart the backend server
-
-4. Test hardware detection:
-```bash
-python backend\test_wmi.py
-```
-
-### Backend Won't Start - Database Error
-
-**Problem**: `ValueError: DATABASE_URL is not set in your .env file`
-
-**Solution**: The app now shows a warning instead of crashing. Hardware detection will work, but database features won't. To fix:
-1. Get the correct `DATABASE_URL` from your team
-2. Update `.env` file with the real connection string (remove `[YOUR-PASSWORD]` placeholder)
-
-### Frontend Shows "Connection Lost"
-
-**Problem**: Frontend can't reach backend
-
-**Solution**:
-1. Verify backend is running on `http://localhost:8000`
-2. Check CORS settings in `backend/main.py` match frontend URL
-3. If frontend is on a different port (e.g., 5174), update CORS origins
-
----
-
-## Team Members
-
-| Name | GitHub | Responsibilities |
-|---|---|---|
-| Libato, Michael Grant | @michaelgrantlibato7@gmail.com | Backend — diagnostic_engine, advisory_module, ai_explainer |
-| Macansantos, Axcelson | @axcelsonmacansantos@gmail.com | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
-| Ruperez, Raymart | @raymartruperez@gmail.com | Backend — FastAPI setup, all routers, Pydantic schemas |
-| Maestrado, Ralph Keane | @maestradoralphkeane@gmail.com | Frontend — ProfilePage, IntakePage, routing, AppContext |
-| Labaya, Godwin | @glabaya123@gmail.com | Frontend — ResultPage, HistoryPage, all reusable components |
 
 ---
 
@@ -233,25 +276,38 @@ python backend\test_wmi.py
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+Install these first:
+
+- Node.js 18+
+- npm
 - Python 3.11+
-- Access to the team Discord (for environment variables)
+- Git
+- Supabase database access
+- Gemini API key
+- Windows 10/11 for live hardware detection
 
 ---
 
-### 1. Clone the repository (everyone)
+## 1. Clone the Repository
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/rigmd.git
-cd rigmd
+cd RigMD
 git checkout main
 git pull origin main
-git checkout -b feature/your-module-name (optional if planned to create new branch/module)
+```
+
+Optional feature branch:
+
+```bash
+git switch -c feature/your-feature-name
 ```
 
 ---
 
-### 2. Backend setup (everyone)
+## 2. Backend Setup
+
+Run these from the project root:
 
 ```bash
 cd backend
@@ -260,79 +316,141 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**⚠️ IMPORTANT**: Ensure `WMI` and `pywin32` are installed. These are **required** for hardware detection on Windows. If missing, run:
-```bash
-pip install WMI pywin32
-```
-
-Create your local `.env` file:
+If hardware detection packages are missing, install them:
 
 ```bash
-# If .env.example exists:
-copy .env.example .env
-
-# Otherwise create .env manually with:
-# GEMINI_API_KEY=your_key_here
-# DATABASE_URL=your_supabase_connection_string
-# FRONTEND_URL=http://localhost:5173
+pip install WMI pywin32 psutil
 ```
-
-> Open the `.env` file and paste in the `GEMINI_API_KEY` and `DATABASE_URL`.  
-> Check the pinned messages in messenger for these credentials.
-
-**Note**: If you don't have a valid `DATABASE_URL`, the app will still run but database features won't work. Hardware detection will work independently.
 
 ---
 
-### 3. Database migrations (optional)
+## 3. Backend Environment Setup
 
-Once the SQLAlchemy models are written, make sure your backend virtual environment is active, then push the tables to Supabase:
+Create this file:
 
-```bash
-cd backend
-venv\Scripts\activate
-alembic upgrade head
+```txt
+backend/.env
 ```
 
-Verify the tables were created in **Supabase → Table Editor**.
+Add:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+DATABASE_URL=your_supabase_postgresql_connection_string_here
+FRONTEND_URL=http://localhost:5173
+```
+
+Example Supabase connection format:
+
+```env
+DATABASE_URL=postgresql://postgres.YOUR_PROJECT_ID:YOUR_PASSWORD@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres
+```
+
+Important notes:
+
+- Do not leave `[YOUR-PASSWORD]` in the connection string.
+- Replace it with the real Supabase database password.
+- If your password has special characters, URL-encode it.
+- Never commit `.env` files.
 
 ---
 
-### 4. Run the Backend
+## 4. Run the Backend
 
-**Option A: Using activated virtual environment (recommended)**
-
-```bash
-# From backend folder with venv activated
-cd backend
-venv\Scripts\activate
-cd ..
-uvicorn backend.main:app --reload --port 8000
-```
-
-**Option B: Direct path to uvicorn**
+Always run the backend from the project root.
 
 ```bash
-# From project root (rigmd folder)
-backend\venv\Scripts\uvicorn.exe backend.main:app --reload --port 8000
+cd D:\RigMD
+backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
 ```
 
-Backend runs at: `http://localhost:8000`  
-API docs available at: `http://localhost:8000/docs`
+Backend runs at:
+
+```txt
+http://localhost:8000
+```
+
+API documentation:
+
+```txt
+http://localhost:8000/docs
+```
+
+Test backend root:
+
+```txt
+http://localhost:8000/
+```
+
+Expected response:
+
+```json
+{
+  "message": "Backend is running!"
+}
+```
 
 ---
 
-### 5. Frontend setup (everyone)
+## 5. Frontend Setup
 
-Open a **second terminal window** (keep the backend running), then:
+Open a second terminal.
 
 ```bash
 cd frontend
 npm install
+```
+
+---
+
+## 6. Frontend Environment Setup
+
+Create this file:
+
+```txt
+frontend/.env
+```
+
+Add:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+This lets the frontend call the FastAPI backend.
+
+---
+
+## 7. Run the Frontend
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Frontend runs at: `http://localhost:5173`
+Frontend runs at:
+
+```txt
+http://localhost:5173
+```
+
+---
+
+## 8. Recommended Run Order
+
+Start backend first:
+
+```bash
+cd D:\RigMD
+backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
+```
+
+Then start frontend in another terminal:
+
+```bash
+cd D:\RigMD\frontend
+npm run dev
+```
 
 ---
 
@@ -340,23 +458,290 @@ Frontend runs at: `http://localhost:5173`
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/profile` | Save system profile |
-| GET | `/api/profile/{id}` | Get system profile |
-| POST | `/api/diagnose` | Run diagnostic + return advisory output |
-| POST | `/api/session` | Save completed session |
-| GET | `/api/history` | Get all sessions |
-| GET | `/api/history/{profile_id}` | Get sessions for a specific profile |
+| GET | `/` | Backend health check |
+| GET | `/api/hardware/live` | Get live hardware/system telemetry |
+| POST | `/api/hardware/refresh` | Refresh hardware cache |
+| GET | `/api/dashboard/summary` | Get home dashboard summary |
+| POST | `/api/diagnose/` | Run diagnostic engine |
+| GET | `/api/history/sessions` | Get diagnostic history sessions |
+| GET | `/api/history/sessions/{session_id}` | Get one diagnostic session detail |
+| GET | `/api/recurring/patterns` | Get detected recurring patterns |
+| GET | `/api/recurring/patterns/{pattern_id}` | Get recurring pattern detail |
+| GET | `/api/warning-signs/reference` | Get warning signs reference list |
+
+---
+
+## Frontend Screens
+
+| Screen | File | Status |
+|---|---|---|
+| Home Dashboard | `HardwareDashboard.tsx` | Working |
+| System Profile | `SystemProfileView.tsx` | Working with live hardware data |
+| Diagnostic History | `DiagnosticHistoryView.tsx` | Backend-ready |
+| Recurring Patterns | `RecurringPatternsView.tsx` | Backend-ready |
+| Warning Signs | `WarningSignsView.tsx` | Working reference screen |
+| Reports | `ReportsView.tsx` | Placeholder |
+| New Diagnosis | In progress | Next module |
+
+---
+
+## Current Module Status
+
+| Module | Status |
+|---|---|
+| System Profile Detection | Working |
+| Home Dashboard | Working, needs database tables for full stats |
+| Diagnostic History | Ready, waits for saved sessions |
+| Recurring Patterns | Ready, waits for saved sessions |
+| Warning Signs Reference | Working |
+| New Diagnosis | Next to implement |
+| Reports | Placeholder |
 
 ---
 
 ## Action Categories
 
-| Category | When it applies |
+| Category | Meaning |
 |---|---|
-| **Monitor** | Mild, inconsistent symptoms with no clear pattern yet |
-| **Maintain** | Symptoms suggest thermal issues or software bloat |
-| **Troubleshoot** | Symptoms followed a recent driver, software, or system update |
-| **Escalate for Professional Inspection** | Conditions exceed software-layer resolution |
+| Monitor | Observe the issue because symptoms are mild or not yet repeated |
+| Maintain | Perform basic cleanup, update, or maintenance steps |
+| Troubleshoot | Investigate software, driver, OS, startup, or configuration causes |
+| Escalate | Issue may require professional inspection or urgent attention |
+
+---
+
+## Confidence Labels
+
+| Label | Meaning |
+|---|---|
+| High Confidence | Strong match between symptoms and diagnostic rule |
+| Moderate | Some matching signals, but more checks may be needed |
+| Low Confidence | Weak match or limited information |
+
+---
+
+## Hardware Detection Requirements
+
+RigMD uses Windows-based hardware detection.
+
+Required packages:
+
+```txt
+WMI
+pywin32
+psutil
+```
+
+Install manually if needed:
+
+```bash
+cd backend
+venv\Scripts\activate
+pip install WMI pywin32 psutil
+```
+
+### Supported OS
+
+| OS | Support |
+|---|---|
+| Windows 10 | Supported |
+| Windows 11 | Supported |
+| Linux | Not supported for WMI hardware detection |
+| macOS | Not supported for WMI hardware detection |
+
+---
+
+## What RigMD Detects
+
+RigMD can detect:
+
+- CPU model
+- CPU usage
+- RAM capacity and usage
+- GPU model
+- GPU driver
+- Storage size
+- Storage usage
+- Storage type
+- Windows version
+- Chipset or motherboard proxy
+- System age based on OS install date
+
+---
+
+## Troubleshooting
+
+### 1. Frontend Shows “Connection Lost”
+
+Cause:
+
+```txt
+Backend is not running or frontend cannot reach port 8000.
+```
+
+Fix:
+
+```bash
+cd D:\RigMD
+backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
+```
+
+Then refresh:
+
+```txt
+http://localhost:5173
+```
+
+---
+
+### 2. Orange Dashboard Database Warning Appears
+
+Message:
+
+```txt
+Database dashboard data is not available yet. Check your Supabase connection and tables.
+```
+
+Cause:
+
+- `DATABASE_URL` is missing
+- `DATABASE_URL` still contains `[YOUR-PASSWORD]`
+- Supabase password is wrong
+- Supabase tables are missing
+- Database route failed
+
+Check:
+
+```txt
+http://localhost:8000/api/dashboard/summary
+```
+
+If the response contains:
+
+```json
+"database_warning": "..."
+```
+
+then the backend database query failed.
+
+Fix your:
+
+```txt
+backend/.env
+```
+
+and confirm these tables exist in Supabase:
+
+```txt
+profiles
+sessions
+recommendations
+```
+
+---
+
+### 3. Hardware Shows Unknown or Generic Values
+
+Cause:
+
+- WMI package missing
+- pywin32 missing
+- psutil missing
+- WMI access blocked
+- Backend is not running on Windows
+
+Fix:
+
+```bash
+cd backend
+venv\Scripts\activate
+pip install WMI pywin32 psutil
+```
+
+Restart backend after installing.
+
+---
+
+### 4. Backend Cannot Import `backend`
+
+Cause:
+
+Backend was run from the wrong folder.
+
+Wrong:
+
+```bash
+cd backend
+uvicorn main:app --reload --port 8000
+```
+
+Correct:
+
+```bash
+cd D:\RigMD
+backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
+```
+
+---
+
+### 5. `psycopg2` Missing
+
+Error:
+
+```txt
+ModuleNotFoundError: No module named 'psycopg2'
+```
+
+Fix:
+
+```bash
+cd backend
+venv\Scripts\activate
+pip install psycopg2-binary
+```
+
+Then restart backend.
+
+---
+
+## Environment Files
+
+### backend/.env
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+DATABASE_URL=your_supabase_connection_string_here
+FRONTEND_URL=http://localhost:5173
+```
+
+### frontend/.env
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+---
+
+## Git Ignore Reminder
+
+The following files must never be committed:
+
+```txt
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+```
+
+Keep only sample files if needed:
+
+```txt
+.env.example
+backend/.env.example
+frontend/.env.example
+```
 
 ---
 
@@ -364,87 +749,47 @@ Frontend runs at: `http://localhost:5173`
 
 | Branch | Purpose |
 |---|---|
-| `main` | Stable releases only — merged from dev after full review |
-| `dev` | Active integration branch — all features merge here first |
-| `feature/[name]` | Individual feature branches per member |
+| `main` | Stable release branch |
+| `dev` | Integration branch |
+| `feature/[feature-name]` | Individual feature work |
 
-### Commit message format
+Example:
 
-```
-feat: add intake form step validation
-fix: correct advisory logic for boot failure
-refactor: move diagnosis to service layer
-docs: update API table in README
+```bash
+git switch -c feature/rigmd-diagnostic-modules
 ```
 
 ---
 
-## Backend requirements.txt
+## Commit Message Format
 
-```
-fastapi==0.136.1
-uvicorn==0.47.0
-sqlalchemy==2.0.49
-alembic==1.18.4
-pydantic==2.13.4
-python-dotenv==1.2.2
-google-generativeai==0.8.6
-psycopg2-binary==2.9.12
+Use Conventional Commits:
 
-# Windows Hardware Detection (REQUIRED)
-WMI==1.5.1
-pywin32==311
-psutil==7.2.2
+```txt
+feat(scope): add new feature
+fix(scope): fix bug
+chore(scope): update config or dependencies
+docs(scope): update documentation
+refactor(scope): improve code structure
 ```
 
-**Note**: `WMI` and `pywin32` are **essential** for hardware detection on Windows. Without them, the system will only show generic hardware information.
+Examples:
+
+```txt
+feat(history): add diagnostic history screen and API
+feat(recurring): add recurring patterns screen and API
+feat(warnings): add warning signs reference screen and API
+fix(hardware): improve hardware refresh handling
+docs(readme): update setup instructions
+```
 
 ---
 
 ## Important Notes
 
-- Scoped to functional or partially functional Windows desktop PCs only.
-- Does not evaluate physical hardware or recommend component replacement.
-- All advisory output is probabilistic, not deterministic.
-- No user data is transmitted externally except the structured prompt sent to Gemini API.
-- The Supabase connection string contains the live database password — treat it like an API key and never commit it to version control.
-
----
-
-## Hardware Detection Requirements
-
-### Windows-Only Support
-RigMD uses **Windows Management Instrumentation (WMI)** for hardware detection. This means:
-- ✅ **Windows 10/11** - Fully supported
-- ❌ **Linux/Mac** - Not supported (WMI is Windows-only)
-
-### Required Packages for Hardware Detection
-The following packages are **critical** for hardware detection to work:
-
-```
-WMI==1.5.1          # Windows Management Instrumentation
-pywin32==311        # Python Windows extensions
-psutil==7.2.2       # System monitoring (cross-platform)
-```
-
-**Without these packages**, hardware detection will fail and show:
-- CPU: Generic names like "AMD64 Family 23 Model 113"
-- GPU: "Unknown"
-- Storage Type: "Unknown"
-
-### What Gets Detected
-When properly configured, RigMD detects:
-- ✅ **CPU**: Actual model name (e.g., "AMD Ryzen 5 3600")
-- ✅ **GPU**: Graphics card model and driver version
-- ✅ **RAM**: Total capacity and usage
-- ✅ **Storage**: All drives (C:, D:, etc.) with type detection (NVMe/SSD/HDD)
-- ✅ **OS**: Windows version and install date
-- ✅ **Motherboard**: Chipset information
-
-### Known Limitations
-- **VRAM Detection**: Some GPUs report incorrect VRAM values via WMI
-- **Admin Rights**: Not required for basic detection, but some features may need elevated permissions
-- **Corporate PCs**: IT policies may restrict WMI access
-- **Multiple GPUs**: Prioritizes dedicated GPUs over integrated graphics
-
----
+- RigMD is scoped to Windows desktop PCs.
+- RigMD does not physically inspect hardware.
+- RigMD does not guarantee a final diagnosis.
+- Advisory output is probabilistic and rule-based.
+- Professional inspection is still required for severe or repeated hardware-related warning signs.
+- Do not commit real API keys, Supabase passwords, or environment files.
