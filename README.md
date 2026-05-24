@@ -10,13 +10,13 @@
 
 ## Team Members
 
-| Name | Role | Responsibilities |
+| Name | GitHub / Contact | Responsibilities |
 |---|---|---|
-| Libato, Michael Grant | Backend Developer | Diagnostic engine, advisory module, AI explainer |
-| Macansantos, Axelson | Database Developer | Supabase setup, SQLAlchemy models, Alembic migrations |
-| Ruperez, Raymart | Backend Developer | FastAPI setup, routers, Pydantic schemas |
-| Maestrado, Ralph Keane | Frontend Developer | Profile page, intake page, routing, app context |
-| Labaya, Godwin | Frontend Developer | Result page, history page, reusable components |
+| Libato, Michael Grant | @michaelgrantlibato7@gmail.com | Backend — diagnostic engine, advisory module, AI explainer |
+| Macansantos, Axelson | @axcelsonmacansantos@gmail.com | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
+| Ruperez, Raymart | @raymartruperez@gmail.com | Backend — FastAPI setup, all routers, Pydantic schemas |
+| Maestrado, Ralph Keane | @maestradoralphkeane@gmail.com | Frontend — ProfilePage, IntakePage, routing, AppContext |
+| Labaya, Godwin | @glabaya123@gmail.com | Frontend — ResultPage, HistoryPage, reusable components |
 
 ---
 ---
