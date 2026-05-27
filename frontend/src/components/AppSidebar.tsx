@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -13,15 +14,44 @@ import {
 
 import type { DashboardSummary, PageKey } from '../types/rigmd';
 
+const HISTORY_SEEN_KEY = 'rigmd_seen_history_count';
+const RECURRING_SEEN_KEY = 'rigmd_seen_recurring_count';
+
+function readSeenCount(key: string) {
+  if (typeof window === 'undefined') return 0;
+
+  const value = Number(window.localStorage.getItem(key) || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function saveSeenCount(key: string, value: number) {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(key, String(value));
+}
+
+function formatBadge(value: number) {
+  if (value > 99) return '99+';
+  return value;
+}
+
 interface SidebarItemProps {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   badge?: string | number | null;
+  alert?: boolean;
   onClick?: () => void;
 }
 
-function SidebarItem({ icon: Icon, label, active = false, badge = null, onClick }: SidebarItemProps) {
+function SidebarItem({
+  icon: Icon,
+  label,
+  active = false,
+  badge = null,
+  alert = false,
+  onClick,
+}: SidebarItemProps) {
   return (
     <button
       type="button"
@@ -32,12 +62,21 @@ function SidebarItem({ icon: Icon, label, active = false, badge = null, onClick 
           : 'text-slate-300 hover:bg-[#172232] hover:text-white'
       }`}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <Icon size={18} />
-        <span className="text-sm font-medium">{label}</span>
+        <span className="truncate text-sm font-medium">{label}</span>
       </div>
 
-      {badge !== null && <span className="text-xs font-bold text-cyan-400">{badge}</span>}
+      {alert ? (
+        <span
+          title="Live warning detected"
+          className="ml-3 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-500/40 bg-orange-500/10 text-orange-400"
+        >
+          <AlertTriangle size={13} />
+        </span>
+      ) : badge !== null ? (
+        <span className="ml-3 shrink-0 text-xs font-bold text-cyan-400">{badge}</span>
+      ) : null}
     </button>
   );
 }
@@ -46,9 +85,40 @@ interface AppSidebarProps {
   activePage: PageKey;
   setActivePage: (page: PageKey) => void;
   dashboard: DashboardSummary;
+  liveWarningActive?: boolean;
 }
 
-export default function AppSidebar({ activePage, setActivePage, dashboard }: AppSidebarProps) {
+export default function AppSidebar({
+  activePage,
+  setActivePage,
+  dashboard,
+  liveWarningActive,
+}: AppSidebarProps) {
+  const totalSessions = dashboard.totals?.total_sessions ?? 0;
+  const recurringIssues = dashboard.recurring_issues_count ?? 0;
+
+  const [seenHistoryCount, setSeenHistoryCount] = useState(() => readSeenCount(HISTORY_SEEN_KEY));
+  const [seenRecurringCount, setSeenRecurringCount] = useState(() => readSeenCount(RECURRING_SEEN_KEY));
+
+  const historyBadgeCount = Math.max(totalSessions - seenHistoryCount, 0);
+  const recurringBadgeCount = Math.max(recurringIssues - seenRecurringCount, 0);
+
+  const warningAlert = liveWarningActive ?? (dashboard.warning_signs_active_count ?? 0) > 0;
+
+  useEffect(() => {
+    if (activePage === 'diagnosticHistory') {
+      setSeenHistoryCount(totalSessions);
+      saveSeenCount(HISTORY_SEEN_KEY, totalSessions);
+    }
+  }, [activePage, totalSessions]);
+
+  useEffect(() => {
+    if (activePage === 'recurringPatterns') {
+      setSeenRecurringCount(recurringIssues);
+      saveSeenCount(RECURRING_SEEN_KEY, recurringIssues);
+    }
+  }, [activePage, recurringIssues]);
+
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-[#253041] bg-[#111827] md:flex">
       <div className="flex items-center gap-3 border-b border-[#253041] px-6 py-5">
@@ -92,7 +162,7 @@ export default function AppSidebar({ activePage, setActivePage, dashboard }: App
           <SidebarItem
             icon={History}
             label="Diagnostic History"
-            badge={dashboard.totals.total_sessions || null}
+            badge={historyBadgeCount > 0 ? formatBadge(historyBadgeCount) : null}
             active={activePage === 'diagnosticHistory'}
             onClick={() => setActivePage('diagnosticHistory')}
           />
@@ -100,7 +170,7 @@ export default function AppSidebar({ activePage, setActivePage, dashboard }: App
           <SidebarItem
             icon={Activity}
             label="Recurring Patterns"
-            badge={dashboard.recurring_issues_count || null}
+            badge={recurringBadgeCount > 0 ? formatBadge(recurringBadgeCount) : null}
             active={activePage === 'recurringPatterns'}
             onClick={() => setActivePage('recurringPatterns')}
           />
@@ -108,7 +178,7 @@ export default function AppSidebar({ activePage, setActivePage, dashboard }: App
           <SidebarItem
             icon={AlertTriangle}
             label="Warning Signs"
-            badge={dashboard.warning_signs_active_count || null}
+            alert={warningAlert}
             active={activePage === 'warningSigns'}
             onClick={() => setActivePage('warningSigns')}
           />

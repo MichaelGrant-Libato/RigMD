@@ -1,4 +1,7 @@
+//HardwareDashboard.tsx
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Stethoscope } from 'lucide-react';
 import axios from 'axios';
 import {
   Activity,
@@ -16,7 +19,6 @@ import {
   Monitor,
   RefreshCw,
   ShieldAlert,
-  Stethoscope,
   Wrench,
   Zap,
   type LucideIcon,
@@ -28,6 +30,7 @@ import SystemProfileView from './SystemProfileView';
 import DiagnosticHistoryView from './DiagnosticHistoryView';
 import RecurringPatternsView from './RecurringPatternsView';
 import WarningSignsView from './WarningSignsView';
+import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
 
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
@@ -320,6 +323,7 @@ function SystemStatusSummaryCard({
     </section>
   );
 }
+
 
 function DashboardMetricCard({
   icon: Icon,
@@ -769,12 +773,7 @@ export default function HardwareDashboard() {
         return <WarningSignsView />;
 
       case 'newDiagnosis':
-        return (
-          <PlaceholderView
-            title="New Diagnosis"
-            subtitle="Guided symptom intake workflow will be implemented here"
-          />
-        );
+        return <NewDiagnosisView />; // TARGET SWAP: Safely maps the new modular view file component
 
       case 'reports':
         return (
