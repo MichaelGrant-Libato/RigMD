@@ -1,18 +1,24 @@
-import { useMemo } from 'react';
+//SystemProfileView.tsx
+
+import { useMemo, useState } from 'react';
 import {
+  Activity,
   Calendar,
   CheckCircle2,
   Cpu,
   Database,
+  Gamepad2,
+  Globe2,
   HardDrive,
   Info,
   Layers,
+  ListChecks,
   MemoryStick,
   Microchip,
   Monitor,
   RefreshCw,
-  Server,
   Terminal,
+  X,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -40,7 +46,22 @@ interface HardwareInfoCardProps {
   confidence: 'High Confidence' | 'Medium Confidence' | 'Low Confidence';
   subtitle?: string;
   warningTag?: string;
+  onClick?: () => void;
+  clickable?: boolean;
+  active?: boolean;
 }
+
+type ComponentInsight =
+  | 'cpu'
+  | 'ram'
+  | 'gpu'
+  | 'gpuDriver'
+  | 'storage'
+  | 'storageType'
+  | 'os'
+  | 'chipset'
+  | 'age'
+  | null;
 
 function cleanValue(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') {
@@ -176,37 +197,348 @@ function HardwareInfoCard({
   confidence,
   subtitle,
   warningTag,
+  onClick,
+  clickable = false,
+  active = false,
 }: HardwareInfoCardProps) {
-  return (
-    <div className="flex min-w-0 items-center justify-between rounded-xl border border-[#30363d] bg-[#161b22] p-4 transition hover:border-cyan-500/30">
-      <div className="flex min-w-0 items-center gap-4">
-        <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-cyan-400">
-          <Icon size={23} />
-        </div>
+  const cardClasses = `flex min-w-0 items-center justify-between rounded-xl border p-4 text-left transition ${
+    active
+      ? 'border-cyan-500/70 bg-cyan-500/10'
+      : 'border-[#30363d] bg-[#161b22] hover:border-cyan-500/30'
+  } ${clickable ? 'cursor-pointer hover:bg-[#1b222c]' : ''}`;
 
-        <div className="min-w-0">
-          <p className="mb-1 text-xs text-gray-400">
-            {title}
-            {subtitle && <span className="mx-1 text-[#30363d]">|</span>}
-            {subtitle && <span className="text-cyan-500">{subtitle}</span>}
-          </p>
+  const content = (
+    <div className="flex min-w-0 items-center gap-4">
+      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-cyan-400">
+        <Icon size={23} />
+      </div>
 
-          <p className="truncate text-sm font-semibold text-gray-100">{value}</p>
+      <div className="min-w-0">
+        <p className="mb-1 text-xs text-gray-400">
+          {title}
+          {subtitle && <span className="mx-1 text-[#30363d]">|</span>}
+          {subtitle && <span className="text-cyan-500">{subtitle}</span>}
+        </p>
 
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getConfidenceStyle(confidence)}`}>
-              {confidence}
+        <p className="truncate text-sm font-semibold text-gray-100">{value}</p>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getConfidenceStyle(confidence)}`}>
+            {confidence}
+          </span>
+
+          {warningTag && (
+            <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-2 py-0.5 text-[11px] font-semibold text-orange-400">
+              {warningTag}
             </span>
-
-            {warningTag && (
-              <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-2 py-0.5 text-[11px] font-semibold text-orange-400">
-                {warningTag}
-              </span>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
+  );
+
+  if (clickable) {
+    return (
+      <button type="button" onClick={onClick} className={cardClasses}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={cardClasses}>{content}</div>;
+}
+
+function MetricTile({
+  label,
+  value,
+  tone = 'cyan',
+}: {
+  label: string;
+  value: string;
+  tone?: 'cyan' | 'emerald' | 'orange' | 'red';
+}) {
+  const color =
+    tone === 'emerald'
+      ? 'text-emerald-400'
+      : tone === 'orange'
+        ? 'text-orange-400'
+        : tone === 'red'
+          ? 'text-red-400'
+          : 'text-cyan-400';
+
+  return (
+    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+      <p className="text-xs uppercase tracking-wider text-gray-500">{label}</p>
+      <p className={`mt-1 text-lg font-bold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function TopAppsList({
+  title,
+  apps,
+}: {
+  title: string;
+  apps: Array<{ name: string; process_count: number; memory_mb: number }>;
+}) {
+  return (
+    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <ListChecks size={15} className="text-cyan-400" />
+        <p className="text-xs uppercase tracking-wider text-gray-500">{title}</p>
+      </div>
+
+      {apps.length === 0 ? (
+        <p className="text-sm text-gray-500">No active app workload data available.</p>
+      ) : (
+        <div className="space-y-2">
+          {apps.slice(0, 5).map((app) => (
+            <div
+              key={app.name}
+              className="flex items-center justify-between rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-xs"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-gray-200">{app.name}</p>
+                <p className="text-[11px] text-gray-500">{app.process_count} process(es)</p>
+              </div>
+
+              <span className="shrink-0 font-semibold text-cyan-400">{app.memory_mb} MB</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComponentWorkloadPanel({
+  stats,
+  selectedComponent,
+  onClear,
+}: {
+  stats: HardwareStats | null;
+  selectedComponent: ComponentInsight;
+  onClear: () => void;
+}) {
+  if (!stats || !selectedComponent) {
+    return (
+      <section className="mt-5 rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
+        <div className="flex items-start gap-3">
+          <Info size={17} className="mt-0.5 shrink-0 text-cyan-400" />
+          <div>
+            <h4 className="font-semibold text-white">Component Workload Details</h4>
+            <p className="mt-1 text-sm text-gray-500">
+              Select CPU, RAM, GPU, Storage, or another detected component to see the live workload data related to it.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const insights = stats.process_insights;
+  const topApps = insights?.top_memory_apps ?? [];
+  const browserMemory = insights?.browser_memory_mb ?? 0;
+  const browserProcesses = insights?.browser_process_count ?? 0;
+  const browserHeavy = insights?.browser_heavy ?? false;
+  const gameDetected = insights?.game_detected ?? false;
+  const gameProcesses = insights?.game_processes ?? [];
+
+  const browserTone = browserHeavy ? 'orange' : 'cyan';
+  const ramTone = stats.ram.usage_percent >= 85 ? 'red' : stats.ram.usage_percent >= 75 ? 'orange' : 'emerald';
+  const cpuTone = stats.cpu.usage_percent >= 85 ? 'red' : stats.cpu.usage_percent >= 70 ? 'orange' : 'emerald';
+  const diskTone = stats.disk.usage_percent >= 90 ? 'red' : stats.disk.usage_percent >= 80 ? 'orange' : 'emerald';
+
+  const titleMap: Record<Exclude<ComponentInsight, null>, string> = {
+    cpu: 'CPU Workload Details',
+    ram: 'RAM Workload Details',
+    gpu: 'GPU Workload Details',
+    gpuDriver: 'GPU Driver Details',
+    storage: 'Storage Details',
+    storageType: 'Storage Type Details',
+    os: 'Operating System Details',
+    chipset: 'Chipset Driver Details',
+    age: 'System Age Details',
+  };
+
+  return (
+    <section className="mt-5 rounded-2xl border border-cyan-500/30 bg-[#101820] p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Activity size={17} className="text-cyan-400" />
+          <h3 className="font-semibold text-white">{titleMap[selectedComponent]}</h3>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded-lg border border-[#30363d] bg-[#0d1117] p-2 text-gray-500 transition hover:border-cyan-500/40 hover:text-white"
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      {selectedComponent === 'cpu' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <MetricTile label="Current CPU Load" value={`${Math.round(stats.cpu.usage_percent)}%`} tone={cpuTone} />
+            <MetricTile label="CPU Cores / Threads" value={`${stats.cpu.cores} / ${stats.cpu.threads}`} />
+            <MetricTile label="Frequency" value={`${stats.cpu.frequency_mhz} MHz`} />
+          </div>
+
+          <TopAppsList
+            title="Active workload signals"
+            apps={topApps}
+          />
+
+          <p className="text-xs leading-relaxed text-gray-500">
+            RigMD can see the total CPU load, but your current backend does not yet report per-process CPU usage.
+            These apps are shown as workload signals because they are currently active and using memory.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'ram' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <MetricTile label="RAM Allocated" value={`${stats.ram.usage_percent}%`} tone={ramTone} />
+            <MetricTile label="Used RAM" value={`${stats.ram.used_gb} GB`} tone={ramTone} />
+            <MetricTile label="Total RAM" value={`${stats.ram.total_gb} GB`} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Globe2 size={16} className="text-cyan-400" />
+                <p className="text-xs uppercase tracking-wider text-gray-500">Browser Memory</p>
+              </div>
+
+              <p className={`text-xl font-bold ${browserHeavy ? 'text-orange-400' : 'text-cyan-400'}`}>
+                {browserMemory} MB
+              </p>
+              <p className="text-xs text-gray-500">{browserProcesses} browser process(es)</p>
+            </div>
+
+            <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+              <p className="text-xs uppercase tracking-wider text-gray-500">Browser Pressure</p>
+              <p className={`mt-1 text-lg font-bold ${browserHeavy ? 'text-orange-400' : 'text-emerald-400'}`}>
+                {browserHeavy ? 'Heavy' : 'Normal'}
+              </p>
+              <p className="text-xs text-gray-500">
+                Many tabs, extensions, videos, and web apps can increase RAM usage.
+              </p>
+            </div>
+          </div>
+
+          <TopAppsList title="Apps using the most RAM" apps={topApps} />
+        </div>
+      )}
+
+      {selectedComponent === 'gpu' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <MetricTile label="GPU Type" value={cleanValue(stats.gpu.type)} />
+            <MetricTile label="VRAM" value={`${stats.gpu.vram_gb} GB`} />
+            <MetricTile label="Game / Launcher" value={gameDetected ? 'Detected' : 'None'} tone={gameDetected ? 'orange' : 'emerald'} />
+          </div>
+
+          <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <Gamepad2 size={16} className="text-orange-400" />
+              <p className="text-xs uppercase tracking-wider text-gray-500">Detected Game / Launcher Processes</p>
+            </div>
+
+            <p className={`text-lg font-bold ${gameDetected ? 'text-orange-400' : 'text-emerald-400'}`}>
+              {gameDetected ? 'Launcher Detected' : 'No known game or launcher process active'}
+            </p>
+
+            <p className="mt-1 text-sm text-gray-500">
+              {gameProcesses.length > 0 ? gameProcesses.join(', ') : 'No detected process names to show.'}
+            </p>
+          </div>
+
+          <p className="text-xs leading-relaxed text-gray-500">
+            This does not always prove a full game is running. It means RigMD found a known game or launcher process that may contribute to graphics load, heat, or display-driver sensitivity.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'gpuDriver' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <MetricTile label="Detected GPU Driver" value={cleanValue(stats.gpu.driver)} />
+            <MetricTile label="GPU Name" value={cleanValue(stats.gpu.name)} />
+          </div>
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            Driver problems are usually connected to flickering, black screens, visual glitches, crashes during games,
+            or problems after a recent driver update. RigMD does not update, remove, or roll back drivers automatically.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'storage' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <MetricTile label="Drive Usage" value={`${stats.disk.usage_percent}% Full`} tone={diskTone} />
+            <MetricTile label="Total Capacity" value={`${stats.disk.total_gb} GB`} />
+            <MetricTile label="Detected Type" value={cleanValue(stats.storage_type)} />
+          </div>
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            Storage pressure becomes more likely to affect performance when a drive is close to 85-90% full.
+            At your current level, RigMD treats storage as a supporting signal unless the user reports file errors,
+            saving problems, or loading delays.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'storageType' && (
+        <div className="space-y-4">
+          <MetricTile label="Detected Storage Type" value={cleanValue(stats.storage_type)} />
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            NVMe SSDs are generally fast. If the system still feels slow, the cause is more likely RAM pressure,
+            browser load, background apps, startup apps, or software activity rather than raw drive speed.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'os' && (
+        <div className="space-y-4">
+          <MetricTile label="Detected Operating System" value={cleanValue(stats.os_version)} />
+
+          <TopAppsList title="Current background app signals" apps={topApps} />
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            Windows updates, background services, startup apps, browsers, and security tools can affect performance
+            even when hardware detection looks healthy.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'chipset' && (
+        <div className="space-y-4">
+          <MetricTile label="Detected Chipset / Platform" value={cleanValue(stats.chipset_driver)} />
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            Chipset and platform drivers affect how Windows communicates with motherboard devices, storage controllers,
+            power states, and connected hardware. RigMD currently treats this as profile context, not an automated fix target.
+          </p>
+        </div>
+      )}
+
+      {selectedComponent === 'age' && (
+        <div className="space-y-4">
+          <MetricTile label="System Age" value={cleanValue(stats.system_age)} />
+
+          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+            System age is based on the Windows install date. A newer install can still slow down if many apps, browser tabs,
+            launchers, or startup items are active.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -217,6 +549,8 @@ export default function SystemProfileView({
   isRefreshingHardware,
   onRefreshHardware,
 }: SystemProfileViewProps) {
+  const [selectedComponent, setSelectedComponent] = useState<ComponentInsight>(null);
+
   return (
     <>
       <TopHeader
@@ -273,7 +607,7 @@ export default function SystemProfileView({
                 <div>
                   <h4 className="font-semibold text-gray-100">Automatic Detection Active</h4>
                   <p className="mt-1 text-sm text-gray-500">
-                    These values were detected from your system. Detection confidence indicates how reliable each detected value is.
+                    Select a detected component to view the active workload data related to that component.
                   </p>
                 </div>
               </div>
@@ -287,76 +621,111 @@ export default function SystemProfileView({
                   ESTABLISHING WMI DATALINK...
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                  <HardwareInfoCard
-                    icon={Cpu}
-                    title="CPU"
-                    subtitle="Real-Time"
-                    value={`${cleanValue(stats.cpu.name)} (${Math.round(stats.cpu.usage_percent)}% Load)`}
-                    confidence={getConfidence(stats.cpu.name)}
-                  />
+                <>
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                    <HardwareInfoCard
+                      icon={Cpu}
+                      title="CPU"
+                      subtitle="Real-Time"
+                      value={`${cleanValue(stats.cpu.name)} (${Math.round(stats.cpu.usage_percent)}% Load)`}
+                      confidence={getConfidence(stats.cpu.name)}
+                      clickable
+                      active={selectedComponent === 'cpu'}
+                      onClick={() => setSelectedComponent('cpu')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={MemoryStick}
-                    title="RAM"
-                    subtitle="Real-Time"
-                    value={`${stats.ram.total_gb} GB (${stats.ram.usage_percent}% Allocated)`}
-                    confidence={getConfidence(stats.ram.total_gb)}
-                  />
+                    <HardwareInfoCard
+                      icon={MemoryStick}
+                      title="RAM"
+                      subtitle="Real-Time"
+                      value={`${stats.ram.total_gb} GB (${stats.ram.usage_percent}% Allocated)`}
+                      confidence={getConfidence(stats.ram.total_gb)}
+                      clickable
+                      active={selectedComponent === 'ram'}
+                      onClick={() => setSelectedComponent('ram')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Monitor}
-                    title="GPU"
-                    subtitle={cleanValue(stats.gpu.type)}
-                    value={cleanValue(stats.gpu.name)}
-                    confidence={getConfidence(stats.gpu.name)}
-                  />
+                    <HardwareInfoCard
+                      icon={Monitor}
+                      title="GPU"
+                      subtitle={cleanValue(stats.gpu.type)}
+                      value={cleanValue(stats.gpu.name)}
+                      confidence={getConfidence(stats.gpu.name)}
+                      clickable
+                      active={selectedComponent === 'gpu'}
+                      onClick={() => setSelectedComponent('gpu')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Microchip}
-                    title="GPU Driver"
-                    value={cleanValue(stats.gpu.driver)}
-                    confidence={getConfidence(stats.gpu.driver)}
-                  />
+                    <HardwareInfoCard
+                      icon={Microchip}
+                      title="GPU Driver"
+                      value={cleanValue(stats.gpu.driver)}
+                      confidence={getConfidence(stats.gpu.driver)}
+                      clickable
+                      active={selectedComponent === 'gpuDriver'}
+                      onClick={() => setSelectedComponent('gpuDriver')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={HardDrive}
-                    title="Storage"
-                    subtitle="Real-Time"
-                    value={`${stats.disk.total_gb} GB ${cleanValue(stats.storage_type)} (${stats.disk.usage_percent}% Full)`}
-                    confidence={getConfidence(stats.disk.total_gb)}
-                  />
+                    <HardwareInfoCard
+                      icon={HardDrive}
+                      title="Storage"
+                      subtitle="Real-Time"
+                      value={`${stats.disk.total_gb} GB ${cleanValue(stats.storage_type)} (${stats.disk.usage_percent}% Full)`}
+                      confidence={getConfidence(stats.disk.total_gb)}
+                      clickable
+                      active={selectedComponent === 'storage'}
+                      onClick={() => setSelectedComponent('storage')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Database}
-                    title="Storage Type"
-                    value={cleanValue(stats.storage_type)}
-                    confidence={getConfidence(stats.storage_type)}
-                  />
+                    <HardwareInfoCard
+                      icon={Database}
+                      title="Storage Type"
+                      value={cleanValue(stats.storage_type)}
+                      confidence={getConfidence(stats.storage_type)}
+                      clickable
+                      active={selectedComponent === 'storageType'}
+                      onClick={() => setSelectedComponent('storageType')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Terminal}
-                    title="Operating System"
-                    value={cleanValue(stats.os_version)}
-                    confidence={getConfidence(stats.os_version)}
-                  />
+                    <HardwareInfoCard
+                      icon={Terminal}
+                      title="Operating System"
+                      value={cleanValue(stats.os_version)}
+                      confidence={getConfidence(stats.os_version)}
+                      clickable
+                      active={selectedComponent === 'os'}
+                      onClick={() => setSelectedComponent('os')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Layers}
-                    title="Chipset Driver"
-                    value={cleanValue(stats.chipset_driver)}
-                    confidence={getConfidence(stats.chipset_driver)}
-                  />
+                    <HardwareInfoCard
+                      icon={Layers}
+                      title="Chipset Driver"
+                      value={cleanValue(stats.chipset_driver)}
+                      confidence={getConfidence(stats.chipset_driver)}
+                      clickable
+                      active={selectedComponent === 'chipset'}
+                      onClick={() => setSelectedComponent('chipset')}
+                    />
 
-                  <HardwareInfoCard
-                    icon={Calendar}
-                    title="System Age"
-                    subtitle="Since OS Install"
-                    value={cleanValue(stats.system_age)}
-                    confidence={getConfidence(stats.system_age)}
-                    warningTag={!isDetected(stats.system_age) ? 'Needs Rescan' : undefined}
+                    <HardwareInfoCard
+                      icon={Calendar}
+                      title="System Age"
+                      subtitle="Since OS Install"
+                      value={cleanValue(stats.system_age)}
+                      confidence={getConfidence(stats.system_age)}
+                      warningTag={!isDetected(stats.system_age) ? 'Needs Rescan' : undefined}
+                      clickable
+                      active={selectedComponent === 'age'}
+                      onClick={() => setSelectedComponent('age')}
+                    />
+                  </div>
+
+                  <ComponentWorkloadPanel
+                    stats={stats}
+                    selectedComponent={selectedComponent}
+                    onClear={() => setSelectedComponent(null)}
                   />
-                </div>
+                </>
               )}
 
               <div className="mt-5 rounded-xl border border-[#30363d] bg-[#0d1117] px-4 py-3 text-sm text-gray-500">
