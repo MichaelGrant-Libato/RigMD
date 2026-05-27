@@ -24,6 +24,78 @@ _static_cache_time = None
 CACHE_DURATION_SECONDS = 60
 
 
+BROWSER_PROCESS_NAMES = {
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
+    "opera.exe", "opera_gx.exe", "vivaldi.exe",
+}
+
+GAME_PROCESS_HINTS = {
+    "valorant", "roblox", "genshin", "starrail", "fortnite",
+    "cs2", "dota2", "league", "minecraft", "steam.exe",
+    "epicgameslauncher.exe", "riotclientservices.exe",
+}
+
+
+def get_process_insights():
+    process_totals = {}
+    browser_memory_mb = 0
+    browser_process_count = 0
+    game_processes = []
+
+    for proc in psutil.process_iter(["pid", "name", "memory_info"]):
+        try:
+            name = (proc.info.get("name") or "unknown").lower()
+            memory_info = proc.info.get("memory_info")
+            memory_mb = round((getattr(memory_info, "rss", 0) or 0) / (1024 * 1024), 2)
+
+            if memory_mb <= 0:
+                continue
+
+            if name not in process_totals:
+                process_totals[name] = {
+                    "name": name,
+                    "process_count": 0,
+                    "memory_mb": 0,
+                }
+
+            process_totals[name]["process_count"] += 1
+            process_totals[name]["memory_mb"] += memory_mb
+
+            if name in BROWSER_PROCESS_NAMES:
+                browser_memory_mb += memory_mb
+                browser_process_count += 1
+
+            if name in GAME_PROCESS_HINTS or any(hint in name for hint in GAME_PROCESS_HINTS):
+                if name not in game_processes:
+                    game_processes.append(name)
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:
+            continue
+
+    top_memory_apps = sorted(
+        process_totals.values(),
+        key=lambda app: app["memory_mb"],
+        reverse=True,
+    )[:8]
+
+    for app in top_memory_apps:
+        app["memory_mb"] = round(app["memory_mb"], 2)
+
+    browser_memory_mb = round(browser_memory_mb, 2)
+
+    return {
+        "browser_detected": browser_process_count > 0,
+        "browser_process_count": browser_process_count,
+        "browser_memory_mb": browser_memory_mb,
+        "browser_heavy": browser_process_count >= 8 or browser_memory_mb >= 1024,
+        "game_detected": len(game_processes) > 0,
+        "game_processes": game_processes[:5],
+        "top_memory_apps": top_memory_apps,
+    }
+
+
 def default_static_hardware():
     return {
         "cpu_name": platform.processor() or "Unknown CPU",
@@ -228,6 +300,8 @@ def get_live_hardware_stats():
         except Exception:
             continue
 
+    process_insights = get_process_insights()
+
     return {
         "os_version": static_data["os_version"],
         "system_age": static_data["system_age"],
@@ -256,6 +330,7 @@ def get_live_hardware_stats():
             "usage_percent": disk_usage_percent,
         },
         "all_disks": disk_info,
+        "process_insights": process_insights,
     }
 
 
