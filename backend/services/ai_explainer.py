@@ -23,9 +23,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-1.5-flash"   # fast + cheap; swap to gemini-1.5-pro if needed
+GEMINI_MODEL = "gemini-1.5-flash"  
 
-# Initialise once at import time (safe to call multiple times)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
