@@ -147,7 +147,9 @@ RigMD/
 │   │   ├── dashboard.py
 │   │   ├── hardware.py
 │   │   ├── history.py
+│   │   ├── profile.py
 │   │   ├── recurring.py
+│   │   ├── remediation.py
 │   │   └── warning_signs.py
 │   │
 │   ├── schemas/
@@ -155,7 +157,10 @@ RigMD/
 │   │   └── profile_schema.py
 │   │
 │   ├── services/
-│   │   └── diagnostic_engine.py
+│   │   ├── ai_explainer.py
+│   │   ├── diagnostic_engine.py
+│   │   ├── remediation_service.py
+│   │   └── session_store.py
 │   │
 │   ├── config.py
 │   ├── database.py
@@ -175,15 +180,23 @@ RigMD/
 │   │   │
 │   │   ├── components/
 │   │   │   ├── AppSidebar.tsx
+│   │   │   ├── HardwareCard.tsx
 │   │   │   └── TopHeader.tsx
 │   │   │
 │   │   ├── pages/
 │   │   │   ├── DiagnosticHistoryView.tsx
+│   │   │   ├── DiagnosticIntakeReview.tsx
+│   │   │   ├── DiagnosticResultView.tsx
 │   │   │   ├── HardwareDashboard.tsx
+│   │   │   ├── HelpScopeView.tsx
+│   │   │   ├── NewDiagnosisView.tsx
 │   │   │   ├── RecurringPatternsView.tsx
 │   │   │   ├── ReportsView.tsx
 │   │   │   ├── SystemProfileView.tsx
 │   │   │   └── WarningSignsView.tsx
+│   │   │
+│   │   ├── services/
+│   │   │   └── profileService.ts
 │   │   │
 │   │   ├── types/
 │   │   │   └── rigmd.ts
@@ -231,6 +244,8 @@ profiles
 ├── system_age
 └── created_at
 ```
+
+Note: `profiles.storage_details` stores per-drive hardware data as JSONB, including detected drive model, storage type, size, interface, usage percentage, bus type, media type, and detection source when available.
 
 ### sessions
 
@@ -462,6 +477,10 @@ npm run dev
 | GET | `/api/hardware/live` | Get live hardware/system telemetry |
 | POST | `/api/hardware/refresh` | Refresh hardware cache |
 | GET | `/api/dashboard/summary` | Get home dashboard summary |
+| POST | `/api/profiles/save` | Save the detected hardware profile |
+| GET | `/api/profiles` | Get saved hardware profiles |
+| GET | `/api/profiles/{profile_id}` | Get one saved hardware profile |
+| PUT | `/api/profiles/{profile_id}` | Update one saved hardware profile |
 | POST | `/api/diagnose/` | Run diagnostic engine |
 | GET | `/api/history/sessions` | Get diagnostic history sessions |
 | GET | `/api/history/sessions/{session_id}` | Get one diagnostic session detail |
@@ -562,10 +581,17 @@ RigMD can detect:
 - GPU driver
 - Storage size
 - Storage usage
-- Storage type
+- Storage type, including NVMe SSD, SATA SSD, generic SSD, HDD, or Unknown
 - Windows version
 - Chipset or motherboard proxy
 - System age based on OS install date
+
+Storage type detection uses Windows physical disk metadata when available:
+
+- `MSFT_PhysicalDisk.MediaType` helps identify SSD vs HDD.
+- `MSFT_PhysicalDisk.BusType` helps distinguish NVMe vs SATA.
+- Model and interface heuristics are used only as fallback signals.
+- Per-drive storage details are saved in `profiles.storage_details` as JSONB.
 
 ---
 
@@ -623,6 +649,8 @@ If the response contains:
 ```
 
 then the backend database query failed.
+
+The dashboard summary endpoint intentionally returns HTTP 200 with `database_warning` when database-backed dashboard data is unavailable. This avoids frontend polling spam while still showing the database warning banner.
 
 Fix your:
 

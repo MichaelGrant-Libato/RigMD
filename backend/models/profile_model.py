@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -19,6 +19,7 @@ class Profile(Base):
     ram_capacity = Column(String, nullable=False)
     storage_type = Column(String, nullable=False)       # e.g. SSD, HDD, NVMe
     storage_capacity = Column(String, nullable=False)   # e.g. 512GB
+    storage_details = Column(JSONB, nullable=True)      # Per-drive details from live hardware scan
     os_version = Column(String, nullable=False)         # e.g. Windows 11 23H2
     gpu_driver = Column(String, nullable=True)          # e.g. 556.12
     chipset_driver = Column(String, nullable=True)

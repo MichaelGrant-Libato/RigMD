@@ -11,6 +11,21 @@ export interface HardwareStats {
     type: string;
     size_gb: number;
     interface: string;
+    media_type?: string | null;
+    bus_type?: string | null;
+    detection_source?: string | null;
+    disk_index?: number | null;
+    used_gb?: number | null;
+    usage_percent?: number | null;
+    volumes?: Array<{
+      drive: string;
+      mountpoint: string;
+      fstype: string;
+      disk_index?: number | null;
+      total_gb: number;
+      used_gb: number;
+      usage_percent: number;
+    }>;
   }>;
   cpu: {
     name: string;
@@ -32,6 +47,7 @@ export interface HardwareStats {
   };
   disk: {
     total_gb: number;
+    used_gb?: number;
     usage_percent: number;
   };
     process_insights?: {

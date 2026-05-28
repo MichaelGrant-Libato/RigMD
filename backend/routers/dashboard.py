@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
-from backend.database import get_db
+from backend.config import DATABASE_CONFIG_ERROR
+from backend.database import SessionLocal
 
 # Important: import Profile so SQLAlchemy can resolve Session.profile relationship
 from backend.models.profile_model import Profile  # noqa: F401
@@ -98,7 +99,7 @@ def session_to_summary(session: Session | None) -> dict[str, Any] | None:
 
 
 @router.get("/summary")
-def get_dashboard_summary(db: DbSession = Depends(get_db)):
+def get_dashboard_summary():
     """
     Dynamic dashboard data.
 
@@ -106,6 +107,14 @@ def get_dashboard_summary(db: DbSession = Depends(get_db)):
     from the database. If the database has no records yet, it returns empty
     dashboard values instead of fake hardcoded values.
     """
+    if SessionLocal is None:
+        return {
+            **empty_dashboard_response(),
+            "database_warning": DATABASE_CONFIG_ERROR or "Database is not configured.",
+        }
+
+    db: DbSession = SessionLocal()
+
     try:
         now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
@@ -227,3 +236,5 @@ def get_dashboard_summary(db: DbSession = Depends(get_db)):
             **empty_dashboard_response(),
             "database_warning": str(error),
         }
+    finally:
+        db.close()

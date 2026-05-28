@@ -25,6 +25,7 @@ import {
 
 import TopHeader from '../components/TopHeader';
 import type { HardwareStats } from '../types/rigmd';
+import { saveHardwareProfile } from '../services/profileService';
 
 interface SystemProfileViewProps {
   stats: HardwareStats | null;
@@ -98,6 +99,14 @@ function formatLastUpdated(value: Date | null) {
 
 function getConfidence(value: string | number | null | undefined): 'High Confidence' | 'Low Confidence' {
   return isDetected(value) ? 'High Confidence' : 'Low Confidence';
+}
+
+function formatStorageSize(sizeGb: number) {
+  return sizeGb >= 1000 ? `${(sizeGb / 1024).toFixed(1)} TB` : `${sizeGb} GB`;
+}
+
+function formatStorageUsage(usagePercent: number | null | undefined) {
+  return typeof usagePercent === 'number' ? `${usagePercent}% Full` : 'Usage unavailable';
 }
 
 function getConfidenceStyle(confidence: HardwareInfoCardProps['confidence']) {
@@ -497,10 +506,8 @@ function ComponentWorkloadPanel({
                     typeColor = "bg-orange-900/30 text-orange-300";
                   }
                   
-                  // Format size display
-                  const sizeDisplay = drive.size_gb >= 1000 
-                    ? `${(drive.size_gb / 1024).toFixed(0)}TB`
-                    : `${drive.size_gb}GB`;
+                  const sizeDisplay = formatStorageSize(drive.size_gb);
+                  const usageDisplay = formatStorageUsage(drive.usage_percent);
                   
                   return (
                     <div key={idx} className="rounded-lg border border-[#30363d] bg-[#0d1117] p-4">
@@ -509,6 +516,12 @@ function ComponentWorkloadPanel({
                           <p className="text-xs font-mono font-semibold text-gray-400">Storage{String(idx).padStart(2, '0')}</p>
                           <p className="mt-2 text-lg font-semibold text-gray-100">{sizeDisplay} {drive.type}</p>
                           <p className="text-xs text-gray-500 mt-1">{drive.model || 'Unknown Model'}</p>
+                          <p className="mt-2 text-sm font-semibold text-cyan-400">{usageDisplay}</p>
+                          {drive.volumes && drive.volumes.length > 0 && (
+                            <p className="mt-1 text-xs text-gray-500">
+                              Volumes: {drive.volumes.map((volume) => `${volume.drive} ${volume.usage_percent}%`).join(', ')}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -579,6 +592,46 @@ export default function SystemProfileView({
   onRefreshHardware,
 }: SystemProfileViewProps) {
   const [selectedComponent, setSelectedComponent] = useState<ComponentInsight>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleSaveProfile = async () => {
+    if (!stats) {
+      setSaveMessage({ type: 'error', text: 'Hardware stats not yet loaded. Please wait.' });
+      return;
+    }
+
+    setIsSavingProfile(true);
+    setSaveMessage(null);
+
+    try {
+      const payload = {
+        cpu_model: cleanValue(stats.cpu.name),
+        ram_capacity: `${stats.ram.total_gb} GB`,
+        storage_type: cleanValue(stats.storage_type),
+        storage_capacity: `${stats.disk.total_gb} GB`,
+        storage_details: stats.storage_drives ?? null,
+        os_version: cleanValue(stats.os_version),
+        gpu_driver: stats.gpu.driver !== 'Unknown' ? cleanValue(stats.gpu.driver) : null,
+        chipset_driver: stats.chipset_driver !== 'Standard/Auto-Managed' ? cleanValue(stats.chipset_driver) : null,
+        system_age: stats.system_age !== 'Unknown' ? cleanValue(stats.system_age) : null,
+      };
+
+      const response = await saveHardwareProfile(payload);
+      setSaveMessage({
+        type: 'success',
+        text: `✓ Hardware profile saved successfully (ID: ${response.id.substring(0, 8)}...)`,
+      });
+
+      // Clear the success message after 5 seconds
+      setTimeout(() => setSaveMessage(null), 5000);
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : 'Unknown error occurred';
+      setSaveMessage({ type: 'error', text: errorText });
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   return (
     <>
@@ -697,16 +750,14 @@ export default function SystemProfileView({
 
                     {stats.storage_drives && stats.storage_drives.length > 0 ? (
                       stats.storage_drives.map((drive, idx) => {
-                        const sizeDisplay = drive.size_gb >= 1000
-                          ? `${(drive.size_gb / 1024).toFixed(0)}TB`
-                          : `${drive.size_gb}GB`;
+                        const sizeDisplay = formatStorageSize(drive.size_gb);
                         return (
                           <HardwareInfoCard
                             key={idx}
                             icon={HardDrive}
                             title={`Storage${String(idx).padStart(2, '0')}`}
                             subtitle="Real-Time"
-                            value={`${sizeDisplay} ${drive.type} (${stats.disk.usage_percent}% Full)`}
+                            value={`${sizeDisplay} ${drive.type} (${formatStorageUsage(drive.usage_percent)})`}
                             confidence={getConfidence(drive.model)}
                             clickable
                             active={selectedComponent === 'storage'}
@@ -772,12 +823,26 @@ export default function SystemProfileView({
                 RigMD automatically detects your PC profile and uses it as the basis for all diagnostic sessions. Run a system scan to refresh detected values.
               </div>
 
+              {saveMessage && (
+                <div
+                  className={`mt-5 rounded-lg border px-4 py-3 text-sm font-medium ${
+                    saveMessage.type === 'success'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                      : 'border-red-500/30 bg-red-500/10 text-red-400'
+                  }`}
+                >
+                  {saveMessage.text}
+                </div>
+              )}
+
               <button
                 type="button"
-                className="mt-5 flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-400 transition-colors hover:bg-cyan-500/20"
+                onClick={handleSaveProfile}
+                disabled={isSavingProfile || !stats}
+                className="mt-5 flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-400 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Database size={16} />
-                Save Hardware Profile
+                <Database size={16} className={isSavingProfile ? 'animate-spin' : ''} />
+                {isSavingProfile ? 'Saving Profile...' : 'Save Hardware Profile'}
               </button>
             </section>
           </div>

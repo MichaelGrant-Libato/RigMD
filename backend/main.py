@@ -10,7 +10,7 @@ from backend.database import get_db
 from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 from backend.services.diagnostic_engine import run_diagnostic
-from backend.routers import hardware, dashboard, history, recurring, warning_signs
+from backend.routers import hardware, dashboard, history, recurring, warning_signs, profile
 from backend.routers.remediation import router as remediation_router
 
 app = FastAPI(
@@ -37,6 +37,7 @@ app.include_router(history.router)
 app.include_router(recurring.router)
 app.include_router(warning_signs.router)
 app.include_router(remediation_router)
+app.include_router(profile.router)
 
 
 @app.get("/")
