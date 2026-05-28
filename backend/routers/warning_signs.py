@@ -130,7 +130,11 @@ def collect_observed_warning_texts(db: DbSession) -> list[str]:
         if row.warning_sign:
             observed_texts.append(row.warning_sign)
 
-    session_rows = db.query(DiagnosticSession).all()
+    # Only collect warning signs from sessions where an actual issue was found
+    # Exclude "No active issue detected" sessions
+    session_rows = db.query(DiagnosticSession).filter(
+        DiagnosticSession.diagnosed_category != "No active issue detected"
+    ).all()
 
     for row in session_rows:
         observed_texts.extend(split_warning_signs(row.warning_signs))

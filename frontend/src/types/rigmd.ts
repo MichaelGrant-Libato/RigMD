@@ -6,6 +6,12 @@ export interface HardwareStats {
   system_age: string;
   chipset_driver: string;
   storage_type: string;
+  storage_drives?: Array<{
+    model: string;
+    type: string;
+    size_gb: number;
+    interface: string;
+  }>;
   cpu: {
     name: string;
     usage_percent: number;

@@ -230,14 +230,14 @@ function ProfileField({
 }) {
   return (
     <div className="flex min-w-0 items-center justify-between border-b border-[#26303a] py-3 last:border-b-0">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="rounded-lg bg-[#0d1117] p-2 text-cyan-400">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="rounded-lg bg-[#0d1117] p-2 text-cyan-400 shrink-0 mt-1">
           <Icon size={16} />
         </div>
 
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-gray-500">{label}</p>
-          <p className="truncate text-sm font-semibold text-white">{value}</p>
+          <p className="whitespace-pre-line text-sm font-semibold text-white">{value}</p>
         </div>
       </div>
 
@@ -278,9 +278,18 @@ function SystemStatusSummaryCard({
       processor: cleanValue(stats?.cpu?.name),
       memory: stats?.ram?.total_gb ? `${stats.ram.total_gb} GB` : 'Detecting...',
       storage:
-        stats?.disk?.total_gb && stats?.storage_type
-          ? `${stats.disk.total_gb} GB ${stats.storage_type}`
-          : 'Detecting...',
+        stats?.storage_drives && stats.storage_drives.length > 0
+          ? stats.storage_drives
+              .map((drive) => {
+                const size = drive.size_gb >= 1000 
+                  ? `${(drive.size_gb / 1024).toFixed(0)}TB` 
+                  : `${drive.size_gb}GB`;
+                return `${size} ${drive.type}`;
+              })
+              .join('\n')
+          : stats?.disk?.total_gb && stats?.storage_type
+            ? `${stats.disk.total_gb} GB ${stats.storage_type}`
+            : 'Detecting...',
       operatingSystem: cleanValue(stats?.os_version),
       gpuDriver: cleanValue(stats?.gpu?.driver),
       chipsetDriver: cleanValue(stats?.chipset_driver),
