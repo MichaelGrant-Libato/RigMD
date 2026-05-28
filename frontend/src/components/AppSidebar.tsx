@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import type { LiveDataStatus } from './TopHeader';
 import type { DashboardSummary, PageKey } from '../types/rigmd';
 
 const HISTORY_SEEN_KEY = 'rigmd_seen_history_count';
@@ -86,6 +87,61 @@ interface AppSidebarProps {
   setActivePage: (page: PageKey) => void;
   dashboard: DashboardSummary;
   liveWarningActive?: boolean;
+  liveStatus?: LiveDataStatus;
+  hardwareUpdatedAt?: Date | null;
+}
+
+function getStatusCopy(status: LiveDataStatus) {
+  if (status === 'syncing') {
+    return {
+      title: 'System Status',
+      label: 'Syncing Hardware',
+      dotClassName: 'bg-cyan-400 animate-pulse',
+      textClassName: 'text-cyan-400',
+    };
+  }
+
+  if (status === 'offline') {
+    return {
+      title: 'System Status',
+      label: 'Offline',
+      dotClassName: 'bg-red-400',
+      textClassName: 'text-red-400',
+    };
+  }
+
+  if (status === 'stale') {
+    return {
+      title: 'System Status',
+      label: 'Stale Data',
+      dotClassName: 'bg-orange-400',
+      textClassName: 'text-orange-400',
+    };
+  }
+
+  return {
+    title: 'System Status',
+    label: 'Live Scan Active',
+    dotClassName: 'bg-emerald-400',
+    textClassName: 'text-emerald-400',
+  };
+}
+
+function formatRelativeUpdate(value: Date | null | undefined) {
+  if (!value) {
+    return 'Waiting for first scan';
+  }
+
+  const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
+
+  if (seconds < 5) return 'Updated just now';
+  if (seconds < 60) return `Updated ${seconds}s ago`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Updated ${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  return `Updated ${hours}h ago`;
 }
 
 export default function AppSidebar({
@@ -93,6 +149,8 @@ export default function AppSidebar({
   setActivePage,
   dashboard,
   liveWarningActive,
+  liveStatus = 'syncing',
+  hardwareUpdatedAt,
 }: AppSidebarProps) {
   const totalSessions = dashboard.totals?.total_sessions ?? 0;
   const recurringIssues = dashboard.recurring_issues_count ?? 0;
@@ -104,6 +162,7 @@ export default function AppSidebar({
   const recurringBadgeCount = Math.max(recurringIssues - seenRecurringCount, 0);
 
   const warningAlert = liveWarningActive ?? (dashboard.warning_signs_active_count ?? 0) > 0;
+  const statusCopy = getStatusCopy(liveStatus);
 
   useEffect(() => {
     if (activePage === 'diagnosticHistory') {
@@ -216,14 +275,16 @@ export default function AppSidebar({
 
       <div className="m-4 rounded-xl border border-[#253041] bg-[#1b2738] p-4">
         <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500">
-          <Activity size={14} className="text-emerald-400" />
-          System Status
+          <Activity size={14} className={statusCopy.textClassName} />
+          {statusCopy.title}
         </div>
 
-        <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
-          Profile Active
+        <div className={`flex items-center gap-2 text-sm font-semibold ${statusCopy.textClassName}`}>
+          <span className={`h-2 w-2 rounded-full ${statusCopy.dotClassName}`} />
+          {statusCopy.label}
         </div>
+
+        <p className="mt-2 text-xs text-slate-500">{formatRelativeUpdate(hardwareUpdatedAt)}</p>
       </div>
     </aside>
   );
