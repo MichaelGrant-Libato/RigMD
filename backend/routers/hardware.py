@@ -98,6 +98,7 @@ def get_process_insights():
 
 def default_static_hardware():
     return {
+        "device_name": platform.node() or "Unknown PC",
         "cpu_name": platform.processor() or "Unknown CPU",
         "gpu_name": "Unknown",
         "gpu_driver": "Unknown",
@@ -120,6 +121,13 @@ def get_static_hardware_fresh():
     try:
         pythoncom.CoInitialize()
         w = wmi.WMI()
+
+        try:
+            systems = w.Win32_ComputerSystem()
+            if systems and systems[0].Name:
+                data["device_name"] = systems[0].Name.strip()
+        except Exception as error:
+            logger.error(f"Device name detection failed: {error}")
 
         try:
             processors = w.Win32_Processor()
@@ -303,6 +311,7 @@ def get_live_hardware_stats():
     process_insights = get_process_insights()
 
     return {
+        "device_name": static_data["device_name"],
         "os_version": static_data["os_version"],
         "system_age": static_data["system_age"],
         "chipset_driver": static_data["chipset_driver"],
