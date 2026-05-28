@@ -57,7 +57,6 @@ type ComponentInsight =
   | 'gpu'
   | 'gpuDriver'
   | 'storage'
-  | 'storageType'
   | 'os'
   | 'chipset'
   | 'age'
@@ -355,7 +354,6 @@ function ComponentWorkloadPanel({
     gpu: 'GPU Workload Details',
     gpuDriver: 'GPU Driver Details',
     storage: 'Storage Details',
-    storageType: 'Storage Type Details',
     os: 'Operating System Details',
     chipset: 'Chipset Driver Details',
     age: 'System Age Details',
@@ -479,27 +477,58 @@ function ComponentWorkloadPanel({
 
       {selectedComponent === 'storage' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <MetricTile label="Drive Usage" value={`${stats.disk.usage_percent}% Full`} tone={diskTone} />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <MetricTile label="Total Usage" value={`${stats.disk.usage_percent}% Full`} tone={diskTone} />
             <MetricTile label="Total Capacity" value={`${stats.disk.total_gb} GB`} />
-            <MetricTile label="Detected Type" value={cleanValue(stats.storage_type)} />
           </div>
+
+          {stats.storage_drives && stats.storage_drives.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-gray-300">Detected System Information - Storage</h3>
+              <div className="space-y-2">
+                {stats.storage_drives.map((drive, idx) => {
+                  // Determine color for type badge
+                  let typeColor = "bg-gray-700/30 text-gray-300"; // Unknown
+                  if (drive.type.includes("NVMe")) {
+                    typeColor = "bg-blue-900/30 text-blue-300";
+                  } else if (drive.type.includes("SATA")) {
+                    typeColor = "bg-purple-900/30 text-purple-300";
+                  } else if (drive.type.includes("HDD")) {
+                    typeColor = "bg-orange-900/30 text-orange-300";
+                  }
+                  
+                  // Format size display
+                  const sizeDisplay = drive.size_gb >= 1000 
+                    ? `${(drive.size_gb / 1024).toFixed(0)}TB`
+                    : `${drive.size_gb}GB`;
+                  
+                  return (
+                    <div key={idx} className="rounded-lg border border-[#30363d] bg-[#0d1117] p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <p className="text-xs font-mono font-semibold text-gray-400">Storage{String(idx).padStart(2, '0')}</p>
+                          <p className="mt-2 text-lg font-semibold text-gray-100">{sizeDisplay} {drive.type}</p>
+                          <p className="text-xs text-gray-500 mt-1">{drive.model || 'Unknown Model'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {stats.storage_drives.some(d => d.type === "Unknown" || d.type.includes("Unknown")) && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-900/10 p-3 text-xs text-amber-200">
+                  <p className="font-medium">ℹ️ Drive Detection Note</p>
+                  <p className="mt-1 text-amber-200/80">Some drives could not be automatically classified. 
+                    Check Device Manager or Disk Management for more details about unidentified drives.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
             Storage pressure becomes more likely to affect performance when a drive is close to 85-90% full.
             At your current level, RigMD treats storage as a supporting signal unless the user reports file errors,
             saving problems, or loading delays.
-          </p>
-        </div>
-      )}
-
-      {selectedComponent === 'storageType' && (
-        <div className="space-y-4">
-          <MetricTile label="Detected Storage Type" value={cleanValue(stats.storage_type)} />
-
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
-            NVMe SSDs are generally fast. If the system still feels slow, the cause is more likely RAM pressure,
-            browser load, background apps, startup apps, or software activity rather than raw drive speed.
           </p>
         </div>
       )}
@@ -666,26 +695,37 @@ export default function SystemProfileView({
                       onClick={() => setSelectedComponent('gpuDriver')}
                     />
 
-                    <HardwareInfoCard
-                      icon={HardDrive}
-                      title="Storage"
-                      subtitle="Real-Time"
-                      value={`${stats.disk.total_gb} GB ${cleanValue(stats.storage_type)} (${stats.disk.usage_percent}% Full)`}
-                      confidence={getConfidence(stats.disk.total_gb)}
-                      clickable
-                      active={selectedComponent === 'storage'}
-                      onClick={() => setSelectedComponent('storage')}
-                    />
-
-                    <HardwareInfoCard
-                      icon={Database}
-                      title="Storage Type"
-                      value={cleanValue(stats.storage_type)}
-                      confidence={getConfidence(stats.storage_type)}
-                      clickable
-                      active={selectedComponent === 'storageType'}
-                      onClick={() => setSelectedComponent('storageType')}
-                    />
+                    {stats.storage_drives && stats.storage_drives.length > 0 ? (
+                      stats.storage_drives.map((drive, idx) => {
+                        const sizeDisplay = drive.size_gb >= 1000
+                          ? `${(drive.size_gb / 1024).toFixed(0)}TB`
+                          : `${drive.size_gb}GB`;
+                        return (
+                          <HardwareInfoCard
+                            key={idx}
+                            icon={HardDrive}
+                            title={`Storage${String(idx).padStart(2, '0')}`}
+                            subtitle="Real-Time"
+                            value={`${sizeDisplay} ${drive.type} (${stats.disk.usage_percent}% Full)`}
+                            confidence={getConfidence(drive.model)}
+                            clickable
+                            active={selectedComponent === 'storage'}
+                            onClick={() => setSelectedComponent('storage')}
+                          />
+                        );
+                      })
+                    ) : (
+                      <HardwareInfoCard
+                        icon={HardDrive}
+                        title="Storage"
+                        subtitle="Real-Time"
+                        value={`${stats.disk.total_gb} GB ${cleanValue(stats.storage_type)} (${stats.disk.usage_percent}% Full)`}
+                        confidence={getConfidence(stats.disk.total_gb)}
+                        clickable
+                        active={selectedComponent === 'storage'}
+                        onClick={() => setSelectedComponent('storage')}
+                      />
+                    )}
 
                     <HardwareInfoCard
                       icon={Terminal}

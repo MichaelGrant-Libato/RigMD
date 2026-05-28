@@ -107,6 +107,7 @@ def default_static_hardware():
         "os_version": f"Windows {platform.release()}",
         "system_age": "Unknown",
         "storage_type": "Unknown",
+        "all_storage_drives": [],
         "chipset_driver": "Standard/Auto-Managed",
     }
 
@@ -203,22 +204,58 @@ def get_static_hardware_fresh():
 
         try:
             drives = w.Win32_DiskDrive()
+            storage_details = []
             storage_types = []
 
             for drive in drives:
                 model = (drive.Model or "").lower()
                 media_type = (drive.MediaType or "").lower()
                 interface_type = (drive.InterfaceType or "").lower()
+                size_bytes = drive.Size or 0
+                size_gb = round(int(size_bytes) / (1024**3), 2) if size_bytes else 0
+                
+                logger.info(f"\n=== Drive {len(storage_details)} ===")
+                logger.info(f"Model: '{model}', MediaType: '{media_type}', Interface: '{interface_type}', Size: {size_gb}GB")
+                
+                # Enhanced detection logic with size heuristics
+                detected_type = "Unknown"
+                
+                # NVMe Detection - check model for NVMe keywords and brands
+                if ("nvme" in model or "nvme" in interface_type or 
+                    any(brand in model for brand in ["samsung 980", "samsung 970", "samsung 990", 
+                                                      "western digital sn850", "wd_black", "kioxia",
+                                                      "crucial p5", "kingston", "corsair", "adata", "intel"])):
+                    detected_type = "NVMe SSD"
+                # SATA SSD Detection - check model and use size heuristics
+                elif (any(brand in model for brand in ["samsung 870", "samsung 860", "samsung 850",
+                                                        "crucial mx", "crucial bx", "sandisk", "intel 660p"]) or
+                      ("ssd" in model or "solid state" in media_type) or
+                      (size_gb < 300 and size_gb >= 100)):  # 100-300GB typically SSD
+                    detected_type = "SATA SSD"
+                # HDD Detection - check model and size heuristics
+                elif (any(brand in model for brand in ["seagate", "western digital", "wd_blue", "wdc", "hitachi"]) or
+                      "fixed hard disk" in media_type or "hdd" in model or
+                      size_gb > 500):  # Drives over 500GB typically HDD
+                    detected_type = "HDD"
+                # Small drives (< 100GB) without SSD marker - likely old SSD or rare case
+                elif size_gb < 100:
+                    detected_type = "SATA SSD"
+                
+                storage_types.append(detected_type)
+                storage_details.append({
+                    "model": drive.Model or "Unknown",
+                    "type": detected_type,
+                    "size_gb": size_gb,
+                    "interface": drive.InterfaceType or "Unknown",
+                })
+                
+                logger.info(f"→ Classified as: {detected_type}")
 
-                if "nvme" in model or "nvme" in interface_type:
-                    storage_types.append("NVMe SSD")
-                elif "ssd" in model or "solid state" in media_type:
-                    storage_types.append("SATA SSD")
-                elif "fixed hard disk" in media_type or "hdd" in model:
-                    storage_types.append("HDD")
-                else:
-                    storage_types.append("Unknown")
+            # Store all drive details for later use
+            data["all_storage_drives"] = storage_details
+            logger.info(f"Total drives detected: {len(storage_details)}")
 
+            # Primary storage type (for backward compatibility) - prefer NVMe if available
             if "NVMe SSD" in storage_types:
                 data["storage_type"] = "NVMe SSD"
             elif "SATA SSD" in storage_types:
@@ -226,6 +263,7 @@ def get_static_hardware_fresh():
             elif "HDD" in storage_types:
                 data["storage_type"] = "HDD"
             elif storage_types:
+                # Use the first detected type even if it's "Unknown (Possible SSD)"
                 data["storage_type"] = storage_types[0]
 
         except Exception as error:
@@ -316,6 +354,7 @@ def get_live_hardware_stats():
         "system_age": static_data["system_age"],
         "chipset_driver": static_data["chipset_driver"],
         "storage_type": static_data["storage_type"],
+        "storage_drives": static_data.get("all_storage_drives", []),
         "cpu": {
             "name": static_data["cpu_name"],
             "usage_percent": cpu_percent,
