@@ -49,6 +49,13 @@ interface DiagnosticReport {
   recommended_next_step: string;
   proof?: DiagnosticProof[];
   verification_target?: VerificationTarget;
+  session_id?: string;
+  resolution_status?: string;
+  resolution_checked_at?: string | null;
+  resolution_summary?: string;
+  resolution_proof?: DiagnosticProof[];
+  last_action_status?: string | null;
+  last_action_summary?: string;
 }
 
 interface RemediationAction {
@@ -439,6 +446,24 @@ function buildActionProof(result: ActionResult) {
   return proof;
 }
 
+function getApiErrorMessage(err: any, fallback: string) {
+  const detail = err?.response?.data?.detail;
+
+  if (typeof detail === 'string') return detail;
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => item?.msg || item?.message || JSON.stringify(item))
+      .join(' ');
+  }
+
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+
+  return err?.message || fallback;
+}
+
 export default function NewDiagnosisView() {
   const [step, setStep] = useState<number>(1);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -454,6 +479,7 @@ export default function NewDiagnosisView() {
   });
 
   const [loading, setLoading] = useState<boolean>(false);
+  const [checkingResolution, setCheckingResolution] = useState(false);
   const [remediating, setRemediating] = useState<boolean>(false);
   const [inspecting, setInspecting] = useState<boolean>(false);
   const [report, setReport] = useState<DiagnosticReport | null>(null);
@@ -508,6 +534,32 @@ export default function NewDiagnosisView() {
     });
   };
 
+  const handleCheckResolution = async () => {
+  if (!report?.session_id) return;
+
+  setCheckingResolution(true);
+
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/check-resolution`);
+
+    setReport((prev) =>
+      prev
+        ? {
+            ...prev,
+            resolution_status: response.data.resolution_status,
+            resolution_checked_at: response.data.resolution_checked_at,
+            resolution_summary: response.data.resolution_summary,
+            resolution_proof: response.data.resolution_proof,
+          }
+        : prev
+    );
+  } catch {
+    setError('RigMD could not check whether this issue is fixed yet.');
+  } finally {
+    setCheckingResolution(false);
+  }
+};
+
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -558,7 +610,7 @@ export default function NewDiagnosisView() {
       setRemediationActions(actionsResponse.data.actions ?? []);
     } catch (err: any) {
       console.error('Diagnostic error:', err);
-      setError(err.response?.data?.detail || err.message || 'The engine encountered an error parsing the issue.');
+      setError(getApiErrorMessage(err, 'The engine encountered an error parsing the issue.'));
       setStep(4);
     } finally {
       setLoading(false);
@@ -627,12 +679,26 @@ export default function NewDiagnosisView() {
         ...prev,
         [selectedAction.id]: response.data,
       }));
+      if (response.data?.success && report?.session_id) {
+        const statusResponse = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/needs-recheck`);
+
+        setReport((prev) =>
+          prev
+            ? {
+                ...prev,
+                resolution_status: statusResponse.data.resolution_status,
+                last_action_status: statusResponse.data.last_action_status,
+                last_action_summary: statusResponse.data.last_action_summary,
+              }
+            : prev
+        );
+      }
     } catch (err: any) {
       setActionResults((prev) => ({
         ...prev,
         [selectedAction.id]: {
           success: false,
-          summary: err.response?.data?.detail || 'The selected action could not be completed.',
+          summary: getApiErrorMessage(err, 'The selected action could not be completed.'),
         },
       }));
     } finally {
@@ -968,6 +1034,39 @@ export default function NewDiagnosisView() {
                         <h5 className="mb-1 text-xs font-bold uppercase tracking-wider text-white">Recommended Next Steps</h5>
                         <p className="text-xs leading-relaxed text-gray-400">{report.recommended_next_step}</p>
                       </div>
+                      {!isNoActiveIssue(report) && report.session_id && (
+                        <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <h5 className="text-xs font-bold uppercase tracking-wider text-white">Resolution Status</h5>
+                              <p className="mt-1 text-xs text-gray-400">
+                                {report.resolution_summary || 'Run a safe action, then check whether the issue is fixed.'}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={checkingResolution}
+                              onClick={handleCheckResolution}
+                              className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-4 py-2 text-xs font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
+                            >
+                              {checkingResolution ? 'Checking...' : 'Check if Fixed'}
+                            </button>
+                          </div>
+
+                          {report.resolution_proof && report.resolution_proof.length > 0 && (
+                            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                              {report.resolution_proof.map((item) => (
+                                <div key={item.label} className="rounded-lg border border-[#253041] bg-[#161b22] p-3">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
+                                  <p className="mt-1 text-xs font-semibold text-white">{item.value}</p>
+                                  <p className="mt-1 text-[11px] text-slate-500">{item.meaning}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {isNoActiveIssue(report) && (
                         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-emerald-300">

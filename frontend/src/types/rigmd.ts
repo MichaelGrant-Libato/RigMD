@@ -75,6 +75,9 @@ export interface DashboardSessionSummary {
   display_date: string | null;
   days_ago: number | null;
   is_recurring: boolean;
+  resolution_status?: string;
+  resolution_checked_at?: string | null;
+  resolution_summary?: string;
 }
 
 // Map SessionSummary to your DashboardSessionSummary structure so DiagnosticHistoryView is satisfied
