@@ -25,12 +25,13 @@ import {
 } from 'lucide-react';
 
 import AppSidebar from '../components/AppSidebar';
-import TopHeader from '../components/TopHeader';
+import TopHeader, { HeaderStatusProvider, type LiveDataStatus } from '../components/TopHeader';
 import SystemProfileView from './SystemProfileView';
 import DiagnosticHistoryView from './DiagnosticHistoryView';
 import RecurringPatternsView from './RecurringPatternsView';
 import WarningSignsView from './WarningSignsView';
 import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
+import HelpScopeView from './HelpScopeView';
 
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
@@ -689,6 +690,24 @@ export default function HardwareDashboard() {
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
   const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
 
+  const liveStatus: LiveDataStatus = useMemo(() => {
+    if (isRefreshingHardware || (!stats && !error)) {
+      return 'syncing';
+    }
+
+    if (error) {
+      return 'offline';
+    }
+
+    if (!hardwareUpdatedAt || Date.now() - hardwareUpdatedAt.getTime() > 30000) {
+      return 'stale';
+    }
+
+    return 'live';
+  }, [error, hardwareUpdatedAt, isRefreshingHardware, stats]);
+
+  const deviceName = stats?.device_name?.trim() || 'Detecting PC';
+
   const fetchHardware = useCallback(async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/api/hardware/live`);
@@ -787,7 +806,7 @@ export default function HardwareDashboard() {
         return <PlaceholderView title="Settings" subtitle="Application preferences and configuration" />;
 
       case 'help':
-        return <PlaceholderView title="Help / Scope" subtitle="Supported diagnostic scope and limitations" />;
+        return <HelpScopeView />;
 
       default:
         return (
@@ -803,10 +822,18 @@ export default function HardwareDashboard() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#0b1017] font-sans text-gray-200">
-      <AppSidebar activePage={activePage} setActivePage={setActivePage} dashboard={dashboard} />
+      <AppSidebar
+        activePage={activePage}
+        setActivePage={setActivePage}
+        dashboard={dashboard}
+        liveStatus={liveStatus}
+        hardwareUpdatedAt={hardwareUpdatedAt}
+      />
 
       <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-[#0b1017]">
-        {renderPage()}
+        <HeaderStatusProvider deviceName={deviceName} liveStatus={liveStatus}>
+          {renderPage()}
+        </HeaderStatusProvider>
       </main>
     </div>
   );
