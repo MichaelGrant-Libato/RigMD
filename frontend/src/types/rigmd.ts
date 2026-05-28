@@ -1,6 +1,7 @@
 //rigmd.ts
 
 export interface HardwareStats {
+  device_name: string;
   os_version: string;
   system_age: string;
   chipset_driver: string;
