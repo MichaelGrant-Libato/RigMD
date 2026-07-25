@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
 from backend.config import DATABASE_CONFIG_ERROR
-from backend.database import SessionLocal
+from backend.database import get_db, SessionLocal
+from backend.dependencies.client_id import get_client_id
 
 # Important: import Profile so SQLAlchemy can resolve Session.profile relationship
 from backend.models.profile_model import Profile  # noqa: F401
@@ -99,13 +100,16 @@ def session_to_summary(session: Session | None) -> dict[str, Any] | None:
 
 
 @router.get("/summary")
-def get_dashboard_summary():
+def get_dashboard_summary(
+    db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     """
-    Dynamic dashboard data.
+    Dynamic dashboard data scoped to the requesting client.
 
     This endpoint reads saved diagnostic sessions and warning recommendations
-    from the database. If the database has no records yet, it returns empty
-    dashboard values instead of fake hardcoded values.
+    from the database filtered by client_id. If the database has no records yet,
+    it returns empty dashboard values instead of fake hardcoded values.
     """
     if SessionLocal is None:
         return {
@@ -113,35 +117,41 @@ def get_dashboard_summary():
             "database_warning": DATABASE_CONFIG_ERROR or "Database is not configured.",
         }
 
-    db: DbSession = SessionLocal()
-
     try:
         now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
         first_day_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        total_sessions = db.query(Session).count()
+        total_sessions = (
+            db.query(Session)
+            .filter(Session.client_id == client_id)
+            .count()
+        )
 
         this_month_count = (
             db.query(Session)
+            .filter(Session.client_id == client_id)
             .filter(Session.created_at >= first_day_this_month)
             .count()
         )
 
         escalated_count = (
             db.query(Session)
+            .filter(Session.client_id == client_id)
             .filter(Session.action_category.ilike("%escalate%"))
             .count()
         )
 
         last_session = (
             db.query(Session)
+            .filter(Session.client_id == client_id)
             .order_by(Session.created_at.desc())
             .first()
         )
 
         action_rows = (
             db.query(Session.action_category, func.count(Session.id))
+            .filter(Session.client_id == client_id)
             .group_by(Session.action_category)
             .all()
         )
@@ -163,6 +173,7 @@ def get_dashboard_summary():
 
         recurring_rows = (
             db.query(Session.symptom_type, func.count(Session.id))
+            .filter(Session.client_id == client_id)
             .group_by(Session.symptom_type)
             .having(func.count(Session.id) >= 2)
             .all()
@@ -170,10 +181,17 @@ def get_dashboard_summary():
 
         recurring_issues_count = len(recurring_rows)
 
-        warning_signs_active_count = db.query(Recommendation).count()
+        # Count only recommendations linked to this client's sessions
+        warning_signs_active_count = (
+            db.query(Recommendation)
+            .join(Session, Recommendation.session_id == Session.id)
+            .filter(Session.client_id == client_id)
+            .count()
+        )
 
         frequency_rows = (
             db.query(func.date(Session.created_at), func.count(Session.id))
+            .filter(Session.client_id == client_id)
             .filter(Session.created_at >= thirty_days_ago)
             .group_by(func.date(Session.created_at))
             .order_by(func.date(Session.created_at))
@@ -190,6 +208,8 @@ def get_dashboard_summary():
 
         recent_warning_rows = (
             db.query(Recommendation)
+            .join(Session, Recommendation.session_id == Session.id)
+            .filter(Session.client_id == client_id)
             .order_by(Recommendation.created_at.desc())
             .limit(3)
             .all()
@@ -236,5 +256,3 @@ def get_dashboard_summary():
             **empty_dashboard_response(),
             "database_warning": str(error),
         }
-    finally:
-        db.close()

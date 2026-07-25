@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
 from backend.models.session_model import Session as DiagnosticSession
 from backend.models.session_model import Recommendation
 
@@ -121,10 +122,16 @@ def split_warning_signs(raw_warning_signs: str | None) -> list[str]:
     return [item.strip() for item in cleaned.splitlines() if item.strip()]
 
 
-def collect_observed_warning_texts(db: DbSession) -> list[str]:
+def collect_observed_warning_texts(db: DbSession, client_id: str) -> list[str]:
     observed_texts: list[str] = []
 
-    recommendation_rows = db.query(Recommendation).all()
+    # Only fetch recommendations linked to this client's sessions
+    recommendation_rows = (
+        db.query(Recommendation)
+        .join(DiagnosticSession, Recommendation.session_id == DiagnosticSession.id)
+        .filter(DiagnosticSession.client_id == client_id)
+        .all()
+    )
 
     for row in recommendation_rows:
         if row.warning_sign:
@@ -133,6 +140,7 @@ def collect_observed_warning_texts(db: DbSession) -> list[str]:
     # Only collect warning signs from sessions where an actual issue was found
     # Exclude "No active issue detected" sessions
     session_rows = db.query(DiagnosticSession).filter(
+        DiagnosticSession.client_id == client_id,
         DiagnosticSession.diagnosed_category != "No active issue detected"
     ).all()
 
@@ -214,9 +222,10 @@ def get_warning_signs_reference(
     search: str = Query(default=""),
     observed_only: bool = Query(default=False),
     db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ):
     try:
-        observed_texts = collect_observed_warning_texts(db)
+        observed_texts = collect_observed_warning_texts(db, client_id)
         rows = build_reference_rows(
             observed_texts=observed_texts,
             category=category,

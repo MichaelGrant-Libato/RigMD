@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session as DbSession, joinedload
 from sqlalchemy.exc import OperationalError
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
 from backend.models.session_model import Session as DiagnosticSession
 
 router = APIRouter(prefix="/api/diagnosis", tags=["Diagnostic History"])
@@ -81,9 +82,10 @@ def get_recommended_next_step(action_category: str, probable_cause: str) -> str:
     return f"Monitor the issue related to {probable_cause}. Run another diagnostic session if symptoms continue."
 
 
-def build_recurring_lookup(db: DbSession) -> set[str]:
+def build_recurring_lookup(db: DbSession, client_id: str) -> set[str]:
     rows = (
         db.query(DiagnosticSession.symptom_type, func.count(DiagnosticSession.id))
+        .filter(DiagnosticSession.client_id == client_id)
         .group_by(DiagnosticSession.symptom_type)
         .having(func.count(DiagnosticSession.id) >= 2)
         .all()
@@ -154,14 +156,19 @@ def session_to_dict(
     }
 
 
-def build_metrics(db: DbSession) -> dict[str, int]:
+def build_metrics(db: DbSession, client_id: str) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    total_sessions = db.query(DiagnosticSession).count()
+    total_sessions = (
+        db.query(DiagnosticSession)
+        .filter(DiagnosticSession.client_id == client_id)
+        .count()
+    )
 
     recurring_rows = (
         db.query(DiagnosticSession.symptom_type, func.count(DiagnosticSession.id))
+        .filter(DiagnosticSession.client_id == client_id)
         .group_by(DiagnosticSession.symptom_type)
         .having(func.count(DiagnosticSession.id) >= 2)
         .all()
@@ -170,12 +177,14 @@ def build_metrics(db: DbSession) -> dict[str, int]:
 
     escalated = (
         db.query(DiagnosticSession)
+        .filter(DiagnosticSession.client_id == client_id)
         .filter(DiagnosticSession.action_category.ilike("%escalate%"))
         .count()
     )
 
     this_month = (
         db.query(DiagnosticSession)
+        .filter(DiagnosticSession.client_id == client_id)
         .filter(DiagnosticSession.created_at >= month_start)
         .count()
     )
@@ -195,10 +204,15 @@ def get_history_sessions(
     recurring_only: bool = Query(default=False),
     sort: str = Query(default="newest"),
     db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ):
     try:
-        recurring_symptoms = build_recurring_lookup(db)
-        query = db.query(DiagnosticSession).options(joinedload(DiagnosticSession.recommendations))
+        recurring_symptoms = build_recurring_lookup(db, client_id)
+        query = (
+            db.query(DiagnosticSession)
+            .options(joinedload(DiagnosticSession.recommendations))
+            .filter(DiagnosticSession.client_id == client_id)
+        )
 
         if search.strip():
             keyword = f"%{search.strip()}%"
@@ -243,7 +257,7 @@ def get_history_sessions(
         ]
 
         return {
-            "metrics": build_metrics(db),
+            "metrics": build_metrics(db, client_id),
             "sessions": items,
         }
 
@@ -260,13 +274,15 @@ def get_history_sessions(
 def get_history_session_detail(
     session_id: UUID,
     db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ):
     try:
-        recurring_symptoms = build_recurring_lookup(db)
+        recurring_symptoms = build_recurring_lookup(db, client_id)
         session = (
             db.query(DiagnosticSession)
             .options(joinedload(DiagnosticSession.recommendations))
             .filter(DiagnosticSession.id == session_id)
+            .filter(DiagnosticSession.client_id == client_id)
             .first()
         )
 

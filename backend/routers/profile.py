@@ -5,6 +5,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from uuid import UUID
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
 from backend.models.profile_model import Profile
 from backend.schemas.profile_schema import ProfileCreate, ProfileResponse, ProfileUpdate
 
@@ -35,17 +36,23 @@ def ensure_storage_details_column(db: DbSession) -> None:
 
 
 @router.post("/save", response_model=ProfileResponse)
-def save_profile(profile_create: ProfileCreate, db: DbSession = Depends(get_db)):
+def save_profile(
+    profile_create: ProfileCreate,
+    db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     """
-    Save a hardware profile to the database.
-    If a profile with identical specifications already exists, returns the existing profile.
+    Save a hardware profile to the database, scoped to the requesting client.
+    If a profile with identical specifications already exists for this client,
+    returns the existing profile.
     """
     try:
         ensure_storage_details_column(db)
 
-        # Check if a profile with the same specifications already exists
+        # Check if a profile with the same specifications already exists for this client
         existing_profile = (
             db.query(Profile)
+            .filter(Profile.client_id == client_id)
             .filter(Profile.cpu_model == profile_create.cpu_model)
             .filter(Profile.ram_capacity == profile_create.ram_capacity)
             .filter(Profile.storage_type == profile_create.storage_type)
@@ -62,8 +69,9 @@ def save_profile(profile_create: ProfileCreate, db: DbSession = Depends(get_db))
 
             return existing_profile
 
-        # Create new profile
+        # Create new profile tagged to this client
         new_profile = Profile(
+            client_id=client_id,
             cpu_model=profile_create.cpu_model,
             ram_capacity=profile_create.ram_capacity,
             storage_type=profile_create.storage_type,
@@ -99,14 +107,23 @@ def save_profile(profile_create: ProfileCreate, db: DbSession = Depends(get_db))
 
 
 @router.get("/{profile_id}", response_model=ProfileResponse)
-def get_profile(profile_id: UUID, db: DbSession = Depends(get_db)):
+def get_profile(
+    profile_id: UUID,
+    db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     """
-    Retrieve a specific profile by ID.
+    Retrieve a specific profile by ID, scoped to the requesting client.
     """
     try:
         ensure_storage_details_column(db)
 
-        profile = db.query(Profile).filter(Profile.id == profile_id).first()
+        profile = (
+            db.query(Profile)
+            .filter(Profile.id == profile_id)
+            .filter(Profile.client_id == client_id)
+            .first()
+        )
 
         if not profile:
             raise HTTPException(
@@ -126,15 +143,25 @@ def get_profile(profile_id: UUID, db: DbSession = Depends(get_db)):
 
 
 @router.put("/{profile_id}", response_model=ProfileResponse)
-def update_profile(profile_id: UUID, profile_update: ProfileUpdate, db: DbSession = Depends(get_db)):
+def update_profile(
+    profile_id: UUID,
+    profile_update: ProfileUpdate,
+    db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     """
-    Update a saved hardware profile.
+    Update a saved hardware profile, scoped to the requesting client.
     Only fields included in the request body are changed.
     """
     try:
         ensure_storage_details_column(db)
 
-        profile = db.query(Profile).filter(Profile.id == profile_id).first()
+        profile = (
+            db.query(Profile)
+            .filter(Profile.id == profile_id)
+            .filter(Profile.client_id == client_id)
+            .first()
+        )
 
         if not profile:
             raise HTTPException(
@@ -175,14 +202,21 @@ def update_profile(profile_id: UUID, profile_update: ProfileUpdate, db: DbSessio
 
 
 @router.get("", response_model=list[ProfileResponse])
-def get_all_profiles(db: DbSession = Depends(get_db)):
+def get_all_profiles(
+    db: DbSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     """
-    Retrieve all saved profiles.
+    Retrieve all saved profiles for the requesting client.
     """
     try:
         ensure_storage_details_column(db)
 
-        profiles = db.query(Profile).all()
+        profiles = (
+            db.query(Profile)
+            .filter(Profile.client_id == client_id)
+            .all()
+        )
         return profiles
 
     except OperationalError as error:
