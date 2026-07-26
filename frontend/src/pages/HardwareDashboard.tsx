@@ -33,6 +33,7 @@ import WarningSignsView from './WarningSignsView';
 import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
 import HelpScopeView from './HelpScopeView';
 import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
+import ReportsView from './ReportsView';
 
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
@@ -823,12 +824,7 @@ export default function HardwareDashboard() {
         return <NewDiagnosisView />; // TARGET SWAP: Safely maps the new modular view file component
 
       case 'reports':
-        return (
-          <PlaceholderView
-            title="Reports"
-            subtitle="Technician-ready diagnostic report output"
-          />
-        );
+        return <ReportsView />;
 
       case 'settings':
         return <PlaceholderView title="Settings" subtitle="Application preferences and configuration" />;
