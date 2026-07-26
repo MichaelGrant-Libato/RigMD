@@ -36,7 +36,7 @@ import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, getHeaders } from '../services/apiClient';
 
 interface DashboardMetricCardProps {
   icon: LucideIcon;
@@ -721,7 +721,7 @@ export default function HardwareDashboard() {
 
   const fetchHardware = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/hardware/live`);
+      const response = await axios.get(`${API_BASE_URL}/api/hardware/live`, { headers: getHeaders() });
 
       setStats(response.data);
       setHardwareUpdatedAt(new Date());
@@ -735,7 +735,7 @@ export default function HardwareDashboard() {
     setIsRefreshingHardware(true);
 
     try {
-      await axios.post(`${API_BASE_URL}/api/hardware/refresh`);
+      await axios.post(`${API_BASE_URL}/api/hardware/refresh`, {}, { headers: getHeaders() });
     } catch {
       // Still fetch live hardware data even if cache refresh fails.
     }
@@ -755,7 +755,7 @@ export default function HardwareDashboard() {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/dashboard/summary`);
+        const response = await axios.get(`${API_BASE_URL}/api/dashboard/summary`, { headers: getHeaders() });
 
         setDashboard(response.data);
       } catch {

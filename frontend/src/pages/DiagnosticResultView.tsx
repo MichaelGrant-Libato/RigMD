@@ -2,6 +2,7 @@
 
 import { type DiagnosisResult, ACTION_COLORS, CONFIDENCE_COLORS } from "../types/rigmd";
 import { useState, useEffect } from "react";
+import { fetchWithClient } from "../services/apiClient";
 
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ const [actionResults, setActionResults]           = useState<Record<string, Acti
  
 useEffect(() => {
   if (!result.diagnosed_category) return;
-  fetch(`/api/remediation/actions?category=${encodeURIComponent(result.diagnosed_category)}`)
+  fetchWithClient(`/api/remediation/actions?category=${encodeURIComponent(result.diagnosed_category)}`)
     .then(r => r.json())
     .then(data => setRemediationActions(data.actions ?? []))
     .catch(() => setRemediationActions([]));
@@ -126,7 +127,7 @@ useEffect(() => {
 async function handleFixNow(actionId: string) {
   setRunningAction(actionId);
   try {
-    const res = await fetch("/api/remediation/execute", {
+    const res = await fetchWithClient("/api/remediation/execute", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({ action_id: actionId }),

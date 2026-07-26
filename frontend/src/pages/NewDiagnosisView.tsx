@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, getHeaders } from '../services/apiClient';
 
 interface DiagnosticFormData {
   symptom_type: string;
@@ -540,7 +540,9 @@ export default function NewDiagnosisView() {
   setCheckingResolution(true);
 
   try {
-    const response = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/check-resolution`);
+    const response = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/check-resolution`, {}, {
+      headers: getHeaders(),
+    });
 
     setReport((prev) =>
       prev
@@ -592,7 +594,7 @@ export default function NewDiagnosisView() {
       };
 
       const response = await axios.post<DiagnosticReport>(`${API_BASE_URL}/api/diagnosis/submit`, payload, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders(),
       });
 
       const diagnosis = response.data;
@@ -605,6 +607,7 @@ export default function NewDiagnosisView() {
 
       const actionsResponse = await axios.get(`${API_BASE_URL}/api/remediation/actions`, {
         params: { category: diagnosis.diagnosed_category },
+        headers: getHeaders(),
       });
 
       setRemediationActions(actionsResponse.data.actions ?? []);
@@ -655,7 +658,7 @@ export default function NewDiagnosisView() {
                   : category.includes('os performance') ? 'task_manager'
                     : 'reliability_monitor');
 
-      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target: targetParam });
+      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target: targetParam }, { headers: getHeaders() });
     } catch (err) {
       console.error('Inspection error:', err);
       setError('RigMD could not open the Windows verification tool. You can still open it manually from Windows Search.');
@@ -673,14 +676,14 @@ export default function NewDiagnosisView() {
     try {
       const response = await axios.post(`${API_BASE_URL}/api/remediation/execute`, {
         action_id: selectedAction.id,
-      });
+      }, { headers: getHeaders() });
 
       setActionResults((prev) => ({
         ...prev,
         [selectedAction.id]: response.data,
       }));
       if (response.data?.success && report?.session_id) {
-        const statusResponse = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/needs-recheck`);
+        const statusResponse = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/needs-recheck`, {}, { headers: getHeaders() });
 
         setReport((prev) =>
           prev
@@ -716,7 +719,7 @@ export default function NewDiagnosisView() {
     setInspecting(true);
 
     try {
-      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target });
+      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target }, { headers: getHeaders() });
     } catch (err) {
       console.error('Post-execution inspection error:', err);
       setError('RigMD could not open the related Windows location. You can still open it manually from Windows Search.');

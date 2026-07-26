@@ -16,7 +16,7 @@ import {
 
 import TopHeader from '../components/TopHeader';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, getHeaders } from '../services/apiClient';
 
 interface RecurringMetrics {
   recurring_issues: number;
@@ -445,7 +445,7 @@ export default function RecurringPatternsView() {
     setIsLoading(true);
 
     try {
-      const response = await axios.get<RecurringResponse>(`${API_BASE_URL}/api/recurring/patterns`);
+      const response = await axios.get<RecurringResponse>(`${API_BASE_URL}/api/recurring/patterns`, { headers: getHeaders() });
       setData(response.data);
     } catch {
       setData(emptyRecurring);

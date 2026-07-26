@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, fetchWithClient } from '../services/apiClient';
 
 interface SessionDetail {
   session_id: string;
@@ -79,7 +79,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/diagnosis/sessions/${sessionId}`);
+      const response = await fetchWithClient(`${API_BASE_URL}/api/diagnosis/sessions/${sessionId}`);
       if (!response.ok) throw new Error(`Server returned status ${response.status}`);
 
       const data = await response.json();
@@ -88,7 +88,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
       setSession(loadedSession);
 
       if (loadedSession?.diagnosed_category) {
-        const actionsResponse = await fetch(
+        const actionsResponse = await fetchWithClient(
           `${API_BASE_URL}/api/remediation/actions?category=${encodeURIComponent(loadedSession.diagnosed_category)}`
         );
 
@@ -109,7 +109,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/remediation/execute`, {
+      const response = await fetchWithClient(`${API_BASE_URL}/api/remediation/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action_id: action.id }),
@@ -123,7 +123,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
       }));
 
       if (result?.success) {
-        const statusResponse = await fetch(`${API_BASE_URL}/api/diagnosis/${sessionId}/needs-recheck`, {
+        const statusResponse = await fetchWithClient(`${API_BASE_URL}/api/diagnosis/${sessionId}/needs-recheck`, {
           method: 'POST',
         });
 
@@ -156,7 +156,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/diagnosis/${sessionId}/check-resolution`, {
+      const response = await fetchWithClient(`${API_BASE_URL}/api/diagnosis/${sessionId}/check-resolution`, {
         method: 'POST',
       });
 

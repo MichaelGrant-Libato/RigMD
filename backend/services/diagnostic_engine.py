@@ -1,9 +1,13 @@
 from uuid import uuid4
 from datetime import datetime
-from google import genai
+import google.generativeai as genai
 from backend.config import GEMINI_API_KEY
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+else:
+    model = None
 
 
 def _text(value):
@@ -654,7 +658,7 @@ def run_diagnostic(symptom_data: dict, profile_data: dict = None) -> dict:
 
     display_proof = _select_display_proof(diagnosed_category, proof, evidence_for_result)
 
-    if client and diagnosed_category != "No active issue detected":
+    if model and diagnosed_category != "No active issue detected":
         prompt = f"""
 Explain this RigMD diagnostic result in one short, clear paragraph for a non-technical Windows desktop user.
 
@@ -675,7 +679,7 @@ Proof shown to the user: {display_proof}
 User report: {symptom_data}
 """
         try:
-            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            response = model.generate_content(prompt)
             ai_text = _clean_ai_text(response.text)
             if ai_text:
                 ai_explanation = ai_text

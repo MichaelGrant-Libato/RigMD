@@ -14,7 +14,7 @@ import {
 
     // ─── Constants ───────────────────────────────────────────────────────────────
 
-    const API_BASE = "http://localhost:8000";
+    import { API_BASE_URL as API_BASE, fetchWithClient } from "../services/apiClient";
 
     const STEPS = [
     { key: "symptom_type",      label: "Symptom Type",      hint: "What is your PC doing that brought you here?" },
@@ -108,7 +108,7 @@ import {
         };
 
         try {
-        const res = await fetch(`${API_BASE}/api/diagnosis/submit`, {
+        const res = await fetchWithClient(`${API_BASE}/api/diagnosis/submit`, {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
             body:    JSON.stringify(payload),

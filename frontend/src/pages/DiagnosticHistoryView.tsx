@@ -12,7 +12,7 @@ import {
 import TopHeader from '../components/TopHeader';
 import type { SessionSummary } from '../types/rigmd';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, fetchWithClient } from '../services/apiClient';
 
 const filters = ['All Sessions', 'Monitor', 'Maintain', 'Troubleshoot', 'Escalate', 'Recurring Only'];
 
@@ -155,7 +155,7 @@ export default function DiagnosticHistoryView({ onViewSession }: Props) {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/diagnosis/sessions`);
+      const response = await fetchWithClient(`${API_BASE_URL}/api/diagnosis/sessions`);
       if (!response.ok) throw new Error(`Server returned status ${response.status}`);
 
       const data = await response.json();

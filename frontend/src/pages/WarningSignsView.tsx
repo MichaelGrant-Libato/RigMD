@@ -10,7 +10,7 @@ import {
 
 import TopHeader from '../components/TopHeader';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+import { API_BASE_URL, getHeaders } from '../services/apiClient';
 
 interface WarningSummary {
   observed_warning_signs: number;
@@ -217,6 +217,7 @@ export default function WarningSignsView() {
       const response = await axios.get<WarningSignsResponse>(
         `${API_BASE_URL}/api/warning-signs/reference`,
         {
+          headers: getHeaders(),
           params: {
             category: activeCategory,
             search,

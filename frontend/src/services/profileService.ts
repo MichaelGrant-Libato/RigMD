@@ -2,8 +2,7 @@
 
 // API service for profile-related calls
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
-
+import { API_BASE_URL, fetchWithClient } from './apiClient';
 export interface SaveProfilePayload {
   cpu_model: string;
   ram_capacity: string;
@@ -63,7 +62,7 @@ export async function saveHardwareProfile(
   payload: SaveProfilePayload
 ): Promise<SaveProfileResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/save`, {
+    const response = await fetchWithClient(`${API_BASE_URL}/api/profiles/save`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -88,7 +87,7 @@ export async function saveHardwareProfile(
  */
 export async function getProfile(profileId: string): Promise<HardwareProfile> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/${profileId}`, {
+    const response = await fetchWithClient(`${API_BASE_URL}/api/profiles/${profileId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -112,7 +111,7 @@ export async function getProfile(profileId: string): Promise<HardwareProfile> {
  */
 export async function getAllProfiles(): Promise<HardwareProfile[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+    const response = await fetchWithClient(`${API_BASE_URL}/api/profiles`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -139,7 +138,7 @@ export async function updateProfile(
   payload: UpdateProfilePayload
 ): Promise<HardwareProfile> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/${profileId}`, {
+    const response = await fetchWithClient(`${API_BASE_URL}/api/profiles/${profileId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
