@@ -1,8 +1,0 @@
-feat: complete Phase 8 - migrate diagnostic engine to C# and restructure docs
-
-- Ported legacy Python logic from `diagnostic_engine.py` into a new, pure C# `DiagnosticEngine` class in the Domain layer.
-- Created `DiagnosticEngineService` to orchestrate hardware providers and diagnostic rules.
-- Added `OfflineAiExplainer` as an infrastructure fallback template to mimic offline AI generation requirements.
-- Implemented `DiagnosticController` with POST `/api/diagnosis/submit` and wired up all hardware providers using Dependency Injection in `Program.cs`.
-- Moved extensive architectural markdown documentation into a dedicated `Docs/` directory, while preserving key entry points (`README.md`, `README_V2.md`, and `AGENTS.md`) at the root.
-- Verified successful backend compilation and functionality over port 5273.
