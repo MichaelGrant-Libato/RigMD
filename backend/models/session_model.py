@@ -1,9 +1,9 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
- 
+
 from backend.database import Base
 
 
@@ -39,6 +39,13 @@ class Session(Base):
     # Relationships
     profile = relationship("Profile", back_populates="sessions")
     recommendations = relationship("Recommendation", back_populates="session")
+
+    resolution_status = Column(String, default="open", nullable=False)
+    resolution_checked_at = Column(DateTime, nullable=True)
+    resolution_summary = Column(Text, default="", nullable=False)
+    resolution_proof = Column(JSON, default=list, nullable=False)
+    last_action_status = Column(String, nullable=True)
+    last_action_summary = Column(Text, default="", nullable=False)
  
  
 class Recommendation(Base):

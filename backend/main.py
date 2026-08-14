@@ -1,5 +1,3 @@
-# main.py
-
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,8 +8,10 @@ from backend.database import get_db
 from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 from backend.services.diagnostic_engine import run_diagnostic
+from backend.services.resolution_service import check_resolution_for_diagnosis
 from backend.routers import hardware, dashboard, history, recurring, warning_signs, profile
 from backend.routers.remediation import router as remediation_router
+from uuid import UUID
 
 app = FastAPI(
     title="RigMD Backend",
@@ -119,6 +119,12 @@ def get_or_create_live_profile(live_hardware_profile: dict, db: DbSession) -> Pr
     return profile
 
 
+def apply_resolution_fields(session: DiagnosticSession, values: dict) -> None:
+    for key, value in values.items():
+        if hasattr(session, key):
+            setattr(session, key, value)
+
+
 def save_diagnostic_session(
     payload: dict,
     result: dict,
@@ -144,6 +150,18 @@ def save_diagnostic_session(
         is_recurring=False,
     )
 
+    apply_resolution_fields(
+        session,
+        {
+            "resolution_status": result.get("resolution_status", "open"),
+            "resolution_checked_at": result.get("resolution_checked_at"),
+            "resolution_summary": result.get("resolution_summary", ""),
+            "resolution_proof": result.get("resolution_proof", []),
+            "last_action_status": result.get("last_action_status"),
+            "last_action_summary": result.get("last_action_summary", ""),
+        },
+    )
+
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -151,6 +169,13 @@ def save_diagnostic_session(
     result["session_id"] = str(session.id)
     result["profile_id"] = str(profile.id)
     result["created_at"] = session.created_at.isoformat() if session.created_at else result.get("created_at")
+
+    result.setdefault("resolution_status", getattr(session, "resolution_status", "open"))
+    result.setdefault("resolution_checked_at", getattr(session, "resolution_checked_at", None))
+    result.setdefault("resolution_summary", getattr(session, "resolution_summary", ""))
+    result.setdefault("resolution_proof", getattr(session, "resolution_proof", []))
+    result.setdefault("last_action_status", getattr(session, "last_action_status", None))
+    result.setdefault("last_action_summary", getattr(session, "last_action_summary", ""))
 
     return result
 
@@ -177,3 +202,68 @@ def run_diagnostic_endpoint(payload: dict, db: DbSession = Depends(get_db)):
             status_code=500,
             detail=f"Diagnosis completed but failed to save session: {error}",
         )
+
+
+@app.post("/api/diagnosis/{session_id}/needs-recheck")
+def mark_diagnosis_needs_recheck(session_id: UUID, db: DbSession = Depends(get_db)):
+    session = (
+        db.query(DiagnosticSession)
+        .filter(DiagnosticSession.id == session_id)
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Diagnosis record not found")
+
+    result = {
+        "resolution_status": "needs_recheck",
+        "last_action_status": "completed",
+        "last_action_summary": "A safe action was performed. Run a follow-up check to see if the issue improved.",
+    }
+
+    apply_resolution_fields(session, result)
+
+    db.commit()
+
+    return {
+        "session_id": str(session.id),
+        **result,
+    }
+
+
+@app.post("/api/diagnosis/{session_id}/check-resolution")
+def check_diagnosis_resolution(session_id: UUID, db: DbSession = Depends(get_db)):
+    session = (
+        db.query(DiagnosticSession)
+        .filter(DiagnosticSession.id == session_id)
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Diagnosis record not found")
+
+    try:
+        live_hardware_profile = hardware.get_live_hardware_stats()
+    except Exception:
+        live_hardware_profile = {}
+
+    diagnosis_record = {
+        "session_id": str(session.id),
+        "diagnosed_category": session.diagnosed_category,
+        "action_category": session.action_category,
+        "confidence_label": session.confidence_label,
+    }
+
+    result = check_resolution_for_diagnosis(
+        diagnosis_record=diagnosis_record,
+        profile_data=live_hardware_profile,
+    )
+
+    apply_resolution_fields(session, result)
+
+    db.commit()
+
+    return {
+        "session_id": str(session.id),
+        **result,
+    }

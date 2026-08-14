@@ -69,6 +69,8 @@ def split_warning_signs(raw_warning_signs: str | None) -> list[str]:
 def get_recommended_next_step(action_category: str, probable_cause: str) -> str:
     action = normalize_action_category(action_category)
 
+
+
     if action == "Escalate":
         return "Prepare a diagnostic report and consult a qualified technician for professional inspection."
     if action == "Troubleshoot":
@@ -139,6 +141,16 @@ def session_to_dict(
         "warning_signs": warning_signs,
         "recommendations": recommendations,
         "recommended_next_step": recommended_next_step,
+        "resolution_status": getattr(session, "resolution_status", "open"),
+        "resolution_checked_at": (
+            session.resolution_checked_at.isoformat()
+            if getattr(session, "resolution_checked_at", None)
+            else None
+        ),
+        "resolution_summary": getattr(session, "resolution_summary", ""),
+        "resolution_proof": getattr(session, "resolution_proof", []),
+        "last_action_status": getattr(session, "last_action_status", None),
+        "last_action_summary": getattr(session, "last_action_summary", ""),
     }
 
 

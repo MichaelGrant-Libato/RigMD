@@ -32,6 +32,7 @@ import RecurringPatternsView from './RecurringPatternsView';
 import WarningSignsView from './WarningSignsView';
 import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
 import HelpScopeView from './HelpScopeView';
+import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
@@ -696,6 +697,7 @@ export default function HardwareDashboard() {
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
   const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
 
@@ -768,6 +770,14 @@ export default function HardwareDashboard() {
     return () => window.clearInterval(interval);
   }, []);
 
+  const handleSetActivePage = (page: PageKey) => {
+  if (page === 'diagnosticHistory') {
+    setSelectedSessionId(null);
+  }
+
+  setActivePage(page);
+};
+
   const renderPage = () => {
     switch (activePage) {
       case 'home':
@@ -791,8 +801,17 @@ export default function HardwareDashboard() {
           />
         );
 
-      case 'diagnosticHistory':
-        return <DiagnosticHistoryView />;
+    case 'diagnosticHistory':
+      return selectedSessionId ? (
+        <DiagnosticSessionDetailView
+          sessionId={selectedSessionId}
+          onBack={() => setSelectedSessionId(null)}
+        />
+      ) : (
+        <DiagnosticHistoryView
+          onViewSession={(sessionId) => setSelectedSessionId(sessionId)}
+        />
+      );
 
       case 'recurringPatterns':
         return <RecurringPatternsView />;
@@ -833,7 +852,7 @@ export default function HardwareDashboard() {
     <div className="flex h-screen overflow-hidden bg-[#0b1017] font-sans text-gray-200">
       <AppSidebar
         activePage={activePage}
-        setActivePage={setActivePage}
+        setActivePage={handleSetActivePage}
         dashboard={dashboard}
         liveStatus={liveStatus}
         hardwareUpdatedAt={hardwareUpdatedAt}
