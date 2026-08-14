@@ -17,15 +17,15 @@
           "C:\\Users\\axcel\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
-          "net10.0"
+          "net10.0-windows"
         ],
         "sources": {
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
-          "net10.0": {
-            "framework": "net10.0",
-            "targetAlias": "net10.0",
+          "net10.0-windows": {
+            "framework": "net10.0-windows7.0",
+            "targetAlias": "net10.0-windows",
             "projectReferences": {
               "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Application\\RigMD.Application.csproj": {
                 "projectPath": "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Application\\RigMD.Application.csproj"
@@ -49,9 +49,9 @@
         "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
-        "net10.0": {
-          "framework": "net10.0",
-          "targetAlias": "net10.0",
+        "net10.0-windows": {
+          "framework": "net10.0-windows7.0",
+          "targetAlias": "net10.0-windows",
           "dependencies": {
             "Microsoft.AspNetCore.OpenApi": {
               "target": "Package",
@@ -1182,15 +1182,15 @@
           "C:\\Users\\axcel\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
-          "net10.0"
+          "net10.0-windows"
         ],
         "sources": {
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
-          "net10.0": {
-            "framework": "net10.0",
-            "targetAlias": "net10.0",
+          "net10.0-windows": {
+            "framework": "net10.0-windows7.0",
+            "targetAlias": "net10.0-windows",
             "projectReferences": {
               "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Application\\RigMD.Application.csproj": {
                 "projectPath": "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Application\\RigMD.Application.csproj"
@@ -1211,9 +1211,15 @@
         "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
-        "net10.0": {
-          "framework": "net10.0",
-          "targetAlias": "net10.0",
+        "net10.0-windows": {
+          "framework": "net10.0-windows7.0",
+          "targetAlias": "net10.0-windows",
+          "dependencies": {
+            "System.Management": {
+              "target": "Package",
+              "version": "[10.0.11, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",

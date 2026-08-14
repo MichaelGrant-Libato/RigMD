@@ -1,8 +1,33 @@
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+builder.Services.AddControllers();
+
+// Add CORS policy to allow the React frontend on port 5273
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReact", policy =>
+    {
+        policy.WithOrigins("http://localhost:5273", "http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// Dependency Injection
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.ICpuProvider, RigMD.Infrastructure.Windows.WmiCpuProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IGpuProvider, RigMD.Infrastructure.Windows.WmiGpuProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMemoryProvider, RigMD.Infrastructure.Windows.WmiMemoryProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IOperatingSystemProvider, RigMD.Infrastructure.Windows.WmiOperatingSystemProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IStorageProvider, RigMD.Infrastructure.Windows.WmiStorageProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMotherboardProvider, RigMD.Infrastructure.Windows.WmiMotherboardProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IProcessProvider, RigMD.Infrastructure.Windows.ProcessProvider>();
+
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IWindowsSystemProfileService, RigMD.Infrastructure.Windows.WindowsSystemProfileService>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.OfflineAiExplainer>();
+builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService, RigMD.Application.Services.DiagnosticEngineService>();
 
 var app = builder.Build();
 
@@ -12,30 +37,10 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseCors("AllowReact");
+
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapControllers();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

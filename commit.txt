@@ -1,16 +1,8 @@
-refactor: establish C#/.NET foundation and Windows observation layer
+feat: complete Phase 8 - migrate diagnostic engine to C# and restructure docs
 
-This commit captures the completion of Phases 0 through 4 of the autonomous migration roadmap. 
-
-Progress toward final goal:
-The final goal is to migrate RigMD from a passive, Python-based advisory tool to an autonomous, closed-loop diagnostic and remediation platform built on C#/.NET. This commit lays the architectural foundation for that transition while preserving the legacy Python implementation for side-by-side verification.
-
-Completed work in this commit:
-- Phase 0: Defined the target architecture, autonomous engine concepts, remediation safety policies, and recorded major technical decisions.
-- Phase 1: Tagged the legacy Python implementation as a baseline for future behavioral parity testing.
-- Phase 2: Scaffolded the new backend-dotnet solution including Api, Application, Domain, Infrastructure, and Test projects.
-- Phase 3: Designed the complete C# Domain Model (Entities) including diagnostic intake properties, reasoning factors, and the new autonomous loop constructs (RemediationRun, ActionAttempt, VerificationResult, RollbackEvent).
-- Phase 4: Ported the monolithic Python hardware observation script (wmi/psutil) into isolated, testable C# providers (System.Management/CIM) within the Infrastructure layer.
-
-Next Steps:
-Future phases will integrate local SQLite persistence (Phase 5), expose the ASP.NET Core API (Phase 6), and finally reconnect the React frontend to the new backend (Phase 7).
+- Ported legacy Python logic from `diagnostic_engine.py` into a new, pure C# `DiagnosticEngine` class in the Domain layer.
+- Created `DiagnosticEngineService` to orchestrate hardware providers and diagnostic rules.
+- Added `OfflineAiExplainer` as an infrastructure fallback template to mimic offline AI generation requirements.
+- Implemented `DiagnosticController` with POST `/api/diagnosis/submit` and wired up all hardware providers using Dependency Injection in `Program.cs`.
+- Moved extensive architectural markdown documentation into a dedicated `Docs/` directory, while preserving key entry points (`README.md`, `README_V2.md`, and `AGENTS.md`) at the root.
+- Verified successful backend compilation and functionality over port 5273.

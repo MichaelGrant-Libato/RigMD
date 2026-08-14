@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RigMD.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bde24f5648e8ae6c7fe58c32a6fabf96158696d0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fa55df50e0c4d499b6174f5b1a1f545c3fefacdf")]
 [assembly: System.Reflection.AssemblyProductAttribute("RigMD.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RigMD.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
