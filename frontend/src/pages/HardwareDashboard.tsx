@@ -727,7 +727,7 @@ export default function HardwareDashboard() {
       setHardwareUpdatedAt(new Date());
       setError(null);
     } catch {
-      setError('Connection lost. Ensure FastAPI is running on port 8000.');
+      setError('Connection lost. Ensure the C# backend (dotnet run) is running on port 5273.');
     }
   }, []);
 

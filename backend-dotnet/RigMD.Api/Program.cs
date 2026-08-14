@@ -1,0 +1,46 @@
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddOpenApi();
+
+builder.Services.AddControllers();
+
+// Add CORS policy to allow the React frontend on port 5273
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReact", policy =>
+    {
+        policy.WithOrigins("http://localhost:5273", "http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// Dependency Injection
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.ICpuProvider, RigMD.Infrastructure.Windows.WmiCpuProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IGpuProvider, RigMD.Infrastructure.Windows.WmiGpuProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMemoryProvider, RigMD.Infrastructure.Windows.WmiMemoryProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IOperatingSystemProvider, RigMD.Infrastructure.Windows.WmiOperatingSystemProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IStorageProvider, RigMD.Infrastructure.Windows.WmiStorageProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMotherboardProvider, RigMD.Infrastructure.Windows.WmiMotherboardProvider>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IProcessProvider, RigMD.Infrastructure.Windows.ProcessProvider>();
+
+builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IWindowsSystemProfileService, RigMD.Infrastructure.Windows.WindowsSystemProfileService>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.OfflineAiExplainer>();
+builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService, RigMD.Application.Services.DiagnosticEngineService>();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseCors("AllowReact");
+
+app.UseHttpsRedirection();
+
+app.MapControllers();
+
+app.Run();

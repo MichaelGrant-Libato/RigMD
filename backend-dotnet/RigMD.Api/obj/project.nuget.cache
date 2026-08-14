@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "BATUMAVcYsQ=",
+  "success": true,
+  "projectFilePath": "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Api\\RigMD.Api.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\axcel\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.11\\microsoft.aspnetcore.openapi.10.0.11.nupkg.sha512",
+    "C:\\Users\\axcel\\.nuget\\packages\\microsoft.openapi\\2.7.5\\microsoft.openapi.2.7.5.nupkg.sha512",
+    "C:\\Users\\axcel\\.nuget\\packages\\system.codedom\\10.0.11\\system.codedom.10.0.11.nupkg.sha512",
+    "C:\\Users\\axcel\\.nuget\\packages\\system.management\\10.0.11\\system.management.10.0.11.nupkg.sha512"
+  ],
+  "logs": []
+}

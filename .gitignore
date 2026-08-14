@@ -122,8 +122,9 @@ test_results/
 
 
 # ============================================================
-#  LOCAL TESTING / CACHE
+#  LOCAL TESTING / CACHE / DRAFT DOCS
 # ============================================================
 
 .cache/
 coverage/
+README_V2.md

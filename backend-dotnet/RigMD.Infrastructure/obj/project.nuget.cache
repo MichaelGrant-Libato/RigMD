@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "vCvj1+3R94k=",
+  "success": true,
+  "projectFilePath": "D:\\codes\\RigMD\\backend-dotnet\\RigMD.Infrastructure\\RigMD.Infrastructure.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\axcel\\.nuget\\packages\\system.codedom\\10.0.11\\system.codedom.10.0.11.nupkg.sha512",
+    "C:\\Users\\axcel\\.nuget\\packages\\system.management\\10.0.11\\system.management.10.0.11.nupkg.sha512"
+  ],
+  "logs": []
+}

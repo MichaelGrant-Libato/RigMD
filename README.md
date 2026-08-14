@@ -1,823 +1,320 @@
-# RigMD — PC Diagnostic Decision Support System
+# RigMD V2 — Autonomous PC Diagnostic & Remediation System
 
-> A Windows desktop PC diagnostic advisory system that detects hardware/software profile data, interprets user-reported symptoms, tracks diagnostic history, identifies recurring patterns, and provides action-classified advisory output.
-
-**Team:** 2526-sem2-it332-11  
-**Course:** IT 332  
-**AY:** 2025–2026, Semester 2
+> **Draft / Migration README** — gitignored, not committed.  
+> This document describes the next-generation architecture, what already exists, what will change, and the full structural hierarchy for the C# migration.
 
 ---
 
-## Team Members
+## 1. Overview & Vision
 
-| Name | GitHub / Contact | Responsibilities |
-|---|---|---|
-| Libato, Michael Grant | @michaelgrantlibato7@gmail.com | Backend — diagnostic engine, advisory module, AI explainer |
-| Macansantos, Axelson | @axcelsonmacansantos@gmail.com | Database — Supabase setup, SQLAlchemy models, Alembic migrations |
-| Ruperez, Raymart | @raymartruperez@gmail.com | Backend — FastAPI setup, all routers, Pydantic schemas |
-| Maestrado, Ralph Keane | @maestradoralphkeane@gmail.com | Frontend — ProfilePage, IntakePage, routing, AppContext |
-| Labaya, Godwin | @glabaya123@gmail.com | Frontend — ResultPage, HistoryPage, reusable components |
+RigMD is evolving from a passive diagnostic decision-support system (DSS) into a **closed-loop autonomous diagnostic and remediation platform** for Windows desktop PCs.
 
----
----
-
-## What is RigMD?
-
-RigMD is a diagnostic support system for desktop PC users who experience Windows-observable performance symptoms.
-
-It helps users understand possible causes of PC issues by connecting:
-
-- Live detected system profile data
-- Structured symptom intake
-- Diagnostic interpretation
-- Recommended action category
-- Diagnostic history
-- Recurring pattern detection
-- Warning signs reference
-
-RigMD does not replace professional hardware inspection. It provides probable advisory output to help users decide the next action.
+The system will combine:
+1. **Isolated Native Windows Telemetry** — hardware, drivers, event logs, processes.
+2. **Deterministic Diagnostic Rule Engine** — structured scoring, reasoning factors, warning signs.
+3. **Controlled Autonomous Remediation Engine** — preconditioned actions, dry-run simulation, execution, verification, automatic rollback, and intelligent pivoting.
+4. **Offline-First Persistence** — local SQLite as the single source of truth, with optional cloud sync.
+5. **Constrained AI Explanations** — plain-language summaries without delegating system execution to any LLM.
 
 ---
 
-## Core Features
+## 2. What RigMD Already Has (Confirmed Baseline)
 
-### Home Dashboard
+### 2.1 Frontend (React / Vite)
+The existing React frontend is substantial and will be preserved and redirected — not rewritten.
 
-- Shows live system profile summary
-- Shows latest diagnostic status
-- Shows current action status
-- Shows recurring issue count
-- Shows warning signs count
-- Shows action category distribution
-- Shows session frequency overview
-- Provides quick actions for diagnosis and history
-
-### System Profile
-
-- Automatically detects desktop PC information
-- Detects CPU, RAM, GPU, storage, OS, GPU driver, chipset, and system age
-- Uses live hardware data from the FastAPI backend
-- Allows hardware data refresh
-
-### New Diagnosis
-
-- Guided symptom intake workflow
-- Collects structured symptom data
-- Sends diagnosis request to backend diagnostic engine
-- Saves completed sessions into the database
-
-### Diagnostic History
-
-- Displays saved diagnostic sessions
-- Supports action category filters
-- Supports search and sorting
-- Opens a session detail panel
-- Shows symptom, probable cause, action, confidence, warning signs, and recommended next step
-
-### Recurring Patterns
-
-- Detects repeated symptoms
-- Detects repeated probable causes
-- Shows recurring issue count
-- Shows worsening trends
-- Shows action escalation
-- Shows total occurrences
-- Displays pattern timeline
-
-### Warning Signs
-
-- Provides a reference guide for observable PC warning indicators
-- Shows warning sign meaning, threshold, category, and recommended action
-- Highlights warning signs observed in saved sessions
-- Supports category filters, search, and observed-only mode
-
-### Reports
-
-- Placeholder for technician-ready diagnostic report output
-- Intended to summarize saved diagnostic sessions for review or repair consultation
-
----
-
-## Tech Stack
-
-| Layer | Technology |
+| Screen | Status |
 |---|---|
-| Frontend | React, Vite, TypeScript, Tailwind CSS, Axios, Lucide React |
-| Backend | Python, FastAPI, Uvicorn |
-| Database | PostgreSQL via Supabase |
-| ORM | SQLAlchemy |
-| Environment Config | python-dotenv, Vite environment variables |
-| Hardware Detection | WMI, pywin32, psutil |
-| AI Support | Gemini API |
+| `SystemProfileView` | ✅ Fully implemented |
+| `NewDiagnosisView` (8-step structured intake) | ✅ Fully implemented |
+| `DiagnosticIntakeReview` | ✅ Fully implemented |
+| `DiagnosticResultView` | ✅ Fully implemented |
+| `DiagnosticHistoryView` | ✅ Fully implemented |
+| `DiagnosticSessionDetailView` | ✅ Fully implemented |
+| `RecurringPatternsView` | ✅ Fully implemented |
+| `WarningSignsView` | ✅ Fully implemented |
+| `HardwareDashboard` | ✅ Fully implemented |
+| `HelpScopeView` | ✅ Fully implemented |
+| `ReportsView` | ⚠️ Empty file — not yet implemented |
+
+### 2.2 Backend (Python / FastAPI)
+The existing backend is functional, not a skeleton.
+
+**Confirmed working routers**: `hardware`, `dashboard`, `history`, `recurring`, `warning_signs`, `profile`, `remediation` (stub).
+
+**`main.py` orchestrates the full pipeline**:
+- `GET live hardware` → `run_diagnostic()` → `get_or_create_profile()` → `save_session()`
+
+**Services that exist**:
+- `diagnostic_engine.py` (34 KB) — substantial rule-based scoring, evidence, and confidence engine.
+- `remediation_service.py` (20 KB) — early-stage; not fully integrated.
+- `resolution_service.py` — re-evaluates a session against live hardware.
+- `ai_explainer.py` — Gemini API client, constrained to diagnostic context.
+- `session_store.py` — query helpers.
+
+### 2.3 Hardware Detection
+The legacy Python implementation already detects:
+- CPU, GPU, GPU driver, RAM, OS version
+- Storage type classification (NVMe / SSD / HDD), physical + logical disk metadata
+- Browser and game/heavy process detection
+- Chipset driver, system age
+- Multiple WMI fallback/error paths
+
+### 2.4 Data Models
+**Profile** (currently `profiles` table):
+- `cpu_model`, `ram_capacity`, `storage_type`, `storage_capacity`, `storage_details` (JSONB), `os_version`, `gpu_driver`, `chipset_driver`, `system_age`
+
+**Session** (currently `sessions` table):
+- 8 intake fields: `symptom_type`, `affected_activity`, `frequency`, `severity`, `duration`, `recent_changes`, `system_state`, `warning_signs`
+- Diagnostic output: `diagnosed_category`, `action_category`, `confidence_label`, `ai_explanation`, `is_recurring`
+- Resolution lifecycle: `resolution_status`, `resolution_checked_at`, `resolution_summary`, `resolution_proof` (JSON), `last_action_status`, `last_action_summary`
+
+### 2.5 Closed-Loop Seed (Already Exists)
+The resolution recheck mechanism is already a seed for the future autonomous loop:
+- Mark session as `needs_recheck` after action.
+- Re-run live hardware collection + resolution check.
+- Update session state.
+
+This is not yet formalized as `RemediationRun` / `VerificationResult`, but the concept exists in the codebase.
 
 ---
 
-## System Architecture
+## 3. Old vs. New Comparison
 
-```txt
-React + Vite Frontend
-http://localhost:5173
-        |
-        | Axios HTTP Requests
-        v
-FastAPI Backend
-http://localhost:8000
-        |
-        | SQLAlchemy ORM
-        v
-Supabase PostgreSQL Database
+| Dimension | Legacy / Baseline (V1) | Target (V2) |
+|---|---|---|
+| **Core Stack** | Python FastAPI / CustomTkinter | React + C#/.NET (ASP.NET Core + WPF + WebView2) |
+| **System Behavior** | Passive Advisory | **Controlled Autonomous Remediation** (Closed-Loop) |
+| **Remediation** | Manual action based on text | Automated with **Verify → Rollback → Pivot** |
+| **Safety Model** | Static text warnings | **Multi-Tier Safety Policy + Dry-Run Mode** |
+| **Hardware Detection** | Monolithic Python script (`wmi`, `psutil`) | **Isolated C# Providers** (`System.Management`, CIM, EventLogs) |
+| **Primary Storage** | Supabase (cloud-dependent) | **SQLite (Local Source of Truth, 100% Offline)** |
+| **Cloud Sync** | Required for basic save | **Optional Async Sync** (background Supabase worker) |
+| **AI Role** | AI generates explanation | **AI constrained to explanation only** — never controls execution |
+| **Packaging** | Python virtual environment | **Standalone Windows Executable** (WPF + WebView2) |
+
+---
+
+## 4. Architecture Flow
+
+```text
+                 ┌────────────────────────────────┐
+                 │       React Frontend UI        │
+                 │   (Intake / Live / History)    │
+                 └───────────────┬────────────────┘
+                                 │ HTTP / IPC
+                                 ↓
+                 ┌────────────────────────────────┐
+                 │       ASP.NET Core API         │
+                 │   (RigMD.Api / Minimal APIs)   │
+                 └───────────────┬────────────────┘
+                                 │
+                                 ↓
+                 ┌────────────────────────────────┐
+                 │       Application Layer        │
+                 │   (Use Cases & Orchestration)  │
+                 └───────┬───────────────┬────────┘
+                         │               │
+         ┌───────────────┘               └───────────────┐
+         ↓                                               ↓
+┌─────────────────────┐                   ┌───────────────────────────────┐
+│     Domain Layer    │                   │      Infrastructure Layer     │
+│  - Diagnostic Rules │                   │  - Windows Native Providers   │
+│  - Autonomous Core  │                   │  - EF Core + SQLite DbContext │
+│  - Safety Policies  │                   │  - Gemini AI Explainer Client │
+└─────────────────────┘                   │  - Optional Supabase Sync     │
+                                          └──────────────┬────────────────┘
+                                                         │
+                              ┌──────────────────────────┴──────────────────────────┐
+                              ↓                                                      ↓
+                   ┌──────────────────────┐                           ┌──────────────────────────┐
+                   │   Local SQLite DB    │                           │   Optional Supabase DB   │
+                   │  (Source of Truth)   │                           │   (Async Cloud Sync)     │
+                   └──────────────────────┘                           └──────────────────────────┘
 ```
 
-Hardware detection works through the backend using Windows system APIs and local machine telemetry.
-
 ---
 
-## Project Structure
+## 5. New Solution & Repository Structure
 
-```txt
+```text
 RigMD/
+├── backend/                              ← Legacy Python/FastAPI (Reference baseline — do not delete yet)
+│   ├── main.py                           ← Primary orchestration
+│   ├── routers/                          ← hardware.py, dashboard.py, history.py, recurring.py, etc.
+│   ├── services/                         ← diagnostic_engine.py, ai_explainer.py, remediation_service.py, etc.
+│   ├── models/                           ← profile_model.py, session_model.py, recommendation_model.py
+│   └── schemas/                          ← Pydantic request/response models
 │
-├── backend/
-│   ├── models/
-│   │   ├── profile_model.py
-│   │   ├── recommendation_model.py
-│   │   └── session_model.py
+├── backend-dotnet/                       ← New C#/.NET Solution
+│   ├── RigMD.sln
 │   │
-│   ├── routers/
-│   │   ├── dashboard.py
-│   │   ├── hardware.py
-│   │   ├── history.py
-│   │   ├── profile.py
-│   │   ├── recurring.py
-│   │   ├── remediation.py
-│   │   └── warning_signs.py
+│   ├── RigMD.Domain/                     ← Enterprise business rules (zero external dependencies)
+│   │   ├── Entities/                     ← SystemProfile, DiagnosticSession, DiagnosticOutput, etc.
+│   │   ├── Enums/                        ← ActionCategory, RemediationTier, VerificationStatus, etc.
+│   │   └── Rules/                        ← Diagnostic rule definitions, symptom matchers
 │   │
-│   ├── schemas/
-│   │   ├── diagnosis_schema.py
-│   │   └── profile_schema.py
+│   ├── RigMD.Application/                ← Use cases, interfaces, orchestration
+│   │   ├── Contracts/                    ← IProfileRepository, IDiagnosticSessionRepository, IRemediationRepository
+│   │   ├── Providers/                    ← ICpuProvider, IGpuProvider, IStorageProvider, etc.
+│   │   ├── Services/                     ← DiagnosticRuleService, ScoringService, EvidenceService, ConfidenceService, AdvisoryActionService
+│   │   ├── Autonomous/                   ← IRemediationPlanner, ISafetyPolicy, IRemediationRegistry, IRemediationExecutor, IVerificationService, IRollbackManager, IPivotEngine
+│   │   └── UseCases/                     ← RunDiagnosticUseCase, PlanRemediationUseCase, ExecuteDryRunUseCase
 │   │
-│   ├── services/
-│   │   ├── ai_explainer.py
-│   │   ├── diagnostic_engine.py
-│   │   ├── remediation_service.py
-│   │   └── session_store.py
+│   ├── RigMD.Infrastructure/             ← External adapters, OS integration, persistence
+│   │   ├── Persistence/                  ← EF Core DbContext, SQLite migrations, repository implementations
+│   │   ├── Windows/                      ← Native Windows information providers
+│   │   │   ├── CpuInformationProvider.cs
+│   │   │   ├── GpuInformationProvider.cs
+│   │   │   ├── MemoryInformationProvider.cs
+│   │   │   ├── StorageInformationProvider.cs
+│   │   │   ├── DriverInformationProvider.cs
+│   │   │   ├── EventLogProvider.cs
+│   │   │   ├── ProcessInformationProvider.cs
+│   │   │   └── WindowsSystemProfileProvider.cs
+│   │   ├── Remediation/                  ← Concrete approved action handlers
+│   │   ├── Ai/                           ← Gemini API client (constrained to explanation)
+│   │   └── Sync/                         ← Optional Supabase background sync worker
 │   │
-│   ├── config.py
-│   ├── database.py
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── test.py
-│   └── test_wmi.py
+│   ├── RigMD.Api/                        ← ASP.NET Core presentation & endpoint layer
+│   │   ├── Endpoints/                    ← /api/health, /api/system-profile/live, /api/diagnostics, etc.
+│   │   ├── Middleware/                   ← Exception handling, logging, validation pipeline
+│   │   └── Program.cs                    ← DI setup, middleware, service registration
+│   │
+│   └── RigMD.Tests/                      ← Automated test suite
+│       ├── Domain.Tests/                 ← Diagnostic rule & scoring unit tests
+│       ├── Application.Tests/            ← Use case & dry-run pipeline tests
+│       └── Infrastructure.Tests/         ← Windows provider & SQLite integration tests
 │
-├── frontend/
-│   ├── public/
-│   │   ├── favicon.svg
-│   │   └── icons.svg
-│   │
-│   ├── src/
-│   │   ├── assets/
-│   │   │   └── hero.png
-│   │   │
-│   │   ├── components/
-│   │   │   ├── AppSidebar.tsx
-│   │   │   ├── HardwareCard.tsx
-│   │   │   └── TopHeader.tsx
-│   │   │
-│   │   ├── pages/
-│   │   │   ├── DiagnosticHistoryView.tsx
-│   │   │   ├── DiagnosticIntakeReview.tsx
-│   │   │   ├── DiagnosticResultView.tsx
-│   │   │   ├── HardwareDashboard.tsx
-│   │   │   ├── HelpScopeView.tsx
-│   │   │   ├── NewDiagnosisView.tsx
-│   │   │   ├── RecurringPatternsView.tsx
-│   │   │   ├── ReportsView.tsx
-│   │   │   ├── SystemProfileView.tsx
-│   │   │   └── WarningSignsView.tsx
-│   │   │
-│   │   ├── services/
-│   │   │   └── profileService.ts
-│   │   │
-│   │   ├── types/
-│   │   │   └── rigmd.ts
-│   │   │
-│   │   ├── App.css
-│   │   ├── App.jsx
-│   │   ├── index.css
-│   │   ├── main.jsx
-│   │   └── vite-env.d.ts
-│   │
-│   ├── .env
-│   ├── .gitignore
-│   ├── eslint.config.js
-│   ├── index.html
-│   ├── package.json
-│   ├── package-lock.json
-│   ├── postcss.config.js
-│   ├── tailwind.config.js
-│   └── vite.config.js
+├── frontend/                             ← React 18 + Vite (Preserved — redirected via VITE_API_URL)
 │
-├── .gitignore
-└── README.md
+├── Docs/                                 ← Thesis PDFs, SRS, SDD
+│
+├── AGENTS.md                             ← AI engineering policy (authoritative)
+├── ARCHITECTURE.md                       ← Target architectural spec
+├── ARCHITECTURE_MIGRATION.md             ← Old → new migration mapping
+├── AUTONOMOUS_ENGINE.md                  ← Closed-loop engine concepts
+├── REMEDIATION_POLICY.md                 ← Safety tiers and action consent model
+├── DECISIONS.md                          ← Architectural decision records
+├── C_SHARP_MIGRATION_PLAN.md             ← 17-phase roadmap and phase checklists
+├── LEGACY_CAPABILITY_INVENTORY.md        ← File-by-file audit of what exists now
+├── MIGRATION_MATRIX.md                   ← Per-capability migration tracking table
+└── BASELINE.md                           ← Known state of the Python baseline at migration start
 ```
 
 ---
 
-## Database Schema
+## 6. Domain Model & ERD Hierarchy
 
-RigMD uses three main tables.
+Reconciled from the thesis SDD ERD + new autonomous concepts:
 
-### profiles
-
-Stores the detected or saved desktop PC profile.
-
-```txt
-profiles
-├── id
-├── cpu_model
-├── ram_capacity
-├── storage_type
-├── storage_capacity
-├── os_version
-├── gpu_driver
-├── chipset_driver
-├── system_age
-└── created_at
+```text
+SystemProfile
+  │ (1)
+  └── (0..*) DiagnosticSession
+               │ (1)
+               ├── (1..*) SessionAnswer
+               │
+               └── (1) DiagnosticOutput
+                         │
+                         ├── (1..*) ReasoningFactor
+                         │
+                         ├── (0..*) OutputWarningSign ──> (1) WarningSign
+                         │
+                         └── (0..1) RemediationRun
+                                      │
+                                      ├── (1..*) ActionAttempt
+                                      │            │
+                                      │            └── (1) VerificationResult
+                                      │
+                                      ├── (0..*) RollbackEvent
+                                      │
+                                      └── (0..*) PivotEvent
 ```
 
-Note: `profiles.storage_details` stores per-drive hardware data as JSONB, including detected drive model, storage type, size, interface, usage percentage, bus type, media type, and detection source when available.
+> **Key rule**: Do not discard `SessionAnswer`, `ReasoningFactor`, or `OutputWarningSign` entities. The current Python implementation stores these as flat columns. The C# model promotes them to proper relational entities to align with the SDD ERD.
 
-### sessions
+---
 
-Stores each completed diagnostic session.
+## 7. Closed-Loop Autonomous Pipeline
 
-```txt
-sessions
-├── id
-├── profile_id
-├── symptom_type
-├── affected_activity
-├── frequency
-├── severity
-├── duration
-├── recent_changes
-├── system_state
-├── warning_signs
-├── diagnosed_category
-├── action_category
-├── confidence_label
-├── ai_explanation
-├── is_recurring
-└── created_at
-```
-
-### recommendations
-
-Stores warning sign rows and recommended actions connected to a diagnostic session.
-
-```txt
-recommendations
-├── id
-├── session_id
-├── warning_sign
-├── threshold
-├── recommended_action
-└── created_at
+```text
+  [ Intake Symptoms + Live Telemetry ]
+                  ↓
+       [ Deterministic Diagnosis ]
+       (DiagnosticRuleService, ScoringService, EvidenceService)
+                  ↓
+     [ Probable Cause + Evidence + Confidence ]
+                  ↓
+         [ Remediation Planner ]
+         (IRemediationPlanner + IRemediationRegistry)
+                  ↓
+      [ Safety Policy & Tier Check ]
+      (ISafetyPolicy → Tier 1 / Tier 2 / Tier 3)
+                  ↓
+      ┌─────────────────────────────────┐
+      │     DRY-RUN SIMULATION MODE     │  ← Always available; permanent developer tool
+      └──────────────┬──────────────────┘
+                     ↓ (if approved)
+        [ Execute Action Attempt ]
+        (IRemediationExecutor + registered action)
+                     ↓
+        [ Measure & Verify State ]
+        (IVerificationService)
+                     │
+             ┌───────┴───────┐
+             │   Resolved?   │
+             └───────┬───────┘
+           YES │           │ NO
+               ↓           ↓
+         [ Complete ]   [ IRollbackManager ]
+         [ Audit Log ]       ↓
+                      [ IPivotEngine ]
+                             ↓
+                     [ Next Candidate Action ]
+                             ↓
+                     [ Re-Verify / Escalate ]
 ```
 
 ---
 
-## Getting Started
+## 8. Remediation Safety Tiers
 
-### Prerequisites
-
-Install these first:
-
-- Node.js 18+
-- npm
-- Python 3.11+
-- Git
-- Supabase database access
-- Gemini API key
-- Windows 10/11 for live hardware detection
-
----
-
-## 1. Clone the Repository
-
-```bash
-git clone https://github.com/YOUR_USERNAME/rigmd.git
-cd RigMD
-git checkout main
-git pull origin main
-```
-
-Optional feature branch:
-
-```bash
-git switch -c feature/your-feature-name
-```
-
----
-
-## 2. Backend Setup
-
-Run these from the project root:
-
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-If hardware detection packages are missing, install them:
-
-```bash
-pip install WMI pywin32 psutil
-```
-
----
-
-## 3. Backend Environment Setup
-
-Create this file:
-
-```txt
-backend/.env
-```
-
-Add:
-
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-DATABASE_URL=your_supabase_postgresql_connection_string_here
-FRONTEND_URL=http://localhost:5173
-```
-
-Example Supabase connection format:
-
-```env
-DATABASE_URL=postgresql://postgres.YOUR_PROJECT_ID:YOUR_PASSWORD@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres
-```
-
-Important notes:
-
-- Do not leave `[YOUR-PASSWORD]` in the connection string.
-- Replace it with the real Supabase database password.
-- If your password has special characters, URL-encode it.
-- Never commit `.env` files.
-
----
-
-## 4. Run the Backend
-
-Always run the backend from the project root.
-
-```bash
-cd D:\RigMD
-backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
-```
-
-Backend runs at:
-
-```txt
-http://localhost:8000
-```
-
-API documentation:
-
-```txt
-http://localhost:8000/docs
-```
-
-Test backend root:
-
-```txt
-http://localhost:8000/
-```
-
-Expected response:
-
-```json
-{
-  "message": "Backend is running!"
-}
-```
-
----
-
-## 5. Frontend Setup
-
-Open a second terminal.
-
-```bash
-cd frontend
-npm install
-```
-
----
-
-## 6. Frontend Environment Setup
-
-Create this file:
-
-```txt
-frontend/.env
-```
-
-Add:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-This lets the frontend call the FastAPI backend.
-
----
-
-## 7. Run the Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend runs at:
-
-```txt
-http://localhost:5173
-```
-
----
-
-## 8. Recommended Run Order
-
-Start backend first:
-
-```bash
-cd D:\RigMD
-backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
-```
-
-Then start frontend in another terminal:
-
-```bash
-cd D:\RigMD\frontend
-npm run dev
-```
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
+| Tier | Type | Policy |
 |---|---|---|
-| GET | `/` | Backend health check |
-| GET | `/api/hardware/live` | Get live hardware/system telemetry |
-| POST | `/api/hardware/refresh` | Refresh hardware cache |
-| GET | `/api/dashboard/summary` | Get home dashboard summary |
-| POST | `/api/profiles/save` | Save the detected hardware profile |
-| GET | `/api/profiles` | Get saved hardware profiles |
-| GET | `/api/profiles/{profile_id}` | Get one saved hardware profile |
-| PUT | `/api/profiles/{profile_id}` | Update one saved hardware profile |
-| POST | `/api/diagnose/` | Run diagnostic engine |
-| GET | `/api/history/sessions` | Get diagnostic history sessions |
-| GET | `/api/history/sessions/{session_id}` | Get one diagnostic session detail |
-| GET | `/api/recurring/patterns` | Get detected recurring patterns |
-| GET | `/api/recurring/patterns/{pattern_id}` | Get recurring pattern detail |
-| GET | `/api/warning-signs/reference` | Get warning signs reference list |
+| **Tier 1** | Safe & Reversible | Automated execution with user notification. No consent required. |
+| **Tier 2** | Configuration Changes | Requires explicit 1-click user consent. Restore snapshot captured before execution. |
+| **Tier 3** | Hardware / High-Risk | Strictly Advisory. Never automated. |
 
 ---
 
-## Frontend Screens
+## 9. What We Are NOT Building Yet
 
-| Screen | File | Status |
-|---|---|---|
-| Home Dashboard | `HardwareDashboard.tsx` | Working |
-| System Profile | `SystemProfileView.tsx` | Working with live hardware data |
-| Diagnostic History | `DiagnosticHistoryView.tsx` | Backend-ready |
-| Recurring Patterns | `RecurringPatternsView.tsx` | Backend-ready |
-| Warning Signs | `WarningSignsView.tsx` | Working reference screen |
-| Reports | `ReportsView.tsx` | Placeholder |
-| New Diagnosis | In progress | Next module |
-
----
-
-## Current Module Status
-
-| Module | Status |
-|---|---|
-| System Profile Detection | Working |
-| Home Dashboard | Working, needs database tables for full stats |
-| Diagnostic History | Ready, waits for saved sessions |
-| Recurring Patterns | Ready, waits for saved sessions |
-| Warning Signs Reference | Working |
-| New Diagnosis | Next to implement |
-| Reports | Placeholder |
+Until the foundation is solid, the following are explicitly out of scope:
+- ❌ Large autonomous action catalog
+- ❌ Arbitrary Windows command execution
+- ❌ AI-generated Windows commands
+- ❌ AI controlling the PC directly
+- ❌ Unrestricted registry modification
+- ❌ BIOS/firmware automation
+- ❌ Aggressive "one-click optimize everything"
+- ❌ Mandatory cloud synchronization
 
 ---
 
-## Action Categories
+## 10. Development Status & Current Phase
 
-| Category | Meaning |
-|---|---|
-| Monitor | Observe the issue because symptoms are mild or not yet repeated |
-| Maintain | Perform basic cleanup, update, or maintenance steps |
-| Troubleshoot | Investigate software, driver, OS, startup, or configuration causes |
-| Escalate | Issue may require professional inspection or urgent attention |
+For the full phased breakdown, see **[`C_SHARP_MIGRATION_PLAN.md`](./C_SHARP_MIGRATION_PLAN.md)**.  
+For the file-by-file capability audit, see **[`LEGACY_CAPABILITY_INVENTORY.md`](./LEGACY_CAPABILITY_INVENTORY.md)**.  
+For per-capability migration tracking, see **[`MIGRATION_MATRIX.md`](./MIGRATION_MATRIX.md)**.  
+For the baseline state reference, see **[`BASELINE.md`](./BASELINE.md)**.
 
----
+- **Current Phase**: Phase 7 (Connect the React Frontend) — **Milestone A (Vertical Slice Complete) Achieved**
+- **Reference Tag**: `v0.1-python-baseline`
+- **Active Branch**: `feature/csharp-migration`
 
-## Confidence Labels
+**How to run current version:**
+1. Backend: `cd backend-dotnet/RigMD.Api` then `dotnet run` (Listens on port 5273)
+2. Frontend: `cd frontend` then `npm run dev` (Listens on port 5173, routes to 5273)
 
-| Label | Meaning |
-|---|---|
-| High Confidence | Strong match between symptoms and diagnostic rule |
-| Moderate | Some matching signals, but more checks may be needed |
-| Low Confidence | Weak match or limited information |
-
----
-
-## Hardware Detection Requirements
-
-RigMD uses Windows-based hardware detection.
-
-Required packages:
-
-```txt
-WMI
-pywin32
-psutil
-```
-
-Install manually if needed:
-
-```bash
-cd backend
-venv\Scripts\activate
-pip install WMI pywin32 psutil
-```
-
-### Supported OS
-
-| OS | Support |
-|---|---|
-| Windows 10 | Supported |
-| Windows 11 | Supported |
-| Linux | Not supported for WMI hardware detection |
-| macOS | Not supported for WMI hardware detection |
-
----
-
-## What RigMD Detects
-
-RigMD can detect:
-
-- CPU model
-- CPU usage
-- RAM capacity and usage
-- GPU model
-- GPU driver
-- Storage size
-- Storage usage
-- Storage type, including NVMe SSD, SATA SSD, generic SSD, HDD, or Unknown
-- Windows version
-- Chipset or motherboard proxy
-- System age based on OS install date
-
-Storage type detection uses Windows physical disk metadata when available:
-
-- `MSFT_PhysicalDisk.MediaType` helps identify SSD vs HDD.
-- `MSFT_PhysicalDisk.BusType` helps distinguish NVMe vs SATA.
-- Model and interface heuristics are used only as fallback signals.
-- Per-drive storage details are saved in `profiles.storage_details` as JSONB.
-
----
-
-## Troubleshooting
-
-### 1. Frontend Shows “Connection Lost”
-
-Cause:
-
-```txt
-Backend is not running or frontend cannot reach port 8000.
-```
-
-Fix:
-
-```bash
-cd D:\RigMD
-backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
-```
-
-Then refresh:
-
-```txt
-http://localhost:5173
-```
-
----
-
-### 2. Orange Dashboard Database Warning Appears
-
-Message:
-
-```txt
-Database dashboard data is not available yet. Check your Supabase connection and tables.
-```
-
-Cause:
-
-- `DATABASE_URL` is missing
-- `DATABASE_URL` still contains `[YOUR-PASSWORD]`
-- Supabase password is wrong
-- Supabase tables are missing
-- Database route failed
-
-Check:
-
-```txt
-http://localhost:8000/api/dashboard/summary
-```
-
-If the response contains:
-
-```json
-"database_warning": "..."
-```
-
-then the backend database query failed.
-
-The dashboard summary endpoint intentionally returns HTTP 200 with `database_warning` when database-backed dashboard data is unavailable. This avoids frontend polling spam while still showing the database warning banner.
-
-Fix your:
-
-```txt
-backend/.env
-```
-
-and confirm these tables exist in Supabase:
-
-```txt
-profiles
-sessions
-recommendations
-```
-
----
-
-### 3. Hardware Shows Unknown or Generic Values
-
-Cause:
-
-- WMI package missing
-- pywin32 missing
-- psutil missing
-- WMI access blocked
-- Backend is not running on Windows
-
-Fix:
-
-```bash
-cd backend
-venv\Scripts\activate
-pip install WMI pywin32 psutil
-```
-
-Restart backend after installing.
-
----
-
-### 4. Backend Cannot Import `backend`
-
-Cause:
-
-Backend was run from the wrong folder.
-
-Wrong:
-
-```bash
-cd backend
-uvicorn main:app --reload --port 8000
-```
-
-Correct:
-
-```bash
-cd D:\RigMD
-backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
-```
-
----
-
-### 5. `psycopg2` Missing
-
-Error:
-
-```txt
-ModuleNotFoundError: No module named 'psycopg2'
-```
-
-Fix:
-
-```bash
-cd backend
-venv\Scripts\activate
-pip install psycopg2-binary
-```
-
-Then restart backend.
-
----
-
-## Environment Files
-
-### backend/.env
-
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-DATABASE_URL=your_supabase_connection_string_here
-FRONTEND_URL=http://localhost:5173
-```
-
-### frontend/.env
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
-
----
-
-## Git Ignore Reminder
-
-The following files must never be committed:
-
-```txt
-.env
-.env.*
-backend/.env
-backend/.env.*
-frontend/.env
-frontend/.env.*
-```
-
-Keep only sample files if needed:
-
-```txt
-.env.example
-backend/.env.example
-frontend/.env.example
-```
-
----
-
-## Branch Strategy
-
-| Branch | Purpose |
-|---|---|
-| `main` | Stable release branch |
-| `dev` | Integration branch |
-| `feature/[feature-name]` | Individual feature work |
-
-Example:
-
-```bash
-git switch -c feature/rigmd-diagnostic-modules
-```
-
----
-
-## Commit Message Format
-
-Use Conventional Commits:
-
-```txt
-feat(scope): add new feature
-fix(scope): fix bug
-chore(scope): update config or dependencies
-docs(scope): update documentation
-refactor(scope): improve code structure
-```
-
-Examples:
-
-```txt
-feat(history): add diagnostic history screen and API
-feat(recurring): add recurring patterns screen and API
-feat(warnings): add warning signs reference screen and API
-fix(hardware): improve hardware refresh handling
-docs(readme): update setup instructions
-```
-
----
-
-## Important Notes
-
-- RigMD is scoped to Windows desktop PCs.
-- RigMD does not physically inspect hardware.
-- RigMD does not guarantee a final diagnosis.
-- Advisory output is probabilistic and rule-based.
-- Professional inspection is still required for severe or repeated hardware-related warning signs.
-- Do not commit real API keys, Supabase passwords, or environment files.
+**Immediate next step**: Phase 8 — Rebuilding the intellectual core and Autonomous Remediation Engine in C#.
