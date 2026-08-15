@@ -128,3 +128,7 @@ test_results/
 .cache/
 coverage/
 README_V2.md
+# .NET build output
+**/bin/
+**/obj/
+frontend/dist/

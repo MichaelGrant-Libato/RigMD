@@ -4,7 +4,8 @@ import { type DiagnosisResult, ACTION_COLORS, CONFIDENCE_COLORS } from "../types
 import { useState, useEffect } from "react";
 
 
-// ─── Props ───────────────────────────────────────────────────────────────────
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 interface Props {
   result: DiagnosisResult;
@@ -117,7 +118,8 @@ const [actionResults, setActionResults]           = useState<Record<string, Acti
  
 useEffect(() => {
   if (!result.diagnosed_category) return;
-  fetch(`/api/remediation/actions?category=${encodeURIComponent(result.diagnosed_category)}`)
+  fetch(`${API_BASE_URL}/api/remediation/actions?category=${encodeURIComponent(
+  result.diagnosed_category)}`)
     .then(r => r.json())
     .then(data => setRemediationActions(data.actions ?? []))
     .catch(() => setRemediationActions([]));
@@ -126,7 +128,7 @@ useEffect(() => {
 async function handleFixNow(actionId: string) {
   setRunningAction(actionId);
   try {
-    const res = await fetch("/api/remediation/execute", {
+    const res = await fetch(`${API_BASE_URL}/api/remediation/execute`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({ action_id: actionId }),

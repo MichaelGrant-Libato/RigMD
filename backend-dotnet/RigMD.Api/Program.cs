@@ -1,3 +1,7 @@
+using RigMD.Infrastructure;
+using RigMD.Application.Services;
+using RigMD.Application.Contracts.Providers;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -24,10 +28,14 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IOperatingSyste
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IStorageProvider, RigMD.Infrastructure.Windows.WmiStorageProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMotherboardProvider, RigMD.Infrastructure.Windows.WmiMotherboardProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IProcessProvider, RigMD.Infrastructure.Windows.ProcessProvider>();
-
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IWindowsSystemProfileService, RigMD.Infrastructure.Windows.WindowsSystemProfileService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.OfflineAiExplainer>();
 builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService, RigMD.Application.Services.DiagnosticEngineService>();
+builder.Services.AddScoped<RigMD.Infrastructure.DatabaseSessionService>();
+builder.Services.AddScoped<DatabaseSessionService>();
+builder.Services.AddScoped<ResolutionService>();
+builder.Services.AddScoped<RecurringPatternService>();
+builder.Services.AddScoped<WarningSignService>();
 
 var app = builder.Build();
 

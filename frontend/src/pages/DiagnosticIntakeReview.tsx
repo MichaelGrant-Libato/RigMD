@@ -12,9 +12,8 @@ import {
   type DiagnosisResult,      
 } from "../types/rigmd";
 
-    // ─── Constants ───────────────────────────────────────────────────────────────
-
-    const API_BASE = "http://localhost:8000";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5273";
 
     const STEPS = [
     { key: "symptom_type",      label: "Symptom Type",      hint: "What is your PC doing that brought you here?" },
