@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 interface SessionDetail {
   session_id: string;

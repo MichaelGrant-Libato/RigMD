@@ -1,22 +1,7 @@
 /// <reference types="vite/client" />
 
-// API service for profile-related calls
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
-
-export interface SaveProfilePayload {
-  cpu_model: string;
-  ram_capacity: string;
-  storage_type: string;
-  storage_capacity: string;
-  storage_details?: StorageDetail[] | null;
-  os_version: string;
-  gpu_driver?: string | null;
-  chipset_driver?: string | null;
-  system_age?: string | null;
-}
-
-export type UpdateProfilePayload = Partial<SaveProfilePayload>;
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 export interface StorageDetail {
   model: string;
@@ -40,6 +25,18 @@ export interface StorageDetail {
   }>;
 }
 
+export interface SaveProfilePayload {
+  cpu_model: string;
+  ram_capacity: string;
+  storage_type: string;
+  storage_capacity: string;
+  storage_details?: StorageDetail[] | null;
+  os_version: string;
+  gpu_driver?: string | null;
+  chipset_driver?: string | null;
+  system_age?: string | null;
+}
+
 export interface HardwareProfile {
   id: string;
   cpu_model: string;
@@ -56,105 +53,40 @@ export interface HardwareProfile {
 
 export type SaveProfileResponse = HardwareProfile;
 
-/**
- * Save the current hardware profile to the database
- */
 export async function saveHardwareProfile(
   payload: SaveProfilePayload
 ): Promise<SaveProfileResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/save`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/api/profiles/save`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }
+    );
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: Failed to save profile`);
+      const errorData =
+        await response.json().catch(() => ({}));
+
+      throw new Error(
+        errorData.detail ||
+          `HTTP ${response.status}: Failed to save profile`
+      );
     }
 
     return await response.json();
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to save profile: ${message}`);
-  }
-}
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown error';
 
-/**
- * Retrieve a specific profile by ID
- */
-export async function getProfile(profileId: string): Promise<HardwareProfile> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/${profileId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: Failed to fetch profile`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to retrieve profile: ${message}`);
-  }
-}
-
-/**
- * Retrieve all saved profiles
- */
-export async function getAllProfiles(): Promise<HardwareProfile[]> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: Failed to fetch profiles`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to retrieve profiles: ${message}`);
-  }
-}
-
-/**
- * Update a saved hardware profile by ID
- */
-export async function updateProfile(
-  profileId: string,
-  payload: UpdateProfilePayload
-): Promise<HardwareProfile> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/profiles/${profileId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: Failed to update profile`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to update profile: ${message}`);
+    throw new Error(
+      `Failed to save profile: ${message}`
+    );
   }
 }

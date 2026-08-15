@@ -1,28 +1,64 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 
 namespace RigMD.Domain.Rules;
 
 public class DiagnosticSymptomPayload
 {
+    [JsonPropertyName("symptom_type")]
     public string SymptomType { get; set; } = string.Empty;
+
+    [JsonPropertyName("warning_signs")]
     public string WarningSigns { get; set; } = string.Empty;
+
+    [JsonPropertyName("warning_signs_label")]
     public string WarningSignsLabel { get; set; } = string.Empty;
+
+    [JsonPropertyName("recent_changes")]
     public string RecentChanges { get; set; } = string.Empty;
+
+    [JsonPropertyName("recent_changes_label")]
     public string RecentChangesLabel { get; set; } = string.Empty;
+
+    [JsonPropertyName("frequency")]
     public string Frequency { get; set; } = string.Empty;
+
+    [JsonPropertyName("severity")]
     public string Severity { get; set; } = string.Empty;
+
+    [JsonPropertyName("affected_activity")]
     public string AffectedActivity { get; set; } = string.Empty;
+
+    [JsonPropertyName("affected_activity_label")]
     public string AffectedActivityLabel { get; set; } = string.Empty;
+
+    [JsonPropertyName("system_state")]
     public string SystemState { get; set; } = string.Empty;
-    
+
+    [JsonPropertyName("duration")]
+    public string Duration { get; set; } = "N/A";
+
+    [JsonPropertyName("mentions_black_screen")]
     public bool MentionsBlackScreen { get; set; }
+
+    [JsonPropertyName("mentions_no_boot")]
     public bool MentionsNoBoot { get; set; }
+
+    [JsonPropertyName("mentions_blue_screen")]
     public bool MentionsBlueScreen { get; set; }
+
+    [JsonPropertyName("mentions_storage")]
     public bool MentionsStorage { get; set; }
+
+    [JsonPropertyName("mentions_heat")]
     public bool MentionsHeat { get; set; }
+
+    [JsonPropertyName("mentions_flicker")]
     public bool MentionsFlicker { get; set; }
+
+    [JsonPropertyName("mentions_slow")]
     public bool MentionsSlow { get; set; }
 }
 

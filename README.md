@@ -1,320 +1,783 @@
-# RigMD V2 — Autonomous PC Diagnostic & Remediation System
+# RigMD V2 — Windows PC Diagnostic & Remediation System
 
-> **Draft / Migration README** — gitignored, not committed.  
-> This document describes the next-generation architecture, what already exists, what will change, and the full structural hierarchy for the C# migration.
+RigMD is a Windows desktop PC diagnostic advisory system that is transitioning into a controlled diagnostic and remediation platform.
+
+The current application uses:
+
+- React + Vite for the frontend
+- C# / .NET with ASP.NET Core for the active backend
+- Native Windows/WMI-based hardware telemetry
+- Deterministic diagnostic rules
+- Supabase PostgreSQL for the current persistence layer
+- Controlled remediation actions
+- Resolution rechecking
+- Recurring pattern detection
+- Warning-sign normalization
+- Constrained AI explanations
+
+The legacy Python/FastAPI backend is still kept in the repository temporarily as a migration reference and historical baseline.
 
 ---
 
 ## 1. Overview & Vision
 
-RigMD is evolving from a passive diagnostic decision-support system (DSS) into a **closed-loop autonomous diagnostic and remediation platform** for Windows desktop PCs.
+RigMD is evolving from a passive diagnostic decision-support system into a **controlled closed-loop diagnostic and remediation platform** for Windows desktop PCs.
 
-The system will combine:
-1. **Isolated Native Windows Telemetry** — hardware, drivers, event logs, processes.
-2. **Deterministic Diagnostic Rule Engine** — structured scoring, reasoning factors, warning signs.
-3. **Controlled Autonomous Remediation Engine** — preconditioned actions, dry-run simulation, execution, verification, automatic rollback, and intelligent pivoting.
-4. **Offline-First Persistence** — local SQLite as the single source of truth, with optional cloud sync.
-5. **Constrained AI Explanations** — plain-language summaries without delegating system execution to any LLM.
+The target architecture combines:
+
+1. **Native Windows Telemetry**
+   Hardware, drivers, processes, utilization, and Windows system information.
+
+2. **Deterministic Diagnostic Engine**
+   Structured scoring, evidence, action categories, confidence levels, recurring-pattern analysis, and warning-sign detection.
+
+3. **Controlled Remediation Engine**
+   Approved remediation actions, safety checks, resolution rechecking, and future verification, rollback, and pivot behavior.
+
+4. **Offline-First Persistence**
+   The target architecture uses local SQLite as the source of truth, with optional Supabase synchronization.
+
+5. **Constrained AI Explanations**
+   AI may explain or summarize diagnostic results, but does not control system execution.
 
 ---
 
-## 2. What RigMD Already Has (Confirmed Baseline)
+## 2. Current Migration Status
 
-### 2.1 Frontend (React / Vite)
-The existing React frontend is substantial and will be preserved and redirected — not rewritten.
+The active backend migration from Python/FastAPI to C#/.NET has reached **functional parity for the routes currently used by the React frontend**.
+
+### C# Migration Checkpoint
+
+```
+Commit: 983190e
+Tag: csharp-migration-complete
+Branch: feature/csharp-migration
+```
+
+### Legacy Python Reference
+
+```
+Tag: python-backend-final
+```
+
+### Current Development URLs
+
+Frontend:
+
+```
+http://localhost:5173
+```
+
+C# backend:
+
+```
+http://localhost:5273
+```
+
+Frontend API configuration:
+
+```
+VITE_API_BASE_URL=http://localhost:5273
+```
+
+The frontend no longer depends on the Python backend at port 8000.
+
+---
+
+## 3. Current Technology Stack
+
+| Layer | Current Implementation |
+|---|---|
+| Frontend | React + TypeScript + Vite |
+| Backend API | C# / ASP.NET Core |
+| Domain Logic | C# |
+| Hardware Detection | WMI / System.Management |
+| Current Database | Supabase PostgreSQL |
+| Database Client | Npgsql |
+| AI Explanation | Gemini integration |
+| Testing | xUnit |
+| Target Local Persistence | SQLite + Entity Framework Core |
+| Target Desktop Packaging | WPF + WebView2 |
+| Target Cloud Strategy | Optional Supabase synchronization |
+
+### Important Persistence Note
+
+The current C# backend still connects directly to the existing Supabase PostgreSQL database.
+
+This is intentional during migration so that:
+
+- existing profile and diagnostic history remains available
+- Python and C# behavior can be compared
+- frontend migration can be validated independently
+- database redesign does not interfere with runtime migration
+
+The long-term architecture remains:
+
+- SQLite = local source of truth
+- Supabase = optional asynchronous cloud synchronization
+
+Direct Supabase persistence is therefore a migration-compatibility architecture, not the final offline-first design.
+
+---
+
+## 4. Frontend
+
+The existing React frontend was preserved rather than rewritten.
 
 | Screen | Status |
 |---|---|
-| `SystemProfileView` | ✅ Fully implemented |
-| `NewDiagnosisView` (8-step structured intake) | ✅ Fully implemented |
-| `DiagnosticIntakeReview` | ✅ Fully implemented |
-| `DiagnosticResultView` | ✅ Fully implemented |
-| `DiagnosticHistoryView` | ✅ Fully implemented |
-| `DiagnosticSessionDetailView` | ✅ Fully implemented |
-| `RecurringPatternsView` | ✅ Fully implemented |
-| `WarningSignsView` | ✅ Fully implemented |
-| `HardwareDashboard` | ✅ Fully implemented |
-| `HelpScopeView` | ✅ Fully implemented |
-| `ReportsView` | ⚠️ Empty file — not yet implemented |
+| HardwareDashboard | ✅ Implemented |
+| SystemProfileView | ✅ Implemented |
+| NewDiagnosisView | ✅ Implemented |
+| DiagnosticIntakeReview | ✅ Implemented |
+| DiagnosticResultView | ✅ Implemented |
+| DiagnosticHistoryView | ✅ Implemented |
+| DiagnosticSessionDetailView | ✅ Implemented |
+| RecurringPatternsView | ✅ Implemented |
+| WarningSignsView | ✅ Implemented |
+| HelpScopeView | ✅ Implemented |
 
-### 2.2 Backend (Python / FastAPI)
-The existing backend is functional, not a skeleton.
-
-**Confirmed working routers**: `hardware`, `dashboard`, `history`, `recurring`, `warning_signs`, `profile`, `remediation` (stub).
-
-**`main.py` orchestrates the full pipeline**:
-- `GET live hardware` → `run_diagnostic()` → `get_or_create_profile()` → `save_session()`
-
-**Services that exist**:
-- `diagnostic_engine.py` (34 KB) — substantial rule-based scoring, evidence, and confidence engine.
-- `remediation_service.py` (20 KB) — early-stage; not fully integrated.
-- `resolution_service.py` — re-evaluates a session against live hardware.
-- `ai_explainer.py` — Gemini API client, constrained to diagnostic context.
-- `session_store.py` — query helpers.
-
-### 2.3 Hardware Detection
-The legacy Python implementation already detects:
-- CPU, GPU, GPU driver, RAM, OS version
-- Storage type classification (NVMe / SSD / HDD), physical + logical disk metadata
-- Browser and game/heavy process detection
-- Chipset driver, system age
-- Multiple WMI fallback/error paths
-
-### 2.4 Data Models
-**Profile** (currently `profiles` table):
-- `cpu_model`, `ram_capacity`, `storage_type`, `storage_capacity`, `storage_details` (JSONB), `os_version`, `gpu_driver`, `chipset_driver`, `system_age`
-
-**Session** (currently `sessions` table):
-- 8 intake fields: `symptom_type`, `affected_activity`, `frequency`, `severity`, `duration`, `recent_changes`, `system_state`, `warning_signs`
-- Diagnostic output: `diagnosed_category`, `action_category`, `confidence_label`, `ai_explanation`, `is_recurring`
-- Resolution lifecycle: `resolution_status`, `resolution_checked_at`, `resolution_summary`, `resolution_proof` (JSON), `last_action_status`, `last_action_summary`
-
-### 2.5 Closed-Loop Seed (Already Exists)
-The resolution recheck mechanism is already a seed for the future autonomous loop:
-- Mark session as `needs_recheck` after action.
-- Re-run live hardware collection + resolution check.
-- Update session state.
-
-This is not yet formalized as `RemediationRun` / `VerificationResult`, but the concept exists in the codebase.
+The frontend now uses `VITE_API_BASE_URL` for active API calls.
 
 ---
 
-## 3. Old vs. New Comparison
+## 5. Current C# Backend Capabilities
 
-| Dimension | Legacy / Baseline (V1) | Target (V2) |
-|---|---|---|
-| **Core Stack** | Python FastAPI / CustomTkinter | React + C#/.NET (ASP.NET Core + WPF + WebView2) |
-| **System Behavior** | Passive Advisory | **Controlled Autonomous Remediation** (Closed-Loop) |
-| **Remediation** | Manual action based on text | Automated with **Verify → Rollback → Pivot** |
-| **Safety Model** | Static text warnings | **Multi-Tier Safety Policy + Dry-Run Mode** |
-| **Hardware Detection** | Monolithic Python script (`wmi`, `psutil`) | **Isolated C# Providers** (`System.Management`, CIM, EventLogs) |
-| **Primary Storage** | Supabase (cloud-dependent) | **SQLite (Local Source of Truth, 100% Offline)** |
-| **Cloud Sync** | Required for basic save | **Optional Async Sync** (background Supabase worker) |
-| **AI Role** | AI generates explanation | **AI constrained to explanation only** — never controls execution |
-| **Packaging** | Python virtual environment | **Standalone Windows Executable** (WPF + WebView2) |
+### 5.1 Hardware Detection
+
+The C# backend provides live Windows hardware and system information including:
+
+- CPU
+- GPU
+- GPU driver
+- RAM
+- operating system
+- storage
+- storage type
+- motherboard
+- chipset/system metadata
+- running processes
+- system utilization
+
+Primary endpoints:
+
+```
+GET  /api/hardware/live
+POST /api/hardware/refresh
+```
+
+### 5.2 Diagnostic Engine
+
+The diagnostic engine has been migrated to C#.
+It supports:
+
+- structured symptom intake
+- deterministic category classification
+- evidence generation
+- action-category selection
+- confidence classification
+- session persistence
+
+Primary endpoint:
+
+```
+POST /api/diagnosis/submit
+```
+
+Diagnostic categories include areas such as:
+
+- OS performance degradation
+- driver conflict
+- thermal condition
+- storage health behavior
+- display driver behavior
+- boot and startup failure
+
+### 5.3 Diagnostic History
+
+Endpoints:
+
+```
+GET /api/diagnosis/sessions
+GET /api/diagnosis/sessions/{sessionId}
+```
+
+History supports dynamically calculated recurring status rather than relying only on previously stored recurrence values.
+
+### 5.4 Dashboard
+
+Endpoint:
+
+```
+GET /api/dashboard/summary
+```
+
+Dashboard data includes:
+
+- total diagnostic sessions
+- sessions this month
+- escalated sessions
+- recurring issue count
+- active warning-sign count
+- action distribution
+- session frequency
+- latest session
+- recent normalized warning signs
+
+### 5.5 Hardware Profiles
+
+The active frontend currently uses:
+
+```
+POST /api/profiles/save
+```
+
+Unused legacy profile list/read/update endpoints were intentionally not recreated because no active frontend feature depends on them.
+
+### 5.6 Recurring Patterns
+
+Endpoints:
+
+```
+GET /api/recurring/patterns
+GET /api/recurring/patterns/{patternId}
+```
+
+Recurring patterns are calculated from diagnostic history.
+Current recurring detection operates dynamically rather than depending only on stored `is_recurring` values.
+
+### 5.7 Warning Signs
+
+Endpoint:
+
+```
+GET /api/warning-signs/reference
+```
+
+The warning-sign reference supports:
+
+- normalized warning-sign definitions
+- observed occurrence counts
+- category filtering
+- text search
+- observed-only filtering
+
+### 5.8 Remediation
+
+Current remediation endpoints:
+
+```
+GET  /api/remediation/actions
+POST /api/remediation/execute
+POST /api/remediation/open-target
+```
+
+The remediation implementation is controlled and limited to explicitly supported actions.
+It is not an unrestricted system-command execution engine.
+
+### 5.9 Resolution Checking
+
+Endpoints:
+
+```
+POST /api/diagnosis/{sessionId}/needs-recheck
+POST /api/diagnosis/{sessionId}/check-resolution
+```
+
+This provides the current foundation for a closed-loop workflow:
+
+```
+Diagnose
+   ↓
+Recommend / Execute Supported Action
+   ↓
+Mark Needs Recheck
+   ↓
+Collect Current System State
+   ↓
+Check Resolution
+   ↓
+Resolved / Still Active / Needs Recheck
+```
+
+### 5.10 Database Health
+
+Endpoint:
+
+```
+GET /api/database/health
+```
+
+This verifies current database connectivity.
 
 ---
 
-## 4. Architecture Flow
+## 6. Old vs. Current vs. Target Architecture
 
-```text
-                 ┌────────────────────────────────┐
-                 │       React Frontend UI        │
-                 │   (Intake / Live / History)    │
-                 └───────────────┬────────────────┘
-                                 │ HTTP / IPC
-                                 ↓
-                 ┌────────────────────────────────┐
-                 │       ASP.NET Core API         │
-                 │   (RigMD.Api / Minimal APIs)   │
-                 └───────────────┬────────────────┘
-                                 │
-                                 ↓
-                 ┌────────────────────────────────┐
-                 │       Application Layer        │
-                 │   (Use Cases & Orchestration)  │
-                 └───────┬───────────────┬────────┘
-                         │               │
-         ┌───────────────┘               └───────────────┐
-         ↓                                               ↓
-┌─────────────────────┐                   ┌───────────────────────────────┐
-│     Domain Layer    │                   │      Infrastructure Layer     │
-│  - Diagnostic Rules │                   │  - Windows Native Providers   │
-│  - Autonomous Core  │                   │  - EF Core + SQLite DbContext │
-│  - Safety Policies  │                   │  - Gemini AI Explainer Client │
-└─────────────────────┘                   │  - Optional Supabase Sync     │
-                                          └──────────────┬────────────────┘
-                                                         │
-                              ┌──────────────────────────┴──────────────────────────┐
-                              ↓                                                      ↓
-                   ┌──────────────────────┐                           ┌──────────────────────────┐
-                   │   Local SQLite DB    │                           │   Optional Supabase DB   │
-                   │  (Source of Truth)   │                           │   (Async Cloud Sync)     │
-                   └──────────────────────┘                           └──────────────────────────┘
+| Dimension | Legacy V1 | Current Runtime | Target V2 |
+|---|---|---|---|
+| Backend | Python / FastAPI | C# / ASP.NET Core | C# / ASP.NET Core |
+| Frontend | React / Vite | React / Vite | React + WPF/WebView2 |
+| Hardware Detection | Python WMI / wrappers | C# WMI providers | Native C# providers |
+| Diagnostic Engine | Python | C# | C# Domain layer |
+| Persistence | Supabase PostgreSQL | Supabase PostgreSQL | SQLite local source of truth |
+| Cloud | Required | Required for current persistence | Optional sync |
+| Remediation | Mostly advisory | Controlled supported actions | Closed-loop remediation |
+| Verification | Basic resolution recheck | Resolution recheck | Formal verification |
+| Rollback | Not formalized | Not formalized | Planned |
+| Pivot | Not formalized | Not formalized | Planned |
+| AI | Explanation | Explanation only | Explanation |
+| Packaging | Development runtime | Development runtime | Standalone Windows application |
+
+---
+
+## 7. Current Runtime Architecture
+
+```
+                 ┌──────────────────────────────┐
+                 │       React Frontend         │
+                 │       Vite / TypeScript      │
+                 └──────────────┬───────────────┘
+                                │
+                                │ HTTP
+                                ↓
+                 ┌──────────────────────────────┐
+                 │       ASP.NET Core API       │
+                 │          RigMD.Api           │
+                 └──────────────┬───────────────┘
+                                │
+                                ↓
+                 ┌──────────────────────────────┐
+                 │      Application Layer       │
+                 │ Services / Models / Logic    │
+                 └──────────────┬───────────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    ↓                       ↓
+         ┌─────────────────────┐   ┌─────────────────────┐
+         │     Domain Layer    │   │ Infrastructure Layer│
+         │ Diagnostic Rules    │   │ Windows Providers   │
+         │ Categories          │   │ Database Access      │
+         │ Confidence          │   │ Remediation          │
+         └─────────────────────┘   └──────────┬──────────┘
+                                             │
+                                             ↓
+                                  ┌───────────────────────┐
+                                  │ Supabase PostgreSQL   │
+                                  │       via Npgsql      │
+                                  └───────────────────────┘
 ```
 
 ---
 
-## 5. New Solution & Repository Structure
+## 8. Target V2 Architecture
 
-```text
+```
+                 ┌──────────────────────────────┐
+                 │        React UI              │
+                 │     WPF + WebView2           │
+                 └──────────────┬───────────────┘
+                                ↓
+                 ┌──────────────────────────────┐
+                 │       ASP.NET Core           │
+                 └──────────────┬───────────────┘
+                                ↓
+                 ┌──────────────────────────────┐
+                 │      Application Layer       │
+                 └──────────────┬───────────────┘
+                                ↓
+                 ┌──────────────────────────────┐
+                 │         Domain Layer         │
+                 │ Diagnosis / Safety / Rules   │
+                 └──────────────┬───────────────┘
+                                ↓
+                 ┌──────────────────────────────┐
+                 │     Infrastructure Layer     │
+                 │                              │
+                 │  Windows Native Providers    │
+                 │  SQLite Persistence          │
+                 │  AI Explanation Client       │
+                 │  Optional Cloud Sync         │
+                 └──────────────┬───────────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    ↓                       ↓
+          ┌──────────────────────┐   ┌─────────────────────┐
+          │    Local SQLite DB   │   │ Supabase PostgreSQL │
+          │   Source of Truth    │   │ Optional Cloud Sync │
+          └──────────────────────┘   └─────────────────────┘
+```
+
+---
+
+## 9. Repository Structure
+
+```
 RigMD/
-├── backend/                              ← Legacy Python/FastAPI (Reference baseline — do not delete yet)
-│   ├── main.py                           ← Primary orchestration
-│   ├── routers/                          ← hardware.py, dashboard.py, history.py, recurring.py, etc.
-│   ├── services/                         ← diagnostic_engine.py, ai_explainer.py, remediation_service.py, etc.
-│   ├── models/                           ← profile_model.py, session_model.py, recommendation_model.py
-│   └── schemas/                          ← Pydantic request/response models
 │
-├── backend-dotnet/                       ← New C#/.NET Solution
+├── backend/
+│   └── Legacy Python/FastAPI implementation
+│       retained temporarily for migration reference
+│
+├── backend-dotnet/
+│   │
 │   ├── RigMD.sln
 │   │
-│   ├── RigMD.Domain/                     ← Enterprise business rules (zero external dependencies)
-│   │   ├── Entities/                     ← SystemProfile, DiagnosticSession, DiagnosticOutput, etc.
-│   │   ├── Enums/                        ← ActionCategory, RemediationTier, VerificationStatus, etc.
-│   │   └── Rules/                        ← Diagnostic rule definitions, symptom matchers
+│   ├── RigMD.Api/
+│   │   ├── Controllers/
+│   │   └── Program.cs
 │   │
-│   ├── RigMD.Application/                ← Use cases, interfaces, orchestration
-│   │   ├── Contracts/                    ← IProfileRepository, IDiagnosticSessionRepository, IRemediationRepository
-│   │   ├── Providers/                    ← ICpuProvider, IGpuProvider, IStorageProvider, etc.
-│   │   ├── Services/                     ← DiagnosticRuleService, ScoringService, EvidenceService, ConfidenceService, AdvisoryActionService
-│   │   ├── Autonomous/                   ← IRemediationPlanner, ISafetyPolicy, IRemediationRegistry, IRemediationExecutor, IVerificationService, IRollbackManager, IPivotEngine
-│   │   └── UseCases/                     ← RunDiagnosticUseCase, PlanRemediationUseCase, ExecuteDryRunUseCase
+│   ├── RigMD.Application/
+│   │   ├── Models/
+│   │   └── Services/
 │   │
-│   ├── RigMD.Infrastructure/             ← External adapters, OS integration, persistence
-│   │   ├── Persistence/                  ← EF Core DbContext, SQLite migrations, repository implementations
-│   │   ├── Windows/                      ← Native Windows information providers
-│   │   │   ├── CpuInformationProvider.cs
-│   │   │   ├── GpuInformationProvider.cs
-│   │   │   ├── MemoryInformationProvider.cs
-│   │   │   ├── StorageInformationProvider.cs
-│   │   │   ├── DriverInformationProvider.cs
-│   │   │   ├── EventLogProvider.cs
-│   │   │   ├── ProcessInformationProvider.cs
-│   │   │   └── WindowsSystemProfileProvider.cs
-│   │   ├── Remediation/                  ← Concrete approved action handlers
-│   │   ├── Ai/                           ← Gemini API client (constrained to explanation)
-│   │   └── Sync/                         ← Optional Supabase background sync worker
+│   ├── RigMD.Domain/
+│   │   ├── Entities/
+│   │   ├── Enums/
+│   │   └── Rules/
 │   │
-│   ├── RigMD.Api/                        ← ASP.NET Core presentation & endpoint layer
-│   │   ├── Endpoints/                    ← /api/health, /api/system-profile/live, /api/diagnostics, etc.
-│   │   ├── Middleware/                   ← Exception handling, logging, validation pipeline
-│   │   └── Program.cs                    ← DI setup, middleware, service registration
+│   ├── RigMD.Infrastructure/
+│   │   ├── Windows/
+│   │   └── DatabaseSessionService.cs
 │   │
-│   └── RigMD.Tests/                      ← Automated test suite
-│       ├── Domain.Tests/                 ← Diagnostic rule & scoring unit tests
-│       ├── Application.Tests/            ← Use case & dry-run pipeline tests
-│       └── Infrastructure.Tests/         ← Windows provider & SQLite integration tests
+│   └── RigMD.Tests/
 │
-├── frontend/                             ← React 18 + Vite (Preserved — redirected via VITE_API_URL)
+├── frontend/
+│   └── React + TypeScript + Vite
 │
-├── Docs/                                 ← Thesis PDFs, SRS, SDD
+├── Docs/
+│   ├── ARCHITECTURE.md
+│   ├── ARCHITECTURE_MIGRATION.md
+│   ├── AUTONOMOUS_ENGINE.md
+│   ├── BASELINE.md
+│   ├── C_SHARP_MIGRATION_PLAN.md
+│   ├── DECISIONS.md
+│   ├── LEGACY_CAPABILITY_INVENTORY.md
+│   ├── MIGRATION_MATRIX.md
+│   └── REMEDIATION_POLICY.md
 │
-├── AGENTS.md                             ← AI engineering policy (authoritative)
-├── ARCHITECTURE.md                       ← Target architectural spec
-├── ARCHITECTURE_MIGRATION.md             ← Old → new migration mapping
-├── AUTONOMOUS_ENGINE.md                  ← Closed-loop engine concepts
-├── REMEDIATION_POLICY.md                 ← Safety tiers and action consent model
-├── DECISIONS.md                          ← Architectural decision records
-├── C_SHARP_MIGRATION_PLAN.md             ← 17-phase roadmap and phase checklists
-├── LEGACY_CAPABILITY_INVENTORY.md        ← File-by-file audit of what exists now
-├── MIGRATION_MATRIX.md                   ← Per-capability migration tracking table
-└── BASELINE.md                           ← Known state of the Python baseline at migration start
+├── AGENTS.md
+├── IMPLEMENT_ME.md
+├── README.md
+└── .gitignore
 ```
 
 ---
 
-## 6. Domain Model & ERD Hierarchy
+## 10. Domain Model Direction
 
-Reconciled from the thesis SDD ERD + new autonomous concepts:
+The target C# domain model includes:
 
-```text
+```
 SystemProfile
-  │ (1)
-  └── (0..*) DiagnosticSession
-               │ (1)
-               ├── (1..*) SessionAnswer
-               │
-               └── (1) DiagnosticOutput
-                         │
-                         ├── (1..*) ReasoningFactor
-                         │
-                         ├── (0..*) OutputWarningSign ──> (1) WarningSign
-                         │
-                         └── (0..1) RemediationRun
-                                      │
-                                      ├── (1..*) ActionAttempt
-                                      │            │
-                                      │            └── (1) VerificationResult
-                                      │
-                                      ├── (0..*) RollbackEvent
-                                      │
-                                      └── (0..*) PivotEvent
+  │
+  └── DiagnosticSession
+        │
+        ├── SessionAnswer
+        │
+        └── DiagnosticOutput
+              │
+              ├── ReasoningFactor
+              ├── OutputWarningSign ──> WarningSign
+              │
+              └── RemediationRun
+                    │
+                    ├── ActionAttempt
+                    │     └── VerificationResult
+                    │
+                    ├── RollbackEvent
+                    └── PivotEvent
 ```
 
-> **Key rule**: Do not discard `SessionAnswer`, `ReasoningFactor`, or `OutputWarningSign` entities. The current Python implementation stores these as flat columns. The C# model promotes them to proper relational entities to align with the SDD ERD.
+The full target model is still being formalized.
+
+The migration should not discard concepts from the SDD simply because the legacy database stores several values in flat columns.
 
 ---
 
-## 7. Closed-Loop Autonomous Pipeline
+## 11. Controlled Remediation Direction
 
-```text
-  [ Intake Symptoms + Live Telemetry ]
-                  ↓
-       [ Deterministic Diagnosis ]
-       (DiagnosticRuleService, ScoringService, EvidenceService)
-                  ↓
-     [ Probable Cause + Evidence + Confidence ]
-                  ↓
-         [ Remediation Planner ]
-         (IRemediationPlanner + IRemediationRegistry)
-                  ↓
-      [ Safety Policy & Tier Check ]
-      (ISafetyPolicy → Tier 1 / Tier 2 / Tier 3)
-                  ↓
-      ┌─────────────────────────────────┐
-      │     DRY-RUN SIMULATION MODE     │  ← Always available; permanent developer tool
-      └──────────────┬──────────────────┘
-                     ↓ (if approved)
-        [ Execute Action Attempt ]
-        (IRemediationExecutor + registered action)
-                     ↓
-        [ Measure & Verify State ]
-        (IVerificationService)
-                     │
-             ┌───────┴───────┐
-             │   Resolved?   │
-             └───────┬───────┘
-           YES │           │ NO
-               ↓           ↓
-         [ Complete ]   [ IRollbackManager ]
-         [ Audit Log ]       ↓
-                      [ IPivotEngine ]
-                             ↓
-                     [ Next Candidate Action ]
-                             ↓
-                     [ Re-Verify / Escalate ]
+The future closed-loop pipeline is:
+
 ```
+Symptoms + Live Telemetry
+           ↓
+Deterministic Diagnosis
+           ↓
+Evidence + Confidence
+           ↓
+Remediation Candidate
+           ↓
+Safety Policy
+           ↓
+Dry Run
+           ↓
+User Approval When Required
+           ↓
+Execute Registered Action
+           ↓
+Verify
+           ↓
+Resolved?
+      ┌────┴────┐
+      │         │
+     Yes        No
+      │         │
+      ↓         ↓
+  Complete   Rollback
+                ↓
+               Pivot
+                ↓
+        Next Safe Action
+```
+
+Only explicitly registered and reviewed remediation actions may execute.
+AI must never generate arbitrary Windows commands for automatic execution.
 
 ---
 
-## 8. Remediation Safety Tiers
+## 12. Remediation Safety Tiers
 
 | Tier | Type | Policy |
 |---|---|---|
-| **Tier 1** | Safe & Reversible | Automated execution with user notification. No consent required. |
-| **Tier 2** | Configuration Changes | Requires explicit 1-click user consent. Restore snapshot captured before execution. |
-| **Tier 3** | Hardware / High-Risk | Strictly Advisory. Never automated. |
+| Tier 1 | Low-risk and reversible | May execute with clear user visibility |
+| Tier 2 | Configuration-changing | Requires explicit user approval and recovery strategy |
+| Tier 3 | High-risk / hardware / firmware | Advisory only |
+
+Restricted functionality includes:
+
+- arbitrary Windows command execution
+- unrestricted PowerShell execution
+- AI-generated system commands
+- uncontrolled registry modification
+- BIOS or firmware automation
+- destructive storage operations
+- uncontrolled one-click optimization
 
 ---
 
-## 9. What We Are NOT Building Yet
+## 13. Running RigMD
 
-Until the foundation is solid, the following are explicitly out of scope:
-- ❌ Large autonomous action catalog
-- ❌ Arbitrary Windows command execution
-- ❌ AI-generated Windows commands
-- ❌ AI controlling the PC directly
-- ❌ Unrestricted registry modification
-- ❌ BIOS/firmware automation
-- ❌ Aggressive "one-click optimize everything"
-- ❌ Mandatory cloud synchronization
+### Requirements
+
+Install:
+
+- compatible .NET SDK
+- Node.js
+- npm
+- Windows
+- valid local backend secrets/configuration
+
+Do not commit:
+
+- database passwords
+- API keys
+- Supabase credentials
+- Gemini API keys
+- real `.env` files
+
+### Start the Backend
+
+From the repository root:
+
+```bash
+cd backend-dotnet
+dotnet run --project RigMD.Api
+```
+
+Expected backend URL:
+
+```
+http://localhost:5273
+```
+
+### Start the Frontend
+
+Open another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Expected frontend URL:
+
+```
+http://localhost:5173
+```
+
+Ensure the frontend environment contains:
+
+```
+VITE_API_BASE_URL=http://localhost:5273
+```
 
 ---
 
-## 10. Development Status & Current Phase
+## 14. Build and Test
 
-For the full phased breakdown, see **[`C_SHARP_MIGRATION_PLAN.md`](./C_SHARP_MIGRATION_PLAN.md)**.  
-For the file-by-file capability audit, see **[`LEGACY_CAPABILITY_INVENTORY.md`](./LEGACY_CAPABILITY_INVENTORY.md)**.  
-For per-capability migration tracking, see **[`MIGRATION_MATRIX.md`](./MIGRATION_MATRIX.md)**.  
-For the baseline state reference, see **[`BASELINE.md`](./BASELINE.md)**.
+### Backend
 
-- **Current Phase**: Phase 7 (Connect the React Frontend) — **Milestone A (Vertical Slice Complete) Achieved**
-- **Reference Tag**: `v0.1-python-baseline`
-- **Active Branch**: `feature/csharp-migration`
+```bash
+cd backend-dotnet
+dotnet build
+dotnet test
+```
 
-**How to run current version:**
-1. Backend: `cd backend-dotnet/RigMD.Api` then `dotnet run` (Listens on port 5273)
-2. Frontend: `cd frontend` then `npm run dev` (Listens on port 5173, routes to 5273)
+### Frontend
 
-**Immediate next step**: Phase 8 — Rebuilding the intellectual core and Autonomous Remediation Engine in C#.
+```bash
+cd frontend
+npm run build
+```
+
+At the C# migration checkpoint:
+
+- Frontend production build: **PASS**
+- .NET build: **PASS**
+- .NET test execution: **PASS**
+
+Current automated test coverage is still limited and must be expanded.
+
+Priority tests include:
+
+- diagnostic-rule classification
+- confidence calculation
+- recurring-pattern detection
+- warning-sign normalization
+- resolution-state evaluation
+- remediation safety behavior
+- database integration behavior
+
+---
+
+## 15. Legacy Python Backend
+
+The directory:
+
+```
+backend/
+```
+
+contains the previous FastAPI implementation.
+It is no longer the active backend used by the React frontend.
+
+It remains temporarily for:
+
+- regression comparison
+- migration verification
+- historical reference
+- auditability
+
+The Python runtime should only be removed after:
+
+- automated C# test coverage is expanded
+- full UI smoke testing passes
+- no active runtime dependency remains
+- documentation cleanup is complete
+
+Historical documentation should remain after runtime retirement.
+
+Relevant files include:
+
+- `Docs/BASELINE.md`
+- `Docs/LEGACY_CAPABILITY_INVENTORY.md`
+
+---
+
+## 16. Current Development Status
+
+### Completed
+
+- ✅ C# solution foundation
+- ✅ ASP.NET Core API
+- ✅ Windows hardware observation layer
+- ✅ diagnostic engine migration
+- ✅ frontend API migration from port 8000 to 5273
+- ✅ diagnostic persistence compatibility
+- ✅ diagnostic history
+- ✅ dashboard
+- ✅ recurring pattern detection
+- ✅ warning-sign reference
+- ✅ profile save
+- ✅ remediation endpoints
+- ✅ resolution rechecking
+- ✅ frontend production build
+- ✅ .NET build
+- ✅ .NET test execution
+- ✅ route parity review
+- ✅ migration checkpoint
+- ✅ generated bin/ and obj/ files removed from Git tracking
+
+### In Progress / Remaining
+
+- ⏳ expand automated test coverage
+- ⏳ improve Application/Infrastructure separation
+- ⏳ replace anonymous/reflection-based internal models
+- ⏳ improve database aggregation queries
+- ⏳ formalize remediation planner
+- ⏳ formalize safety policy
+- ⏳ add dry-run remediation
+- ⏳ formalize verification
+- ⏳ add rollback
+- ⏳ add pivot logic
+- ⏳ implement SQLite local persistence
+- ⏳ implement optional Supabase synchronization
+- ⏳ desktop packaging
+- ⏳ final thesis/SRS/SDD alignment
+- ⏳ retire legacy Python runtime
+
+---
+
+## 17. Important Git Checkpoints
+
+**Legacy Python Reference**
+
+```
+python-backend-final
+```
+
+**C# Runtime Migration Complete**
+
+```
+csharp-migration-complete
+```
+
+Current migration checkpoint:
+
+```
+983190e feat: complete C# backend migration parity
+```
+
+---
+
+## 18. Documentation
+
+- [Architecture](./Docs/ARCHITECTURE.md)
+- [Architecture Migration](./Docs/ARCHITECTURE_MIGRATION.md)
+- [C# Migration Roadmap](./Docs/C_SHARP_MIGRATION_PLAN.md)
+- [Autonomous Engine](./Docs/AUTONOMOUS_ENGINE.md)
+- [Remediation Policy](./Docs/REMEDIATION_POLICY.md)
+- [Migration Matrix](./Docs/MIGRATION_MATRIX.md)
+- [Legacy Baseline](./Docs/BASELINE.md)
+- [Legacy Capability Inventory](./Docs/LEGACY_CAPABILITY_INVENTORY.md)
+- [Architectural Decisions](./Docs/DECISIONS.md)
+
+---
+
+## 19. Current Development Focus
+
+The Python-to-C# runtime migration is functionally complete for the active React frontend.
+
+The next priorities are:
+
+- expand meaningful automated tests
+- clean Application and Infrastructure boundaries
+- continue the controlled remediation framework
+- implement local SQLite persistence
+- implement optional Supabase synchronization
+- perform full UI and backend validation
+- retire the Python runtime
+- prepare Windows desktop packaging
+- align final implementation with the SRS and SDD

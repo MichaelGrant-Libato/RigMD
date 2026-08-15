@@ -1,9 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Services;
 using RigMD.Domain.Rules;
+using RigMD.Infrastructure;
 
 namespace RigMD.Api.Controllers;
 
@@ -12,92 +13,397 @@ namespace RigMD.Api.Controllers;
 public class DiagnosticController : ControllerBase
 {
     private readonly IDiagnosticEngineService _diagnosticEngine;
+    private readonly DatabaseSessionService _databaseSessionService;
+    private readonly IWindowsSystemProfileService _profileService;
+    private readonly ResolutionService _resolutionService;
 
-    // In-memory session store — replaced by EF Core in a later phase
-    private static readonly List<object> _sessions = new();
-    private static readonly Dictionary<string, object> _sessionMap = new();
-
-    public DiagnosticController(IDiagnosticEngineService diagnosticEngine)
+    public DiagnosticController(
+        IDiagnosticEngineService diagnosticEngine,
+        DatabaseSessionService databaseSessionService,
+        IWindowsSystemProfileService profileService,
+        ResolutionService resolutionService)
     {
         _diagnosticEngine = diagnosticEngine;
+        _databaseSessionService = databaseSessionService;
+        _profileService = profileService;
+        _resolutionService = resolutionService;
     }
 
+    // =========================================================
+    // SUBMIT DIAGNOSIS
+    // =========================================================
+
     [HttpPost("submit")]
-    public async Task<IActionResult> SubmitDiagnosis([FromBody] DiagnosticSymptomPayload payload)
+    public async Task<IActionResult> SubmitDiagnosis(
+        [FromBody] DiagnosticSymptomPayload payload)
     {
         try
         {
-            var report = await _diagnosticEngine.SubmitDiagnosisAsync(payload);
+            var report =
+                await _diagnosticEngine.SubmitDiagnosisAsync(payload);
 
-            // Store session in-memory for this run
-            var sessionId = report.session_id ?? Guid.NewGuid().ToString();
-            var sessionRecord = new
+            if (report.hardware_profile == null)
             {
-                session_id = sessionId,
-                symptom_type = payload.SymptomType,
-                diagnosed_category = report.diagnosed_category,
-                action_category = report.action_category,
-                confidence_label = report.confidence_label,
-                ai_explanation = report.ai_explanation,
-                proof = report.proof,
-                verification_target = report.verification_target,
-                recommended_next_step = report.recommended_next_step,
-                resolution_status = "open",
-                resolution_checked_at = (string?)null,
-                resolution_summary = "",
-                resolution_proof = Array.Empty<object>(),
-                created_at = DateTime.UtcNow.ToString("o")
-            };
-            _sessionMap[sessionId] = sessionRecord;
-            _sessions.Insert(0, sessionRecord);
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        error =
+                            "Hardware profile was not available for database persistence."
+                    }
+                );
+            }
 
-            return Ok(sessionRecord);
+            var sessionId =
+                await _databaseSessionService.SaveDiagnosisAsync(
+                    payload,
+                    report.hardware_profile,
+                    report.diagnosed_category,
+                    report.action_category,
+                    report.confidence_label,
+                    report.ai_explanation
+                );
+
+            report.session_id =
+                sessionId.ToString();
+
+            return Ok(new
+            {
+                session_id =
+                    report.session_id,
+
+                symptom_type =
+                    payload.SymptomType,
+
+                affected_activity =
+                    payload.AffectedActivity,
+
+                frequency =
+                    payload.Frequency,
+
+                severity =
+                    payload.Severity,
+
+                duration =
+                    payload.Duration,
+
+                recent_changes =
+                    payload.RecentChanges,
+
+                system_state =
+                    payload.SystemState,
+
+                warning_signs =
+                    payload.WarningSigns,
+
+                diagnosed_category =
+                    report.diagnosed_category,
+
+                action_category =
+                    report.action_category,
+
+                confidence_label =
+                    report.confidence_label,
+
+                ai_explanation =
+                    report.ai_explanation,
+
+                proof =
+                    report.proof,
+
+                verification_target =
+                    report.verification_target,
+
+                recommended_next_step =
+                    report.recommended_next_step,
+
+                resolution_status =
+                    "open",
+
+                resolution_checked_at =
+                    (string?)null,
+
+                resolution_summary =
+                    string.Empty,
+
+                resolution_proof =
+                    Array.Empty<object>(),
+
+                created_at =
+                    DateTime.UtcNow.ToString("o")
+            });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = ex.Message });
+            Console.Error.WriteLine(
+                $"Diagnosis submission failed: {ex}"
+            );
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    error =
+                        "Diagnosis could not be completed."
+                }
+            );
         }
     }
 
+    // =========================================================
+    // GET ALL SESSIONS
+    // =========================================================
+
     [HttpGet("sessions")]
-    public IActionResult GetSessions()
+    public async Task<IActionResult> GetSessions()
     {
-        return Ok(_sessions);
+        try
+        {
+            var sessions =
+                await _databaseSessionService
+                    .GetSessionsAsync();
+
+            return Ok(sessions);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Failed to load diagnosis sessions: {ex}"
+            );
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    error =
+                        "Diagnosis sessions could not be loaded."
+                }
+            );
+        }
     }
+
+    // =========================================================
+    // GET SINGLE SESSION
+    // =========================================================
 
     [HttpGet("sessions/{sessionId}")]
-    public IActionResult GetSession(string sessionId)
+    public async Task<IActionResult> GetSession(
+        string sessionId)
     {
-        if (_sessionMap.TryGetValue(sessionId, out var session))
-            return Ok(session);
+        try
+        {
+            if (!Guid.TryParse(
+                sessionId,
+                out var id))
+            {
+                return BadRequest(new
+                {
+                    detail =
+                        "Invalid diagnosis session ID."
+                });
+            }
 
-        return NotFound(new { detail = "Diagnosis record not found" });
+            var session =
+                await _databaseSessionService
+                    .GetSessionAsync(id);
+
+            if (session == null)
+            {
+                return NotFound(new
+                {
+                    detail =
+                        "Diagnosis record not found."
+                });
+            }
+
+            return Ok(session);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Failed to load diagnosis session: {ex}"
+            );
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    error =
+                        "Diagnosis session could not be loaded."
+                }
+            );
+        }
     }
+
+    // =========================================================
+    // CHECK RESOLUTION
+    // =========================================================
 
     [HttpPost("{sessionId}/check-resolution")]
-    public IActionResult CheckResolution(string sessionId)
+    public async Task<IActionResult> CheckResolution(
+        string sessionId)
     {
-        // Resolution checking requires the full Python resolution_service logic.
-        // For now we return a placeholder so the frontend does not error out.
-        return Ok(new
+        try
         {
-            session_id = sessionId,
-            resolution_status = "open",
-            resolution_checked_at = DateTime.UtcNow.ToString("o"),
-            resolution_summary = "Resolution check is not yet fully implemented in the C# backend. Recheck after applying the recommended action.",
-            resolution_proof = Array.Empty<object>()
-        });
+            if (!Guid.TryParse(
+                sessionId,
+                out var id))
+            {
+                return BadRequest(new
+                {
+                    detail =
+                        "Invalid diagnosis session ID."
+                });
+            }
+
+            var session =
+                await _databaseSessionService
+                    .GetSessionAsync(id);
+
+            if (session == null)
+            {
+                return NotFound(new
+                {
+                    detail =
+                        "Diagnosis record not found."
+                });
+            }
+
+            var hardware =
+                _profileService.GetLiveSystemProfile();
+
+            var diagnosedCategory =
+                session.GetType()
+                    .GetProperty(
+                        "diagnosed_category"
+                    )
+                    ?.GetValue(session)
+                    ?.ToString()
+                ?? string.Empty;
+
+            var result =
+                _resolutionService.CheckResolution(
+                    diagnosedCategory,
+                    hardware
+                );
+
+            var updated =
+                await _databaseSessionService
+                    .UpdateResolutionAsync(
+                        id,
+                        result.resolution_status,
+                        result.resolution_checked_at,
+                        result.resolution_summary,
+                        result.resolution_proof
+                    );
+
+            if (!updated)
+            {
+                return NotFound(new
+                {
+                    detail =
+                        "Diagnosis record not found."
+                });
+            }
+
+            return Ok(new
+            {
+                session_id =
+                    sessionId,
+
+                resolution_status =
+                    result.resolution_status,
+
+                resolution_checked_at =
+                    result.resolution_checked_at,
+
+                resolution_summary =
+                    result.resolution_summary,
+
+                resolution_proof =
+                    result.resolution_proof
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Resolution check failed: {ex}"
+            );
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    error =
+                        "Resolution check could not be completed."
+                }
+            );
+        }
     }
 
+    // =========================================================
+    // MARK NEEDS RECHECK
+    // =========================================================
+
     [HttpPost("{sessionId}/needs-recheck")]
-    public IActionResult MarkNeedsRecheck(string sessionId)
+    public async Task<IActionResult> MarkNeedsRecheck(
+        string sessionId)
     {
-        return Ok(new
+        try
         {
-            session_id = sessionId,
-            resolution_status = "needs_recheck",
-            last_action_status = "completed",
-            last_action_summary = "A safe action was performed. Run a follow-up check to see if the issue improved."
-        });
+            if (!Guid.TryParse(
+                sessionId,
+                out var id))
+            {
+                return BadRequest(new
+                {
+                    detail =
+                        "Invalid diagnosis session ID."
+                });
+            }
+
+            var updated =
+                await _databaseSessionService
+                    .MarkNeedsRecheckAsync(id);
+
+            if (!updated)
+            {
+                return NotFound(new
+                {
+                    detail =
+                        "Diagnosis record not found."
+                });
+            }
+
+            return Ok(new
+            {
+                session_id =
+                    sessionId,
+
+                resolution_status =
+                    "needs_recheck",
+
+                last_action_status =
+                    "completed",
+
+                last_action_summary =
+                    "A safe action was performed. Run a follow-up check to see if the issue improved."
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Failed to update diagnosis status: {ex}"
+            );
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    error =
+                        "Diagnosis status could not be updated."
+                }
+            );
+        }
     }
 }

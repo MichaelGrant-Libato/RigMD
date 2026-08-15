@@ -6,7 +6,8 @@ namespace RigMD.Application.Services;
 
 public interface IDiagnosticEngineService
 {
-    Task<DiagnosticReportDto> SubmitDiagnosisAsync(DiagnosticSymptomPayload payload);
+    Task<DiagnosticReportDto> SubmitDiagnosisAsync(
+        DiagnosticSymptomPayload payload);
 }
 
 public class DiagnosticReportDto
@@ -16,7 +17,13 @@ public class DiagnosticReportDto
     public string confidence_label { get; set; } = string.Empty;
     public string ai_explanation { get; set; } = string.Empty;
     public string recommended_next_step { get; set; } = string.Empty;
+
     public object? proof { get; set; }
     public object? verification_target { get; set; }
+
+    // Assigned after the diagnosis is persisted to Supabase.
     public string? session_id { get; set; }
+
+    // Live hardware snapshot used during this diagnosis.
+    public HardwareProfileDto? hardware_profile { get; set; }
 }
