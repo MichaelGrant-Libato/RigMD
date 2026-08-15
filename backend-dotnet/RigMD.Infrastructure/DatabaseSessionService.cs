@@ -18,6 +18,12 @@ public class DatabaseSessionService
 
     private string GetConnectionString()
     {
+        // Prefer pre-built Npgsql connection string (avoids URI parsing issues with special characters in passwords)
+        var direct = _configuration.GetConnectionString("DefaultConnection");
+        if (!string.IsNullOrWhiteSpace(direct))
+            return direct;
+
+        // Fall back to DATABASE_URL URI format
         var databaseUrl = _configuration["DATABASE_URL"];
 
         if (string.IsNullOrWhiteSpace(databaseUrl))
@@ -387,7 +393,7 @@ public class DatabaseSessionService
         return recurringSymptoms.Count;
     }
 
-    public async Task<List<object>> GetSessionsAsync()
+    public async Task<List<DiagnosticSessionDto>> GetSessionsAsync()
     {
         var recurringSymptoms =
             await GetRecurringSymptomLookupAsync();
@@ -436,7 +442,7 @@ public class DatabaseSessionService
             await command.ExecuteReaderAsync();
 
         var sessions =
-            new List<object>();
+            new List<DiagnosticSessionDto>();
 
         while (await reader.ReadAsync())
         {
@@ -451,7 +457,7 @@ public class DatabaseSessionService
         return sessions;
     }
 
-    public async Task<object?> GetSessionAsync(
+    public async Task<DiagnosticSessionDto?> GetSessionAsync(
         Guid sessionId)
     {
         var recurringSymptoms =
@@ -514,7 +520,7 @@ public class DatabaseSessionService
         );
     }
 
-    private static object MapSession(
+    private static DiagnosticSessionDto MapSession(
         NpgsqlDataReader reader,
         HashSet<string>? recurringSymptoms = null)
     {
@@ -555,85 +561,81 @@ public class DatabaseSessionService
             recurringSymptoms != null &&
             recurringSymptoms.Contains(symptomType);
 
-        return new
+        return new DiagnosticSessionDto
         {
-            session_id =
-                reader["id"].ToString(),
+            SessionId =
+                reader["id"].ToString() ?? string.Empty,
 
-            profile_id =
-                reader["profile_id"].ToString(),
+            ProfileId =
+                reader["profile_id"].ToString() ?? string.Empty,
 
-            symptom_type =
+            SymptomType =
                 symptomType,
 
-            affected_activity =
+            AffectedActivity =
                 GetString(reader, "affected_activity"),
 
-            frequency =
+            Frequency =
                 GetString(reader, "frequency"),
 
-            severity =
+            Severity =
                 GetString(reader, "severity"),
 
-            duration =
+            Duration =
                 GetString(reader, "duration"),
 
-            recent_changes =
+            RecentChanges =
                 GetString(reader, "recent_changes"),
 
-            system_state =
+            SystemState =
                 GetString(reader, "system_state"),
 
-            warning_signs =
+            WarningSigns =
                 GetString(reader, "warning_signs"),
 
-            diagnosed_category =
+            DiagnosedCategory =
                 GetString(reader, "diagnosed_category"),
 
-            action_category =
+            ActionCategory =
                 GetString(reader, "action_category"),
 
-            confidence_label =
+            ConfidenceLabel =
                 GetString(reader, "confidence_label"),
 
-            ai_explanation =
+            AiExplanation =
                 GetString(reader, "ai_explanation"),
 
-            is_recurring =
-                databaseRecurring ||
-                dynamicallyRecurring,
+            IsRecurring =
+                databaseRecurring || dynamicallyRecurring,
 
-            created_at =
-                reader["created_at"] == DBNull.Value
-                    ? null
-                    : reader["created_at"],
+            CreatedAt =
+                reader["created_at"] != DBNull.Value
+                    ? Convert.ToDateTime(reader["created_at"])
+                    : null,
 
-            resolution_status =
-                reader["resolution_status"] == DBNull.Value
-                    ? "open"
-                    : reader["resolution_status"]?.ToString()
-                      ?? "open",
+            ResolutionStatus =
+                GetString(reader, "resolution_status"),
 
-            resolution_checked_at =
-                reader["resolution_checked_at"] == DBNull.Value
-                    ? null
-                    : reader["resolution_checked_at"],
+            ResolutionCheckedAt =
+                reader["resolution_checked_at"] != DBNull.Value
+                    ? Convert.ToDateTime(
+                        reader["resolution_checked_at"]
+                    )
+                    : null,
 
-            resolution_summary =
+            ResolutionSummary =
                 GetString(reader, "resolution_summary"),
 
-            resolution_proof =
-                resolutionProof,
+            ResolutionProof =
+                resolutionProof as object[] ?? Array.Empty<object>(),
 
-            last_action_status =
-                reader["last_action_status"] == DBNull.Value
-                    ? null
-                    : reader["last_action_status"]?.ToString(),
+            LastActionStatus =
+                GetString(reader, "last_action_status"),
 
-            last_action_summary =
+            LastActionSummary =
                 GetString(reader, "last_action_summary"),
 
-            client_id =
+            ClientId =
                 GetString(reader, "client_id")
         };
     }

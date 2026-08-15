@@ -37,6 +37,13 @@ builder.Services.AddScoped<ResolutionService>();
 builder.Services.AddScoped<RecurringPatternService>();
 builder.Services.AddScoped<WarningSignService>();
 
+// Autonomy
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationRegistry, RigMD.Application.Services.Autonomy.RemediationRegistry>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationPlanner, RigMD.Application.Services.Autonomy.RemediationPlanner>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.ISafetyPolicy, RigMD.Application.Services.Autonomy.SafetyPolicy>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

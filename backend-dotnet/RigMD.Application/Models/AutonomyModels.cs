@@ -54,3 +54,11 @@ public enum VerificationStatus
     Worse,
     Unknown
 }
+
+public class OrchestrationResult
+{
+    public RemediationPlan? Plan { get; set; }
+    public SafetyEvaluation? Safety { get; set; }
+    public ExecutionResult? Execution { get; set; }
+    public string Trace { get; set; } = string.Empty;
+}
