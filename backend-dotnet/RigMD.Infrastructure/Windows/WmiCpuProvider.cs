@@ -27,7 +27,7 @@ public class WmiCpuProvider : ICpuProvider
             dto.UsagePercent = 0; // Placeholder until real-time hook is built
             dto.FrequencyMhz = 0;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Fallbacks
             dto.Name = "Unknown CPU (Fallback)";

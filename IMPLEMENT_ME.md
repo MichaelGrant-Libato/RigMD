@@ -289,8 +289,8 @@ Content-Type: application/json
 
 **Acceptance Criteria:**
 - [x] `dotnet build` succeeds with 0 errors
-- [ ] Dry-run endpoint returns a complete JSON trace showing Plan, SafetyCheck, and Execution
-- [ ] Different input categories produce different plans
+- [x] Dry-run endpoint returns a complete JSON trace showing Plan, SafetyCheck, and Execution
+- [x] Different input categories produce different plans
 
 ---
 

@@ -151,3 +151,5 @@ frontend/logs/
 .cache/
 coverage/
 README_V2.md
+# Local developer secrets - never commit
+backend-dotnet/RigMD.Api/appsettings.Development.json
