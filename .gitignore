@@ -1,18 +1,20 @@
 # ============================================================
-#  RigMD .gitignore
-#  React + FastAPI + PostgreSQL/Supabase
+# RigMD .gitignore
+# React + C#/.NET + Legacy Python + PostgreSQL/Supabase
 # ============================================================
 
 
 # ============================================================
-#  SECRETS / ENVIRONMENT FILES
-#  Never commit real credentials, API keys, DB URLs, or tokens
+# SECRETS / ENVIRONMENT FILES
+# Never commit real credentials, API keys, DB URLs, or tokens
 # ============================================================
 
 .env
 .env.*
+
 backend/.env
 backend/.env.*
+
 frontend/.env
 frontend/.env.*
 
@@ -29,7 +31,7 @@ config.ini
 
 
 # ============================================================
-#  FRONTEND — React / Vite / Node
+# FRONTEND — React / Vite / Node
 # ============================================================
 
 frontend/node_modules/
@@ -38,13 +40,33 @@ frontend/build/
 frontend/.vite/
 frontend/.eslintcache
 
-# Keep package lock files tracked
+# Keep package files tracked
 !frontend/package-lock.json
 !frontend/package.json
 
 
 # ============================================================
-#  BACKEND — Python / FastAPI
+# C# / .NET
+# ============================================================
+
+**/bin/
+**/obj/
+
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+TestResults/
+test_results/
+
+*.coverage
+*.coveragexml
+
+
+# ============================================================
+# LEGACY BACKEND — Python / FastAPI
+# Retained temporarily for migration/reference purposes
 # ============================================================
 
 __pycache__/
@@ -56,14 +78,13 @@ __pycache__/
 venv/
 env/
 .venv/
+
 backend/venv/
 backend/env/
 backend/.venv/
 
 *.egg
 *.egg-info/
-dist/
-build/
 
 .mypy_cache/
 .pytest_cache/
@@ -72,27 +93,30 @@ htmlcov/
 
 
 # ============================================================
-#  DATABASE / MIGRATIONS
+# DATABASE / MIGRATIONS
 # ============================================================
 
 database/migrations/versions/*.pyc
 backend/database/migrations/versions/*.pyc
 
+*.db
+*.db-shm
+*.db-wal
+
 
 # ============================================================
-#  IDE / EDITOR FILES
+# IDE / EDITOR FILES
 # ============================================================
 
 .vscode/
 .idea/
-*.suo
-*.user
+
 *.swp
 *.swo
 
 
 # ============================================================
-#  OS FILES
+# OS FILES
 # ============================================================
 
 .DS_Store
@@ -101,7 +125,7 @@ desktop.ini
 
 
 # ============================================================
-#  LOGS
+# LOGS
 # ============================================================
 
 *.log
@@ -111,24 +135,19 @@ frontend/logs/
 
 
 # ============================================================
-#  TEMP / BACKUP FILES
+# TEMP / BACKUP FILES
 # ============================================================
 
 *.bak
 *.tmp
 *.temp
 *.old
-test_results/
 
 
 # ============================================================
-#  LOCAL TESTING / CACHE / DRAFT DOCS
+# LOCAL TESTING / CACHE / DRAFT DOCS
 # ============================================================
 
 .cache/
 coverage/
-README_V2.md
-# .NET build output
-**/bin/
-**/obj/
-frontend/dist/
+README_V2.md
