@@ -1,11 +1,13 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import { Bell, Microchip, Monitor, Settings } from 'lucide-react';
+import { Bell, Menu, Microchip, Monitor } from 'lucide-react';
+import { motion } from 'motion/react';
 
 export type LiveDataStatus = 'live' | 'syncing' | 'offline' | 'stale';
 
 interface HeaderStatusContextValue {
   deviceName: string;
   liveStatus: LiveDataStatus;
+  onMenuClick?: () => void;
 }
 
 const HeaderStatusContext = createContext<HeaderStatusContextValue>({
@@ -17,9 +19,10 @@ export function HeaderStatusProvider({
   children,
   deviceName,
   liveStatus,
+  onMenuClick,
 }: HeaderStatusContextValue & { children: ReactNode }) {
   return (
-    <HeaderStatusContext.Provider value={{ deviceName, liveStatus }}>
+    <HeaderStatusContext.Provider value={{ deviceName, liveStatus, onMenuClick }}>
       {children}
     </HeaderStatusContext.Provider>
   );
@@ -34,8 +37,8 @@ function getLiveStatusView(status: LiveDataStatus) {
   if (status === 'syncing') {
     return {
       label: 'Syncing',
-      className: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
-      iconClassName: 'text-cyan-400',
+      className: 'border-cyan-400/20 bg-cyan-400/10 text-cyan-300',
+      iconClassName: 'text-cyan-300',
       dotClassName: 'bg-cyan-400 animate-pulse',
     };
   }
@@ -43,8 +46,8 @@ function getLiveStatusView(status: LiveDataStatus) {
   if (status === 'offline') {
     return {
       label: 'Offline',
-      className: 'border-red-500/20 bg-red-500/10 text-red-400',
-      iconClassName: 'text-red-400',
+      className: 'border-red-400/20 bg-red-400/10 text-red-300',
+      iconClassName: 'text-red-300',
       dotClassName: 'bg-red-400',
     };
   }
@@ -52,35 +55,49 @@ function getLiveStatusView(status: LiveDataStatus) {
   if (status === 'stale') {
     return {
       label: 'Stale Data',
-      className: 'border-orange-500/20 bg-orange-500/10 text-orange-400',
-      iconClassName: 'text-orange-400',
-      dotClassName: 'bg-orange-400',
+      className: 'border-amber-400/20 bg-amber-400/10 text-amber-300',
+      iconClassName: 'text-amber-300',
+      dotClassName: 'bg-amber-400',
     };
   }
 
   return {
-    label: 'Live Data',
-    className: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400',
-    iconClassName: 'text-emerald-400',
-    dotClassName: 'bg-emerald-500',
+      label: 'Live Data',
+      className: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
+      iconClassName: 'text-emerald-300',
+      dotClassName: 'bg-emerald-400',
   };
 }
 
 export default function TopHeader({ title, subtitle }: TopHeaderProps) {
-  const { deviceName, liveStatus } = useContext(HeaderStatusContext);
+  const { deviceName, liveStatus, onMenuClick } = useContext(HeaderStatusContext);
   const statusView = getLiveStatusView(liveStatus);
 
   return (
-    <header className="flex h-20 shrink-0 items-center justify-between border-b border-[#253041] bg-[#111827] px-8">
-      <div>
-        <h2 className="text-xl font-bold text-white">{title}</h2>
-        <p className="text-sm text-slate-400">{subtitle}</p>
+    <header className="rigmd-app-header flex min-h-[72px] shrink-0 items-center justify-between border-b px-4 sm:px-6 lg:px-8">
+      <div className="flex min-w-0 items-center gap-3">
+        {onMenuClick && (
+          <motion.button
+            type="button"
+            onClick={onMenuClick}
+            whileTap={{ scale: 0.98 }}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card-soft)] text-slate-400 transition hover:border-cyan-400/35 hover:text-white md:hidden"
+            aria-label="Open navigation menu"
+          >
+            <Menu size={20} />
+          </motion.button>
+        )}
+
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-bold text-[var(--rigmd-text-main)] sm:text-xl">{title}</h2>
+          <p className="truncate text-xs text-[var(--rigmd-text-muted)] sm:text-sm">{subtitle}</p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="hidden items-center gap-2 rounded-lg border border-[#2c3a4f] bg-[#172232] px-4 py-2 text-sm sm:flex">
-          <Microchip size={16} className="text-cyan-400" />
-          <span className="max-w-[180px] truncate text-white">{deviceName}</span>
+      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <div className="hidden items-center gap-2 rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card-soft)] px-3.5 py-2 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:flex">
+          <Microchip size={16} className="text-cyan-300" />
+          <span className="max-w-[180px] truncate text-[var(--rigmd-text-main)]">{deviceName}</span>
           <div className={`ml-2 h-1.5 w-1.5 rounded-full ${statusView.dotClassName}`} />
         </div>
 
@@ -89,20 +106,21 @@ export default function TopHeader({ title, subtitle }: TopHeaderProps) {
           {statusView.label}
         </div>
 
-        <button type="button" className="p-2 text-slate-400 transition hover:text-white">
-          <Bell size={20} />
-        </button>
-
-        <button type="button" className="p-2 text-slate-400 transition hover:text-white">
-          <Settings size={20} />
-        </button>
-
-        <button
+        <motion.button
           type="button"
-          className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-cyan-600 text-sm font-bold text-white transition hover:bg-cyan-500"
+          whileTap={{ scale: 0.98 }}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-[var(--rigmd-card-soft)] hover:text-white"
+        >
+          <Bell size={20} />
+        </motion.button>
+
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.98 }}
+          className="ml-1 flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/22 bg-cyan-400/12 text-sm font-bold text-cyan-100 transition hover:bg-cyan-400/20"
         >
           MG
-        </button>
+        </motion.button>
       </div>
     </header>
   );

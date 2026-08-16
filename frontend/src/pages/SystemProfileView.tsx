@@ -1,6 +1,7 @@
 //SystemProfileView.tsx
 
 import { useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   Activity,
   Calendar,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import { buttonTap, cardFadeUp, cardTransition, hoverLift, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
 
@@ -152,7 +154,13 @@ function ProfileCompletenessPanel({
     completeness >= 90 ? 'text-emerald-400' : completeness >= 60 ? 'text-orange-400' : 'text-red-400';
 
   return (
-    <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
+    <motion.section
+      variants={cardFadeUp}
+      initial="hidden"
+      animate="visible"
+      transition={cardTransition}
+      className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+    >
       <div className="mb-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-cyan-400" />
@@ -165,9 +173,12 @@ function ProfileCompletenessPanel({
         </div>
       </div>
 
-      <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-[#0d1117]">
-        <div
+      <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-[var(--rigmd-bg)]">
+        <motion.div
           className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+          initial={{ width: 0 }}
+          animate={{ width: `${completeness}%` }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
           style={{ width: `${completeness}%` }}
         />
       </div>
@@ -194,7 +205,7 @@ function ProfileCompletenessPanel({
         {detectedCount}/{fields.length} detected fields completed
         {hardwareUpdatedAt ? ` · Last scan: ${formatLastUpdated(hardwareUpdatedAt)}` : ''}
       </p>
-    </section>
+    </motion.section>
   );
 }
 
@@ -212,19 +223,19 @@ function HardwareInfoCard({
   const cardClasses = `flex min-w-0 items-center justify-between rounded-xl border p-4 text-left transition ${
     active
       ? 'border-cyan-500/70 bg-cyan-500/10'
-      : 'border-[#30363d] bg-[#161b22] hover:border-cyan-500/30'
-  } ${clickable ? 'cursor-pointer hover:bg-[#1b222c]' : ''}`;
+      : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] hover:border-cyan-500/30'
+  } ${clickable ? 'cursor-pointer hover:bg-[var(--rigmd-card-hover)]' : ''}`;
 
   const content = (
     <div className="flex min-w-0 items-center gap-4">
-      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-cyan-400">
+      <div className="rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-3 text-cyan-400">
         <Icon size={23} />
       </div>
 
       <div className="min-w-0">
         <p className="mb-1 text-xs text-gray-400">
           {title}
-          {subtitle && <span className="mx-1 text-[#30363d]">|</span>}
+          {subtitle && <span className="mx-1 text-[var(--rigmd-border)]">|</span>}
           {subtitle && <span className="text-cyan-500">{subtitle}</span>}
         </p>
 
@@ -247,13 +258,39 @@ function HardwareInfoCard({
 
   if (clickable) {
     return (
-      <button type="button" onClick={onClick} className={cardClasses}>
+      <motion.button
+        type="button"
+        onClick={onClick}
+        whileHover={hoverLift}
+        whileTap={buttonTap}
+        transition={{ duration: 0.18 }}
+        className={cardClasses}
+      >
         {content}
-      </button>
+      </motion.button>
     );
   }
 
-  return <div className={cardClasses}>{content}</div>;
+  return (
+    <motion.div variants={cardFadeUp} transition={cardTransition} className={cardClasses}>
+      {content}
+    </motion.div>
+  );
+}
+
+function ProfileCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
+      <div className="flex items-center gap-4">
+        <div className="h-12 w-12 rounded-lg bg-[var(--rigmd-card)]" />
+        <div className="flex-1 space-y-3">
+          <div className="h-3 w-24 rounded bg-[var(--rigmd-card)]" />
+          <div className="h-4 w-3/4 rounded bg-[var(--rigmd-card)]" />
+          <div className="h-3 w-32 rounded bg-[var(--rigmd-card)]" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MetricTile({
@@ -275,7 +312,7 @@ function MetricTile({
           : 'text-cyan-400';
 
   return (
-    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
       <p className="text-xs uppercase tracking-wider text-gray-500">{label}</p>
       <p className={`mt-1 text-lg font-bold ${color}`}>{value}</p>
     </div>
@@ -290,7 +327,7 @@ function TopAppsList({
   apps: Array<{ name: string; process_count: number; memory_mb: number }>;
 }) {
   return (
-    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <ListChecks size={15} className="text-cyan-400" />
         <p className="text-xs uppercase tracking-wider text-gray-500">{title}</p>
@@ -303,7 +340,7 @@ function TopAppsList({
           {apps.slice(0, 5).map((app) => (
             <div
               key={app.name}
-              className="flex items-center justify-between rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-xs"
+              className="flex items-center justify-between rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3 py-2 text-xs"
             >
               <div className="min-w-0">
                 <p className="truncate text-gray-200">{app.name}</p>
@@ -330,7 +367,13 @@ function ComponentWorkloadPanel({
 }) {
   if (!stats || !selectedComponent) {
     return (
-      <section className="mt-5 rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
+      <motion.section
+        variants={cardFadeUp}
+        initial="hidden"
+        animate="visible"
+        transition={cardTransition}
+        className="mt-5 rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-5"
+      >
         <div className="flex items-start gap-3">
           <Info size={17} className="mt-0.5 shrink-0 text-cyan-400" />
           <div>
@@ -340,7 +383,7 @@ function ComponentWorkloadPanel({
             </p>
           </div>
         </div>
-      </section>
+      </motion.section>
     );
   }
 
@@ -369,20 +412,27 @@ function ComponentWorkloadPanel({
   };
 
   return (
-    <section className="mt-5 rounded-2xl border border-cyan-500/30 bg-[#101820] p-5">
+    <motion.section
+      variants={cardFadeUp}
+      initial="hidden"
+      animate="visible"
+      transition={cardTransition}
+      className="mt-5 rounded-2xl border border-cyan-500/30 bg-[#101820] p-5"
+    >
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Activity size={17} className="text-cyan-400" />
           <h3 className="font-semibold text-white">{titleMap[selectedComponent]}</h3>
         </div>
 
-        <button
+        <motion.button
           type="button"
           onClick={onClear}
-          className="rounded-lg border border-[#30363d] bg-[#0d1117] p-2 text-gray-500 transition hover:border-cyan-500/40 hover:text-white"
+          whileTap={buttonTap}
+          className="rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-2 text-gray-500 transition hover:border-cyan-500/40 hover:text-white"
         >
           <X size={15} />
-        </button>
+        </motion.button>
       </div>
 
       {selectedComponent === 'cpu' && (
@@ -414,7 +464,7 @@ function ComponentWorkloadPanel({
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+            <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
               <div className="mb-2 flex items-center gap-2">
                 <Globe2 size={16} className="text-cyan-400" />
                 <p className="text-xs uppercase tracking-wider text-gray-500">Browser Memory</p>
@@ -426,7 +476,7 @@ function ComponentWorkloadPanel({
               <p className="text-xs text-gray-500">{browserProcesses} browser process(es)</p>
             </div>
 
-            <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+            <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
               <p className="text-xs uppercase tracking-wider text-gray-500">Browser Pressure</p>
               <p className={`mt-1 text-lg font-bold ${browserHeavy ? 'text-orange-400' : 'text-emerald-400'}`}>
                 {browserHeavy ? 'Heavy' : 'Normal'}
@@ -449,7 +499,7 @@ function ComponentWorkloadPanel({
             <MetricTile label="Game / Launcher" value={gameDetected ? 'Detected' : 'None'} tone={gameDetected ? 'orange' : 'emerald'} />
           </div>
 
-          <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+          <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
             <div className="mb-2 flex items-center gap-2">
               <Gamepad2 size={16} className="text-orange-400" />
               <p className="text-xs uppercase tracking-wider text-gray-500">Detected Game / Launcher Processes</p>
@@ -477,7 +527,7 @@ function ComponentWorkloadPanel({
             <MetricTile label="GPU Name" value={cleanValue(stats.gpu.name)} />
           </div>
 
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+          <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-400">
             Driver problems are usually connected to flickering, black screens, visual glitches, crashes during games,
             or problems after a recent driver update. RigMD does not update, remove, or roll back drivers automatically.
           </p>
@@ -510,7 +560,7 @@ function ComponentWorkloadPanel({
                   const usageDisplay = formatStorageUsage(drive.usage_percent);
                   
                   return (
-                    <div key={idx} className="rounded-lg border border-[#30363d] bg-[#0d1117] p-4">
+                    <div key={idx} className="rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <p className="text-xs font-mono font-semibold text-gray-400">Storage{String(idx).padStart(2, '0')}</p>
@@ -538,7 +588,7 @@ function ComponentWorkloadPanel({
             </div>
           )}
 
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+          <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-400">
             Storage pressure becomes more likely to affect performance when a drive is close to 85-90% full.
             At your current level, RigMD treats storage as a supporting signal unless the user reports file errors,
             saving problems, or loading delays.
@@ -552,7 +602,7 @@ function ComponentWorkloadPanel({
 
           <TopAppsList title="Current background app signals" apps={topApps} />
 
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+          <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-400">
             Windows updates, background services, startup apps, browsers, and security tools can affect performance
             even when hardware detection looks healthy.
           </p>
@@ -563,7 +613,7 @@ function ComponentWorkloadPanel({
         <div className="space-y-4">
           <MetricTile label="Detected Chipset / Platform" value={cleanValue(stats.chipset_driver)} />
 
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+          <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-400">
             Chipset and platform drivers affect how Windows communicates with motherboard devices, storage controllers,
             power states, and connected hardware. RigMD currently treats this as profile context, not an automated fix target.
           </p>
@@ -574,13 +624,13 @@ function ComponentWorkloadPanel({
         <div className="space-y-4">
           <MetricTile label="System Age" value={cleanValue(stats.system_age)} />
 
-          <p className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-400">
+          <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-400">
             System age is based on the Windows install date. A newer install can still slow down if many apps, browser tabs,
             launchers, or startup items are active.
           </p>
         </div>
       )}
-    </section>
+    </motion.section>
   );
 }
 
@@ -640,7 +690,14 @@ export default function SystemProfileView({
         subtitle="RigMD automatically detects your desktop PC specifications and uses them as the basis for diagnostic sessions"
       />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+      <motion.div
+        variants={pageFade}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        transition={pageTransition}
+        className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
+      >
         <div className="w-full space-y-6">
           <ProfileCompletenessPanel stats={stats} hardwareUpdatedAt={hardwareUpdatedAt} />
 
@@ -652,25 +709,27 @@ export default function SystemProfileView({
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <button
+              <motion.button
                 type="button"
                 onClick={onRefreshHardware}
                 disabled={isRefreshingHardware}
+                whileTap={buttonTap}
                 className="flex items-center gap-2 rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-[#041014] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={16} className={isRefreshingHardware ? 'animate-spin' : ''} />
                 Run System Scan
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
                 type="button"
                 onClick={onRefreshHardware}
                 disabled={isRefreshingHardware}
-                className="flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#1f2937] px-5 py-2.5 text-sm font-semibold text-gray-200 transition hover:border-cyan-500/40 hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                whileTap={buttonTap}
+                className="flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-5 py-2.5 text-sm font-semibold text-gray-200 transition hover:border-cyan-500/40 hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={16} className={isRefreshingHardware ? 'animate-spin' : ''} />
                 Refresh Detected Data
-              </button>
+              </motion.button>
             </div>
           </div>
 
@@ -682,8 +741,8 @@ export default function SystemProfileView({
               </h3>
             </div>
 
-            <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
-              <div className="mb-5 flex gap-3 rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+            <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
+              <div className="mb-5 flex gap-3 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                 <Info className="mt-0.5 shrink-0 text-cyan-400" size={17} />
 
                 <div>
@@ -699,12 +758,19 @@ export default function SystemProfileView({
                   {error}
                 </div>
               ) : !stats ? (
-                <div className="animate-pulse rounded-xl border border-dashed border-[#30363d] p-8 text-center font-mono tracking-widest text-gray-500">
-                  ESTABLISHING WMI DATALINK...
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <ProfileCardSkeleton key={index} />
+                  ))}
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  <motion.div
+                    variants={staggerContainer}
+                    initial="hidden"
+                    animate="visible"
+                    className="grid grid-cols-1 gap-4 xl:grid-cols-3"
+                  >
                     <HardwareInfoCard
                       icon={Cpu}
                       title="CPU"
@@ -809,7 +875,7 @@ export default function SystemProfileView({
                       active={selectedComponent === 'age'}
                       onClick={() => setSelectedComponent('age')}
                     />
-                  </div>
+                  </motion.div>
 
                   <ComponentWorkloadPanel
                     stats={stats}
@@ -819,7 +885,7 @@ export default function SystemProfileView({
                 </>
               )}
 
-              <div className="mt-5 rounded-xl border border-[#30363d] bg-[#0d1117] px-4 py-3 text-sm text-gray-500">
+              <div className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-3 text-sm text-gray-500">
                 RigMD automatically detects your PC profile and uses it as the basis for all diagnostic sessions. Run a system scan to refresh detected values.
               </div>
 
@@ -835,19 +901,20 @@ export default function SystemProfileView({
                 </div>
               )}
 
-              <button
+              <motion.button
                 type="button"
                 onClick={handleSaveProfile}
                 disabled={isSavingProfile || !stats}
+                whileTap={buttonTap}
                 className="mt-5 flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-400 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Database size={16} className={isSavingProfile ? 'animate-spin' : ''} />
                 {isSavingProfile ? 'Saving Profile...' : 'Save Hardware Profile'}
-              </button>
+              </motion.button>
             </section>
           </div>
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

@@ -2,13 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Main layout */
+  --rigmd-bg: #070c12;
+  --rigmd-sidebar: #0f1824;
+  --rigmd-header: #111b28;
+  --rigmd-main-surface: #0b1118;
+  --rigmd-card: #141f2b;
+  --rigmd-card-soft: #182433;
+  --rigmd-card-hover: #1b2a3b;
+
+  /* Borders */
+  --rigmd-border: #263647;
+  --rigmd-border-soft: #1f2d3d;
+  --rigmd-border-active: #14b8a6;
+
+  /* Primary accent */
+  --rigmd-accent: #2dd4bf;
+  --rigmd-accent-strong: #22d3ee;
+  --rigmd-accent-muted: #0f3b3b;
+  --rigmd-accent-soft: #102f35;
+  --rigmd-muted-blue: #7da2c7;
+
+  /* Text */
+  --rigmd-text-main: #f8fafc;
+  --rigmd-text-soft: #cbd5e1;
+  --rigmd-text-muted: #94a3b8;
+  --rigmd-text-faint: #64748b;
+
+  /* Status colors */
+  --rigmd-success: #34d399;
+  --rigmd-success-dark: #064e3b;
+  --rigmd-success-soft: #0f3a2f;
+
+  --rigmd-warning: #fbbf24;
+  --rigmd-warning-strong: #f59e0b;
+  --rigmd-warning-dark: #3a2a0a;
+  --rigmd-warning-soft: #2f240d;
+
+  --rigmd-danger: #fb7185;
+  --rigmd-danger-strong: #ef4444;
+  --rigmd-danger-dark: #3b1117;
+  --rigmd-danger-soft: #35151b;
+
+  --rigmd-info: #38bdf8;
+  --rigmd-info-dark: #082f49;
+  --rigmd-info-soft: #0c2638;
+
+  --rigmd-glass: rgba(20, 31, 43, 0.72);
+  --rigmd-glass-soft: rgba(24, 36, 51, 0.58);
+  --rigmd-glass-border: rgba(125, 162, 199, 0.14);
+  --rigmd-glow: rgba(34, 211, 238, 0.1);
+}
+
 html,
 body,
 #root {
   width: 100%;
   height: 100%;
   margin: 0;
-  background: #0d1117;
+  background:
+    linear-gradient(115deg, rgba(45, 212, 191, 0.045), transparent 38%),
+    linear-gradient(250deg, rgba(34, 211, 238, 0.04), transparent 34%),
+    linear-gradient(180deg, #091019 0%, var(--rigmd-bg) 46%, #05090d 100%);
 }
 
 * {
@@ -29,10 +85,81 @@ button {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #30363d;
+  background-color: var(--rigmd-border);
   border-radius: 20px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: #475569;
+  background-color: var(--rigmd-text-faint);
+}
+
+.rigmd-glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    var(--rigmd-glass);
+  border-color: var(--rigmd-glass-border);
+  box-shadow:
+    0 16px 46px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(18px);
+}
+
+.rigmd-app-header {
+  background: color-mix(in srgb, var(--rigmd-header) 94%, transparent);
+  border-color: var(--rigmd-border-soft);
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.025),
+    0 1px 0 rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(16px);
+}
+
+.rigmd-main-surface {
+  background:
+    linear-gradient(180deg, rgba(125, 162, 199, 0.025), transparent 18rem),
+    var(--rigmd-main-surface);
+}
+
+.rigmd-card-surface {
+  background:
+    linear-gradient(180deg, rgba(125, 162, 199, 0.045), rgba(125, 162, 199, 0.012)),
+    var(--rigmd-card);
+  border-color: var(--rigmd-border);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(248, 250, 252, 0.035);
+}
+
+.rigmd-side-card {
+  background:
+    linear-gradient(180deg, rgba(125, 162, 199, 0.03), rgba(125, 162, 199, 0.008)),
+    color-mix(in srgb, var(--rigmd-card) 88%, var(--rigmd-main-surface));
+  border-color: var(--rigmd-border-soft);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(248, 250, 252, 0.025);
+}
+
+.rigmd-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23cbd5e1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 1rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+}
+
+.rigmd-glass-soft {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    var(--rigmd-glass-soft);
+  border-color: var(--rigmd-glass-border);
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px);
+}
+
+.rigmd-sidebar-surface {
+  background: linear-gradient(90deg, #121b28 0%, var(--rigmd-sidebar) 64%, #0d141f 100%);
+  border-color: rgba(125, 162, 199, 0.11);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.35);
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { ArrowLeft, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
+import { buttonTap, cardFadeUp, cardTransition, drawerSlideRight, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
@@ -191,28 +193,37 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
     <>
       <TopHeader title="Diagnosis Detail" subtitle="Resolve this saved session and verify the result" />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+      <motion.div
+        variants={pageFade}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        transition={pageTransition}
+        className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
+      >
         <div className="mx-auto w-full max-w-[1100px] space-y-5">
-          <button
+          <motion.button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#161b22] px-4 py-2 text-sm font-bold text-cyan-400 hover:border-cyan-500/40"
+            whileTap={buttonTap}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-4 py-2 text-sm font-bold text-cyan-400 hover:border-cyan-500/40"
           >
             <ArrowLeft size={16} />
             Back to History
-          </button>
+          </motion.button>
 
           {loading ? (
-            <div className="rounded-2xl border border-[#30363d] bg-[#161b22] px-6 py-16 text-center">
-              <RefreshCw size={34} className="mx-auto mb-4 animate-spin text-cyan-400" />
-              <h3 className="text-lg font-bold text-white">Opening diagnostic session</h3>
+            <div className="space-y-4 rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className="h-12 animate-pulse rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)]" />
+              ))}
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5 text-red-300">{error}</div>
           ) : session ? (
             <>
-              <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
-                <div className="flex flex-col gap-4 border-b border-[#30363d] pb-5 md:flex-row md:items-start md:justify-between">
+              <motion.section variants={drawerSlideRight} initial="hidden" animate="visible" exit="exit" transition={pageTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
+                <div className="flex flex-col gap-4 border-b border-[var(--rigmd-border)] pb-5 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
                       {session.display_date} {session.display_time}
@@ -235,29 +246,29 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                 </div>
 
                 <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-                  <div className="rounded-xl border border-[#253041] bg-[#0d1117] p-4">
+                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Activity</p>
                     <p className="mt-1 text-sm font-semibold text-white">{session.affected_activity || 'Not recorded'}</p>
                   </div>
-                  <div className="rounded-xl border border-[#253041] bg-[#0d1117] p-4">
+                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Frequency</p>
                     <p className="mt-1 text-sm font-semibold text-white">{session.frequency || 'Not recorded'}</p>
                   </div>
-                  <div className="rounded-xl border border-[#253041] bg-[#0d1117] p-4">
+                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Severity</p>
                     <p className="mt-1 text-sm font-semibold text-white">{session.severity || 'Not recorded'}</p>
                   </div>
                 </div>
 
-                <div className="mt-5 rounded-xl border border-[#253041] bg-[#0d1117] p-4">
+                <div className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Explanation</h3>
                   <p className="mt-2 text-sm leading-relaxed text-slate-300">
                     {session.ai_explanation || 'No explanation saved for this session.'}
                   </p>
                 </div>
-              </section>
+              </motion.section>
 
-              <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
+              <motion.section variants={cardFadeUp} initial="hidden" animate="visible" transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <h3 className="text-sm font-bold uppercase tracking-wider text-white">Resolution Status</h3>
@@ -266,21 +277,22 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                     </p>
                   </div>
 
-                  <button
+                  <motion.button
                     type="button"
                     onClick={checkResolution}
                     disabled={checking}
+                    whileTap={buttonTap}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
                   >
                     <RefreshCw size={16} className={checking ? 'animate-spin' : ''} />
                     {checking ? 'Checking...' : 'Check if Fixed'}
-                  </button>
+                  </motion.button>
                 </div>
 
                 {session.resolution_proof && session.resolution_proof.length > 0 && (
                   <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                     {session.resolution_proof.map((item) => (
-                      <div key={item.label} className="rounded-xl border border-[#253041] bg-[#0d1117] p-4">
+                      <div key={item.label} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
                         <p className="mt-1 text-sm font-bold text-white">{item.value}</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-500">{item.meaning}</p>
@@ -288,9 +300,9 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                     ))}
                   </div>
                 )}
-              </section>
+              </motion.section>
 
-              <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-6">
+              <motion.section variants={cardFadeUp} initial="hidden" animate="visible" transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
                 <div className="flex items-start gap-3">
                   <ShieldCheck size={20} className="mt-0.5 text-cyan-400" />
                   <div>
@@ -303,16 +315,17 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
 
                 <div className="mt-5 space-y-3">
                   {actions.length === 0 ? (
-                    <div className="rounded-xl border border-[#253041] bg-[#0d1117] p-4 text-sm text-slate-500">
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-500">
                       No safe action is available for this saved diagnosis.
                     </div>
                   ) : (
-                    actions.map((action) => {
+                    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-3">
+                    {actions.map((action) => {
                       const result = actionResults[action.id];
                       const running = runningActionId === action.id;
 
                       return (
-                        <div key={action.id} className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                        <motion.div key={action.id} variants={cardFadeUp} transition={cardTransition} className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
                           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                             <div>
                               <h4 className="text-sm font-bold text-cyan-400">{action.label}</h4>
@@ -321,14 +334,15 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                             </div>
 
                             {!result && (
-                              <button
+                              <motion.button
                                 type="button"
                                 onClick={() => runAction(action)}
                                 disabled={runningActionId !== null}
+                                whileTap={buttonTap}
                                 className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/15 disabled:opacity-50"
                               >
                                 {running ? 'Running...' : getActionButtonLabel(action.id)}
-                              </button>
+                              </motion.button>
                             )}
                           </div>
 
@@ -342,21 +356,23 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                               {result.cleared && <p className="mt-1">Cleared: {result.cleared}</p>}
                             </div>
                           )}
-                        </div>
+                        </motion.div>
                       );
                     })
+                    }
+                    </motion.div>
                   )}
                 </div>
-              </section>
+              </motion.section>
             </>
           ) : (
-            <div className="rounded-2xl border border-[#30363d] bg-[#161b22] px-6 py-16 text-center">
+            <div className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-6 py-16 text-center">
               <CheckCircle2 size={40} className="mx-auto mb-4 text-slate-600" />
               <h3 className="text-lg font-bold text-white">Session not found</h3>
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

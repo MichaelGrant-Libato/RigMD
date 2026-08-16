@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { motion } from 'motion/react';
 
 import {
   AlertTriangle,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import type { SessionSummary } from '../types/rigmd';
 
 const API_BASE_URL =
@@ -31,8 +33,13 @@ const filters = [
   'Recurring Only',
 ];
 
+const DEFAULT_VISIBLE_SESSIONS = 10;
+const SHOW_MORE_INCREMENT = 5;
+
 interface Props {
   onViewSession?: (sessionId: string) => void;
+  selectedSessionId?: string | null;
+  onStartNewDiagnosis?: () => void;
 }
 
 function normalizeAction(action: string): string {
@@ -61,39 +68,39 @@ function getActionStyle(action: string) {
   const value = action.toLowerCase();
 
   if (value.includes('monitor')) {
-    return 'border-blue-500/60 bg-blue-500/10 text-blue-400';
+    return 'border-cyan-400/35 bg-cyan-400/10 text-cyan-300';
   }
 
   if (value.includes('maintain')) {
-    return 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400';
+    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
   }
 
   if (value.includes('troubleshoot')) {
-    return 'border-orange-500/60 bg-orange-500/10 text-orange-400';
+    return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
   }
 
   if (value.includes('escalate')) {
-    return 'border-red-500/60 bg-red-500/10 text-red-400';
+    return 'border-red-400/35 bg-red-400/10 text-red-300';
   }
 
-  return 'border-cyan-500/60 bg-cyan-500/10 text-cyan-400';
+  return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
 
 function getConfidenceStyle(confidence: string) {
   const value = confidence.toLowerCase();
 
   if (value.includes('high')) {
-    return 'text-emerald-400';
+    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
   }
 
   if (
     value.includes('moderate') ||
     value.includes('medium')
   ) {
-    return 'text-orange-400';
+    return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
   }
 
-  return 'text-slate-400';
+  return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
 
 function getResolutionLabel(status?: string) {
@@ -106,18 +113,18 @@ function getResolutionLabel(status?: string) {
 
 function getResolutionStyle(status?: string) {
   if (status === 'resolved') {
-    return 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15';
+    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
   }
 
   if (status === 'still_active') {
-    return 'border-red-500/50 bg-red-500/10 text-red-300 hover:bg-red-500/15';
+    return 'border-red-400/35 bg-red-400/10 text-red-300';
   }
 
   if (status === 'needs_recheck') {
-    return 'border-orange-500/50 bg-orange-500/10 text-orange-300 hover:bg-orange-500/15';
+    return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
   }
 
-  return 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15';
+  return 'border-cyan-400/35 bg-cyan-400/10 text-cyan-300';
 }
 
 function formatSessionDate(session: SessionSummary) {
@@ -167,11 +174,13 @@ function MetricCard({
   borderColor: string;
 }) {
   return (
-    <section
-      className={`rounded-2xl border bg-[#161b22] px-5 py-6 ${borderColor}`}
+    <motion.section
+      variants={cardFadeUp}
+      transition={cardTransition}
+      className={`flex h-full min-h-[104px] items-center rounded-2xl border bg-[var(--rigmd-card)] px-5 py-6 ${borderColor}`}
     >
       <div className="flex items-center gap-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0d1117]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--rigmd-bg)]">
           {icon}
         </div>
 
@@ -185,7 +194,7 @@ function MetricCard({
           </h3>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 }
 
@@ -199,26 +208,29 @@ function FilterButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
+      whileTap={buttonTap}
       className={`rounded-full border px-4 py-2 text-xs font-bold uppercase transition ${
         active
           ? 'border-cyan-500/80 bg-cyan-500/10 text-cyan-400'
-          : 'border-[#30363d] bg-[#0d1117] text-slate-500 hover:border-cyan-500/40 hover:text-cyan-400'
+          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-500 hover:border-cyan-500/40 hover:text-cyan-400'
       }`}
     >
       {label}
-    </button>
+    </motion.button>
   );
 }
 
 function SessionRow({
   session,
   onViewSession,
+  selected,
 }: {
   session: SessionSummary;
   onViewSession?: (sessionId: string) => void;
+  selected?: boolean;
 }) {
   const action = normalizeAction(
     session.action_category || ''
@@ -229,8 +241,32 @@ function SessionRow({
     session.created_at
   );
 
+  const canOpen =
+    Boolean(session.session_id) &&
+    Boolean(onViewSession);
+
+  const openSession = () => {
+    if (session.session_id) {
+      onViewSession?.(session.session_id);
+    }
+  };
+
   return (
-    <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(260px,1.25fr)_140px_150px_170px] items-center border-b border-[#30363d] px-5 py-4 last:border-b-0">
+    <motion.div
+      variants={cardFadeUp}
+      initial="hidden"
+      animate="visible"
+      whileHover={canOpen ? { y: -1 } : undefined}
+      transition={{ duration: 0.2 }}
+      onClick={canOpen ? openSession : undefined}
+      className={`grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] items-center border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${
+        canOpen ? 'cursor-pointer' : ''
+      } ${
+        selected
+          ? 'border-l-cyan-400 bg-cyan-400/[0.06]'
+          : 'border-l-transparent hover:border-l-cyan-400/50 hover:bg-[var(--rigmd-card-hover)]'
+      }`}
+    >
       <div>
         <p className="text-sm font-bold text-white">
           {sessionDate}
@@ -247,19 +283,19 @@ function SessionRow({
         </p>
 
         {session.is_recurring && (
-          <span className="mt-1 inline-flex rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[11px] font-bold text-orange-400">
+          <span className="mt-1 inline-flex rounded-full border border-amber-400/25 bg-amber-400/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-300">
             Recurring
           </span>
         )}
       </div>
 
-      <p className="truncate text-center text-sm text-slate-400">
+      <p className="mx-auto max-w-[360px] whitespace-normal text-center text-sm leading-relaxed text-slate-400">
         {session.diagnosed_category || 'Unknown'}
       </p>
 
       <div className="flex justify-center">
         <span
-          className={`rounded border px-3 py-1 text-xs font-bold uppercase ${getActionStyle(
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getActionStyle(
             action
           )}`}
         >
@@ -269,7 +305,7 @@ function SessionRow({
 
       <div className="flex justify-center">
         <span
-          className={`text-xs font-bold uppercase ${getConfidenceStyle(
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getConfidenceStyle(
             session.confidence_label || ''
           )}`}
         >
@@ -278,31 +314,52 @@ function SessionRow({
       </div>
 
       <div className="flex justify-center">
-        <button
-          type="button"
-          disabled={
-            !session.session_id ||
-            !onViewSession
-          }
-          onClick={() =>
-            onViewSession?.(session.session_id)
-          }
-          className={`rounded border px-3 py-2 text-[11px] font-bold uppercase transition disabled:cursor-not-allowed disabled:opacity-50 ${getResolutionStyle(
+        <span
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getResolutionStyle(
             session.resolution_status
           )}`}
-          title="Open this diagnosis"
         >
           {getResolutionLabel(
             session.resolution_status
           )}
-        </button>
+        </span>
       </div>
+
+      <div className="flex justify-center">
+        <motion.button
+          type="button"
+          disabled={!canOpen}
+          onClick={(event) => {
+            event.stopPropagation();
+            openSession();
+          }}
+          whileTap={buttonTap}
+          className="inline-flex items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-[11px] font-bold uppercase text-cyan-300 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Open this diagnosis"
+        >
+          View
+        </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
+function TableRowSkeleton() {
+  return (
+    <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0">
+      {Array.from({ length: 7 }).map((_, index) => (
+        <div key={index} className="flex justify-center">
+          <div className="h-4 w-24 animate-pulse rounded bg-[var(--rigmd-card-soft)]" />
+        </div>
+      ))}
     </div>
   );
 }
 
 export default function DiagnosticHistoryView({
   onViewSession,
+  selectedSessionId,
+  onStartNewDiagnosis,
 }: Props) {
   const [sessions, setSessions] = useState<
     SessionSummary[]
@@ -319,6 +376,9 @@ export default function DiagnosticHistoryView({
 
   const [search, setSearch] =
     useState('');
+
+  const [visibleCount, setVisibleCount] =
+    useState(DEFAULT_VISIBLE_SESSIONS);
 
   const fetchSessions =
     useCallback(async () => {
@@ -384,6 +444,15 @@ export default function DiagnosticHistoryView({
     fetchSessions();
   }, [fetchSessions]);
 
+  useEffect(() => {
+    setVisibleCount(
+      DEFAULT_VISIBLE_SESSIONS
+    );
+  }, [
+    filter,
+    search,
+  ]);
+
   const filteredSessions =
     useMemo(() => {
       const query =
@@ -439,8 +508,34 @@ export default function DiagnosticHistoryView({
       sessions,
     ]);
 
+  const visibleSessions =
+    useMemo(
+      () =>
+        filteredSessions.slice(
+          0,
+          visibleCount
+        ),
+      [
+        filteredSessions,
+        visibleCount,
+      ]
+    );
+
   const totalSessions =
     sessions.length;
+
+  const hasMoreSessions =
+    visibleSessions.length <
+    filteredSessions.length;
+
+  const hasActiveFilters =
+    filter !== 'All Sessions' ||
+    search.trim().length > 0;
+
+  const resetFilters = () => {
+    setFilter('All Sessions');
+    setSearch('');
+  };
 
   const recurringCount =
     sessions.filter(
@@ -471,9 +566,21 @@ export default function DiagnosticHistoryView({
         subtitle="All saved diagnostic sessions and their outcomes"
       />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+      <motion.div
+        variants={pageFade}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        transition={pageTransition}
+        className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
+      >
         <div className="mx-auto w-full max-w-[1512px] space-y-5">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 gap-4 lg:grid-cols-4"
+          >
             <MetricCard
               icon={
                 <Zap
@@ -521,9 +628,9 @@ export default function DiagnosticHistoryView({
               value={thisMonthCount}
               borderColor="border-cyan-500/30"
             />
-          </div>
+          </motion.div>
 
-          <section className="rounded-2xl border border-[#30363d] bg-[#161b22] p-4">
+          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap gap-2">
                 {filters.map(
@@ -557,15 +664,16 @@ export default function DiagnosticHistoryView({
                       )
                     }
                     placeholder="Search symptom or cause..."
-                    className="h-10 w-full rounded-lg border border-[#30363d] bg-[#1f2937] pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500/50 sm:w-[300px]"
+                    className="h-10 w-full rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500/50 sm:w-[300px]"
                   />
                 </label>
 
-                <button
+                <motion.button
                   type="button"
                   onClick={fetchSessions}
                   disabled={loading}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#30363d] bg-[#1f2937] px-4 text-sm font-bold text-white transition hover:border-cyan-500/40 hover:text-cyan-400 disabled:cursor-wait disabled:opacity-70"
+                  whileTap={buttonTap}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 text-sm font-bold text-white transition hover:border-cyan-500/40 hover:text-cyan-400 disabled:cursor-wait disabled:opacity-70"
                 >
                   <RefreshCw
                     size={16}
@@ -577,13 +685,13 @@ export default function DiagnosticHistoryView({
                   />
 
                   Refresh
-                </button>
+                </motion.button>
               </div>
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-[#30363d] bg-[#161b22]">
-            <div className="flex items-center justify-between border-b border-[#30363d] px-5 py-4">
+          <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]">
+            <div className="flex items-center justify-between border-b border-[var(--rigmd-border)] px-5 py-4">
               <div className="flex items-center gap-3">
                 <RefreshCw
                   size={15}
@@ -598,7 +706,7 @@ export default function DiagnosticHistoryView({
                   Sessions
                 </h3>
 
-                <span className="rounded-full bg-[#20304a] px-2 py-0.5 text-xs font-bold text-slate-400">
+                <span className="rounded-full bg-[var(--rigmd-card-soft)] px-2 py-0.5 text-xs font-bold text-slate-400">
                   {filteredSessions.length}
                 </span>
               </div>
@@ -610,8 +718,8 @@ export default function DiagnosticHistoryView({
             </div>
 
             <div className="overflow-x-auto">
-              <div className="min-w-[1260px]">
-                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(260px,1.25fr)_140px_150px_170px] border-b border-[#30363d] bg-[#111827] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+              <div className="min-w-[1380px]">
+                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] border-b border-[var(--rigmd-border)] bg-[var(--rigmd-sidebar)] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
                   <div>
                     Date
                   </div>
@@ -633,20 +741,19 @@ export default function DiagnosticHistoryView({
                   </div>
 
                   <div className="text-center">
-                    Status
+                    Follow-up Status
+                  </div>
+
+                  <div className="text-center">
+                    Details
                   </div>
                 </div>
 
                 {loading ? (
-                  <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center">
-                    <RefreshCw
-                      size={38}
-                      className="mb-4 animate-spin text-slate-600"
-                    />
-
-                    <h3 className="text-lg font-bold text-white">
-                      Loading diagnostic sessions
-                    </h3>
+                  <div>
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <TableRowSkeleton key={index} />
+                    ))}
                   </div>
                 ) : error ? (
                   <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center">
@@ -656,19 +763,24 @@ export default function DiagnosticHistoryView({
                     />
 
                     <h3 className="text-lg font-bold text-white">
-                      {error}
+                      Diagnostic history is unavailable
                     </h3>
 
-                    <button
+                    <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+                      Check that the backend API is running, then refresh this view.
+                    </p>
+
+                    <motion.button
                       type="button"
                       onClick={fetchSessions}
-                      className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#1f2937] px-4 py-2 text-sm font-bold text-white transition hover:border-cyan-500/40 hover:text-cyan-400"
+                      whileTap={buttonTap}
+                      className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2 text-sm font-bold text-white transition hover:border-cyan-500/40 hover:text-cyan-400"
                     >
                       <RefreshCw
                         size={15}
                       />
                       Try Again
-                    </button>
+                    </motion.button>
                   </div>
                 ) : filteredSessions.length ===
                   0 ? (
@@ -679,18 +791,42 @@ export default function DiagnosticHistoryView({
                     />
 
                     <h3 className="text-lg font-bold text-white">
-                      No diagnostic sessions yet
+                      {totalSessions === 0 && !hasActiveFilters
+                        ? 'No diagnostic sessions yet'
+                        : 'No sessions match your filters'}
                     </h3>
 
                     <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
-                      Saved diagnostic sessions
-                      will appear here after the
-                      New Diagnosis workflow saves
-                      results.
+                      {totalSessions === 0 && !hasActiveFilters
+                        ? 'Complete a guided diagnosis to start building your history.'
+                        : 'Try clearing the search or selecting All Sessions.'}
                     </p>
+
+                    {totalSessions === 0 && !hasActiveFilters ? (
+                      onStartNewDiagnosis && (
+                        <motion.button
+                          type="button"
+                          onClick={onStartNewDiagnosis}
+                          whileTap={buttonTap}
+                          className="mt-5 inline-flex items-center justify-center rounded-lg bg-[#1fb6c9] px-4 py-2.5 text-sm font-bold text-[#041014] transition hover:bg-[#38c7d7]"
+                        >
+                          Start New Diagnosis
+                        </motion.button>
+                      )
+                    ) : (
+                      <motion.button
+                        type="button"
+                        onClick={resetFilters}
+                        whileTap={buttonTap}
+                        className="mt-5 inline-flex items-center justify-center rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2.5 text-sm font-bold text-white transition hover:border-cyan-500/40 hover:text-cyan-400"
+                      >
+                        Reset Filters
+                      </motion.button>
+                    )}
                   </div>
                 ) : (
-                  filteredSessions.map(
+                  <motion.div variants={staggerContainer} initial="hidden" animate="visible">
+                    {visibleSessions.map(
                     (session) => (
                       <SessionRow
                         key={
@@ -702,15 +838,49 @@ export default function DiagnosticHistoryView({
                         onViewSession={
                           onViewSession
                         }
+                        selected={
+                          selectedSessionId ===
+                          session.session_id
+                        }
                       />
                     )
-                  )
+                    )}
+
+                    {filteredSessions.length >
+                      DEFAULT_VISIBLE_SESSIONS && (
+                      <div className="flex items-center justify-center border-t border-[var(--rigmd-border)] px-5 py-4">
+                        {hasMoreSessions ? (
+                          <motion.button
+                            type="button"
+                            onClick={() =>
+                              setVisibleCount(
+                                (current) =>
+                                  Math.min(
+                                    current +
+                                      SHOW_MORE_INCREMENT,
+                                    filteredSessions.length
+                                  )
+                              )
+                            }
+                            whileTap={buttonTap}
+                            className="inline-flex items-center justify-center rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2.5 text-sm font-bold text-slate-200 transition hover:border-cyan-500/40 hover:text-cyan-400"
+                          >
+                            Show More Sessions
+                          </motion.button>
+                        ) : (
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                            All sessions loaded
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </motion.div>
                 )}
               </div>
             </div>
           </section>
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

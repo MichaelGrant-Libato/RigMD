@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
   BookOpen,
@@ -9,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import { accordionReveal, buttonTap, cardFadeUp, cardTransition, hoverLift, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 
 const supportedItems = [
   {
@@ -141,7 +144,12 @@ function ScopeCard({
   const iconClass = supported ? 'text-emerald-400' : 'text-red-400';
 
   return (
-    <article className="rounded-xl border border-[#30363d] bg-[#0d1117] px-4 py-3.5">
+    <motion.article
+      variants={cardFadeUp}
+      whileHover={hoverLift}
+      transition={{ duration: 0.18 }}
+      className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-3.5"
+    >
       <div className="flex items-start gap-3">
         <Icon size={15} className={`mt-0.5 shrink-0 ${iconClass}`} />
 
@@ -150,11 +158,13 @@ function ScopeCard({
           <p className="mt-1 text-sm leading-relaxed text-slate-500">{description}</p>
         </div>
       </div>
-    </article>
+    </motion.article>
   );
 }
 
 export default function HelpScopeView() {
+  const [openFaq, setOpenFaq] = useState<string | null>(null);
+
   return (
     <>
       <TopHeader
@@ -162,9 +172,16 @@ export default function HelpScopeView() {
         subtitle="What RigMD can help with, its limitations, and frequently asked questions"
       />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6">
+      <motion.div
+        variants={pageFade}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        transition={pageTransition}
+        className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6"
+      >
         <div className="mx-auto w-full max-w-[1280px] space-y-8">
-          <section className="rounded-2xl border border-[#30363d] bg-[#0d1117] px-5 py-4">
+          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-4">
             <div className="flex gap-3">
               <Info size={18} className="mt-0.5 shrink-0 text-cyan-400" />
               <p className="text-sm leading-relaxed text-slate-400">
@@ -173,7 +190,7 @@ export default function HelpScopeView() {
                 Monitor, Maintain, Troubleshoot, or Escalate.
               </p>
             </div>
-          </section>
+          </motion.section>
 
           <section className="grid grid-cols-1 gap-7 xl:grid-cols-2">
             <div>
@@ -182,11 +199,11 @@ export default function HelpScopeView() {
                 <h2 className="text-sm font-bold text-white">RigMD Can Help With</h2>
               </div>
 
-              <div className="space-y-3">
+              <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-3">
                 {supportedItems.map((item) => (
                   <ScopeCard key={item.title} supported title={item.title} description={item.description} />
                 ))}
-              </div>
+              </motion.div>
             </div>
 
             <div>
@@ -195,11 +212,11 @@ export default function HelpScopeView() {
                 <h2 className="text-sm font-bold text-white">RigMD Cannot</h2>
               </div>
 
-              <div className="space-y-3">
+              <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-3">
                 {unsupportedItems.map((item) => (
                   <ScopeCard key={item.title} supported={false} title={item.title} description={item.description} />
                 ))}
-              </div>
+              </motion.div>
             </div>
           </section>
 
@@ -209,17 +226,17 @@ export default function HelpScopeView() {
               <h2 className="text-sm font-bold text-white">Understanding Action Categories</h2>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {actionCategories.map((category) => (
-                <article key={category.label} className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-4">
+                <motion.article key={category.label} variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                   <h3 className={`font-bold ${category.tone}`}>{category.label}</h3>
                   <p className="mt-3 text-sm leading-relaxed text-slate-500">{category.description}</p>
-                </article>
+                </motion.article>
               ))}
-            </div>
+            </motion.div>
           </section>
 
-          <section className="rounded-2xl border border-[#30363d] bg-[#0d1117] px-5 py-4">
+          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-4">
             <div className="flex gap-3">
               <AlertTriangle size={18} className="mt-0.5 shrink-0 text-orange-400" />
               <p className="text-sm leading-relaxed text-slate-400">
@@ -228,7 +245,7 @@ export default function HelpScopeView() {
                 before performing troubleshooting steps.
               </p>
             </div>
-          </section>
+          </motion.section>
 
           <section>
             <div className="mb-4 flex items-center gap-2">
@@ -238,13 +255,31 @@ export default function HelpScopeView() {
 
             <div className="space-y-2">
               {faqs.map((faq) => (
-                <details key={faq.question} className="group rounded-xl border border-[#30363d] bg-[#0d1117] px-4 py-3">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold text-white">
+                <motion.div key={faq.question} variants={cardFadeUp} transition={cardTransition} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-3">
+                  <motion.button
+                    type="button"
+                    onClick={() => setOpenFaq(openFaq === faq.question ? null : faq.question)}
+                    whileTap={buttonTap}
+                    className="flex w-full items-center justify-between gap-4 text-left text-sm font-bold text-white"
+                  >
                     {faq.question}
-                    <ChevronDown size={16} className="shrink-0 text-slate-500 transition group-open:rotate-180" />
-                  </summary>
-                  <p className="mt-3 border-t border-[#253041] pt-3 text-sm leading-relaxed text-slate-500">{faq.answer}</p>
-                </details>
+                    <ChevronDown size={16} className={`shrink-0 text-slate-500 transition ${openFaq === faq.question ? 'rotate-180' : ''}`} />
+                  </motion.button>
+                  <AnimatePresence initial={false}>
+                    {openFaq === faq.question && (
+                      <motion.div
+                        variants={accordionReveal}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        transition={pageTransition}
+                        className="overflow-hidden"
+                      >
+                        <p className="mt-3 border-t border-[var(--rigmd-border)] pt-3 text-sm leading-relaxed text-slate-500">{faq.answer}</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
               ))}
             </div>
           </section>
@@ -253,7 +288,7 @@ export default function HelpScopeView() {
             RigMD v1.0.0 - Guided PC Diagnostic Decision Support - For Windows desktop users
           </p>
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

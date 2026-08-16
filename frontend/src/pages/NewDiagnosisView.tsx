@@ -1,5 +1,6 @@
-import { useState, ChangeEvent } from 'react';
+import { useMemo, useState, ChangeEvent } from 'react';
 import axios from 'axios';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Stethoscope,
   ArrowRight,
@@ -13,8 +14,10 @@ import {
   X,
   FileText,
   Info,
+  Search,
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
+import { buttonTap, cardFadeUp, cardTransition, fadeIn, hoverLift, pageFade, pageTransition } from '../lib/motion';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
@@ -96,6 +99,53 @@ const CATEGORY_OPTIONS = [
   { value: 'boot and startup issues', label: "Takes forever to turn on / Won't start up" },
   { value: 'display and rendering issues', label: 'Screen flickering / Strange visual lines' },
 ];
+
+const SYMPTOM_OPTIONS = [
+  {
+    value: 'thermal condition',
+    label: 'Loud Fan Noise or Heat',
+    description: 'PC gets hot, fans get loud, or performance drops during heavier use.',
+    category: 'Thermal',
+    common: true,
+  },
+  {
+    value: 'os performance issues',
+    label: 'Stuttering or Lag',
+    description: 'System feels slow, freezes, or struggles during normal desktop tasks.',
+    category: 'Performance',
+    common: true,
+  },
+  {
+    value: 'driver-related issues',
+    label: 'Blue Screen or Driver Issue',
+    description: 'Blue screens, random restarts, glitches, or device-driver symptoms appear.',
+    category: 'Drivers',
+    common: true,
+  },
+  {
+    value: 'storage os-level issues',
+    label: 'Storage Warning',
+    description: 'Files load slowly, saving fails, or disk/storage behavior seems unstable.',
+    category: 'Storage',
+    common: true,
+  },
+  {
+    value: 'boot and startup issues',
+    label: 'Slow Boot or Startup Loop',
+    description: 'PC takes too long to start, loops during startup, or has boot trouble.',
+    category: 'Boot',
+    common: true,
+  },
+  {
+    value: 'display and rendering issues',
+    label: 'Display or Visual Issue',
+    description: 'Screen flickers, shows visual artifacts, or has rendering problems.',
+    category: 'Display',
+    common: true,
+  },
+];
+
+const SYMPTOM_FILTERS = ['All', 'Common', ...Array.from(new Set(SYMPTOM_OPTIONS.map((option) => option.category)))];
 
 const QUESTION_BRANCHES: Record<string, {
   step2Label: string;
@@ -468,6 +518,8 @@ function getApiErrorMessage(err: any, fallback: string) {
 export default function NewDiagnosisView() {
   const [step, setStep] = useState<number>(1);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [symptomSearch, setSymptomSearch] = useState('');
+  const [activeSymptomFilter, setActiveSymptomFilter] = useState('All');
 
   const [formData, setFormData] = useState<DiagnosticFormData>({
     symptom_type: '',
@@ -491,7 +543,10 @@ export default function NewDiagnosisView() {
 
   const currentBranch = QUESTION_BRANCHES[formData.symptom_type] || QUESTION_BRANCHES['thermal condition'];
 
-  const selectedSymptom = CATEGORY_OPTIONS.find((item) => item.value === formData.symptom_type)?.label ?? '';
+  const selectedSymptom =
+    SYMPTOM_OPTIONS.find((item) => item.value === formData.symptom_type)?.label ??
+    CATEGORY_OPTIONS.find((item) => item.value === formData.symptom_type)?.label ??
+    '';
   const selectedActivity = formData.affected_activity
     ? currentBranch.activities.find((item) => item.value === formData.affected_activity)?.label ?? formData.affected_activity
     : '';
@@ -501,6 +556,29 @@ export default function NewDiagnosisView() {
   const selectedChange = formData.recent_changes
     ? currentBranch.recentChanges.find((item) => item.value === formData.recent_changes)?.label ?? formData.recent_changes
     : '';
+
+  const selectedSymptomOption = SYMPTOM_OPTIONS.find((item) => item.value === formData.symptom_type);
+
+  const filteredSymptomOptions = useMemo(() => {
+    const query = symptomSearch.trim().toLowerCase();
+
+    return SYMPTOM_OPTIONS.filter((option) => {
+      const matchesFilter =
+        activeSymptomFilter === 'All' ||
+        (activeSymptomFilter === 'Common' && option.common) ||
+        option.category === activeSymptomFilter;
+
+      if (!matchesFilter) return false;
+      if (!query) return true;
+
+      return (
+        option.label.toLowerCase().includes(query) ||
+        option.description.toLowerCase().includes(query) ||
+        option.category.toLowerCase().includes(query) ||
+        option.value.toLowerCase().includes(query)
+      );
+    });
+  }, [activeSymptomFilter, symptomSearch]);
 
   const answerSummary = [
     { label: 'Symptom', value: selectedSymptom },
@@ -521,8 +599,8 @@ export default function NewDiagnosisView() {
     return true;
   };
 
-  const handleCategoryChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    const nextCategory = e.target.value;
+  const selectSymptomType = (nextCategory: string) => {
+    if (nextCategory === formData.symptom_type) return;
 
     setFormData({
       symptom_type: nextCategory,
@@ -753,8 +831,8 @@ export default function NewDiagnosisView() {
     return { badge: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/10', border: 'border-l-cyan-400' };
   };
 
-  const selectStyle = 'w-full mt-2 rounded-xl border border-[#30363d] bg-[#0d1117] px-5 py-3.5 text-[15px] text-gray-100 outline-none focus:border-cyan-500/50 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50';
-  const inputStyle = 'w-full mt-2 rounded-xl border border-[#30363d] bg-[#0d1117] px-5 py-3.5 text-[15px] text-gray-100 outline-none focus:border-cyan-500/50 transition-all';
+  const selectStyle = 'rigmd-select w-full mt-2 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] py-3.5 pl-5 pr-12 text-[15px] text-gray-100 outline-none focus:border-cyan-500/50 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50';
+  const inputStyle = 'w-full mt-2 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-3.5 text-[15px] text-gray-100 outline-none focus:border-cyan-500/50 transition-all';
 
   const diagnosticSteps = [
     { label: 'Symptom Type', detail: 'General Problem', num: 1 },
@@ -770,10 +848,17 @@ export default function NewDiagnosisView() {
     <>
       <TopHeader title="Guided Checkup" subtitle="Let's identify what's slowing down your computer" />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6">
+      <motion.div
+        variants={pageFade}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        transition={pageTransition}
+        className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6"
+      >
         <div className="grid w-full grid-cols-1 gap-5 xl:grid-cols-[250px_minmax(0,1fr)_292px]">
-          <aside className="hidden self-start overflow-hidden rounded-2xl border border-[#30363d] bg-[#161b22] xl:block">
-            <div className="border-b border-[#30363d] px-4 py-4">
+          <aside className="hidden self-start overflow-hidden rounded-2xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)]/80 xl:block">
+            <div className="border-b border-[var(--rigmd-border)] px-4 py-4">
               <div className="flex items-center gap-2">
                 <span className="h-4 w-1 rounded-full bg-cyan-400" />
                 <h3 className="text-[13px] font-bold uppercase tracking-[0.18em] text-white">Diagnostic Steps</h3>
@@ -786,18 +871,25 @@ export default function NewDiagnosisView() {
                 const active = step === item.num;
 
                 return (
-                  <div key={item.num} className={`flex items-center gap-3 rounded-xl border px-3.5 py-3.5 transition ${
+                  <motion.div
+                    key={item.num}
+                    animate={{ scale: active ? 1.02 : 1 }}
+                    transition={{ duration: 0.2 }}
+                    className={`flex items-center gap-3 rounded-xl border px-3.5 py-3.5 transition ${
                     active ? 'border-cyan-500/40 bg-cyan-500/10'
                       : completed ? 'border-emerald-500/20 bg-emerald-500/5'
                         : 'border-transparent bg-transparent opacity-55'
                   }`}>
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${
+                    <motion.span
+                      animate={{ scale: completed || active ? 1.02 : 1 }}
+                      transition={{ duration: 0.2 }}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${
                       active ? 'border-cyan-400 bg-cyan-400 text-[#041014] shadow-[0_0_14px_rgba(34,211,238,0.35)]'
                         : completed ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                          : 'border-[#30363d] bg-[#0d1117] text-slate-600'
+                          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-600'
                     }`}>
                       {completed ? <CheckCircle2 size={14} /> : item.num}
-                    </span>
+                    </motion.span>
 
                     <div className="min-w-0">
                       <p className={`truncate text-[13px] font-bold ${active ? 'text-white' : completed ? 'text-slate-200' : 'text-slate-500'}`}>
@@ -807,19 +899,19 @@ export default function NewDiagnosisView() {
                         {completed ? 'Completed' : active ? 'In progress' : item.detail}
                       </p>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
 
-            <div className="m-3 rounded-xl border border-[#30363d] bg-[#0d1117] p-3 text-[11px] leading-relaxed text-slate-500">
+            <div className="m-3 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-3 text-[11px] leading-relaxed text-slate-500">
               Answers update the diagnostic result only after you run the final check.
             </div>
           </aside>
 
           <div className="min-w-0 space-y-5">
-            <section className="overflow-hidden rounded-2xl border border-[#30363d] bg-[#161b22]">
-              <div className="flex flex-col gap-3 border-b border-[#30363d] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]">
+              <div className="flex flex-col gap-3 border-b border-[var(--rigmd-border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">
                     <Stethoscope size={14} className="text-cyan-400" />
@@ -831,35 +923,161 @@ export default function NewDiagnosisView() {
                 <div className="text-left sm:text-right">
                   <p className="text-xs font-semibold text-slate-500">
                     Step {step} of {diagnosticSteps.length}
-                    <span className="ml-2 text-cyan-400">{progressPercent}%</span>
+                    <span className="ml-2 text-cyan-400">Progress: {progressPercent}%</span>
                   </p>
-                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#0d1117] sm:w-44">
-                    <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${progressPercent}%` }} />
+                  <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                    Answers Completed: {completedAnswerCount}/{answerSummary.length}
+                  </p>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--rigmd-bg)] sm:w-44">
+                    <motion.div
+                      className="h-full rounded-full bg-cyan-400"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progressPercent}%` }}
+                      transition={{ duration: 0.3, ease: 'easeOut' }}
+                    />
                   </div>
                 </div>
               </div>
             </section>
 
-            <div className="flex min-h-[520px] flex-col justify-between rounded-2xl border border-[#30363d] bg-[#161b22] p-7">
+            <div className="flex flex-col rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
+              <AnimatePresence mode="wait">
               {step === 1 && (
-                <div className="animate-fadeIn">
+                <motion.div key="step-1" variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition}>
                   <div className="mb-6 flex items-center gap-3">
                     <HelpCircle className="text-cyan-400" size={24} />
-                    <h3 className="text-xl font-bold text-white">What seems to be the main issue?</h3>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">What seems to be the main issue?</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Choose the symptom that best describes what you notice most often.
+                      </p>
+                    </div>
                   </div>
 
-                  <label className="text-xs font-bold uppercase tracking-wider text-gray-400">Select a category</label>
-                  <select name="symptom_type" value={formData.symptom_type} onChange={handleCategoryChange} className={selectStyle}>
-                    <option value="" disabled>Select the main issue</option>
-                    {CATEGORY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="space-y-4">
+                    <label className="relative block">
+                      <Search
+                        size={16}
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                      />
+                      <input
+                        value={symptomSearch}
+                        onChange={(event) => setSymptomSearch(event.target.value)}
+                        placeholder="Search symptoms, categories, or keywords..."
+                        className="h-11 w-full rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] pl-11 pr-4 text-sm text-white outline-none transition focus:border-cyan-400/45 placeholder:text-slate-600"
+                      />
+                    </label>
+
+                    <div className="flex flex-wrap gap-2">
+                      {SYMPTOM_FILTERS.map((filter) => {
+                        const active = activeSymptomFilter === filter;
+
+                        return (
+                          <motion.button
+                            key={filter}
+                            type="button"
+                            onClick={() => setActiveSymptomFilter(filter)}
+                            whileTap={buttonTap}
+                            className={`rounded-full border px-3.5 py-1.5 text-[11px] font-bold uppercase transition ${
+                              active
+                                ? 'border-cyan-400/45 bg-cyan-400/10 text-cyan-300'
+                                : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-500 hover:border-cyan-400/30 hover:text-cyan-300'
+                            }`}
+                          >
+                            {filter}
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+
+                    <AnimatePresence mode="popLayout">
+                      {filteredSymptomOptions.length === 0 ? (
+                        <motion.div
+                          key="no-symptoms"
+                          variants={cardFadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          exit="exit"
+                          transition={cardTransition}
+                          className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-5 text-center"
+                        >
+                          <p className="font-semibold text-white">No matching symptoms found.</p>
+                          <p className="mt-1 text-sm text-slate-500">Try another keyword or choose All.</p>
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="symptom-options"
+                          variants={cardFadeUp}
+                          initial="hidden"
+                          animate="visible"
+                          exit="exit"
+                          transition={cardTransition}
+                          className="grid grid-cols-1 gap-3 md:grid-cols-2"
+                        >
+                          {filteredSymptomOptions.map((option) => {
+                            const selected = formData.symptom_type === option.value;
+
+                            return (
+                              <motion.button
+                                key={option.value}
+                                type="button"
+                                onClick={() => selectSymptomType(option.value)}
+                                whileHover={hoverLift}
+                                whileTap={buttonTap}
+                                className={`flex min-h-[108px] items-start gap-3 rounded-xl border p-4 text-left transition ${
+                                  selected
+                                    ? 'border-cyan-400/55 bg-cyan-400/10'
+                                    : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] hover:border-cyan-400/30 hover:bg-[var(--rigmd-card-soft)]'
+                                }`}
+                              >
+                                <span
+                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                                    selected
+                                      ? 'border-cyan-300 bg-cyan-300 text-[#041014]'
+                                      : 'border-slate-600 text-transparent'
+                                  }`}
+                                >
+                                  <CheckCircle2 size={13} />
+                                </span>
+
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex flex-wrap items-center gap-2">
+                                    <span className="font-bold text-white">{option.label}</span>
+                                    {option.common && (
+                                      <span className="rounded-full border border-teal-300/25 bg-teal-300/10 px-2 py-0.5 text-[10px] font-bold uppercase text-teal-200">
+                                        Common
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="mt-1 block text-sm leading-relaxed text-slate-500">{option.description}</span>
+                                  <span className="mt-3 inline-flex rounded-full border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] px-2.5 py-1 text-[10px] font-bold uppercase text-slate-400">
+                                    {option.category}
+                                  </span>
+                                </span>
+                              </motion.button>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {selectedSymptomOption && (
+                      <motion.div
+                        variants={fadeIn}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ duration: 0.2 }}
+                        className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.055] px-4 py-3 text-sm text-cyan-100"
+                      >
+                        Selected: <span className="font-bold">{selectedSymptomOption.label}</span>
+                      </motion.div>
+                    )}
+                  </div>
+                </motion.div>
               )}
 
               {step === 2 && (
-                <div className="animate-fadeIn space-y-6">
+                <motion.div key="step-2" variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition} className="space-y-6">
                   <div className="flex items-center gap-3">
                     <Activity className="text-cyan-400" size={24} />
                     <h3 className="text-xl font-bold text-white">How does it behave?</h3>
@@ -897,11 +1115,11 @@ export default function NewDiagnosisView() {
                       ))}
                     </select>
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {step === 3 && (
-                <div className="animate-fadeIn space-y-6">
+                <motion.div key="step-3" variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition} className="space-y-6">
                   <div className="flex items-center gap-3">
                     <AlertTriangle className="text-cyan-400" size={24} />
                     <h3 className="text-xl font-bold text-white">Any other clues?</h3>
@@ -939,31 +1157,31 @@ export default function NewDiagnosisView() {
                       className={`${inputStyle} min-h-[80px] resize-none`}
                     />
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {step === 4 && (
-                <div className="animate-fadeIn space-y-4">
+                <motion.div key="step-4" variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition} className="space-y-4">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="text-emerald-400" size={24} />
                     <h3 className="text-xl font-bold text-white">Review Your Information</h3>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 rounded-xl border border-[#253041] bg-[#0d1117] p-4 text-sm md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm md:grid-cols-2">
                     <div><span className="block text-xs font-bold uppercase text-gray-500">Selected Issue Group</span><span className="font-medium text-white">{selectedSymptom}</span></div>
                     <div><span className="block text-xs font-bold uppercase text-gray-500">Disruption Level</span><span className="font-medium text-white">{formData.severity}</span></div>
                     <div><span className="block text-xs font-bold uppercase text-gray-500">How Frequently</span><span className="font-medium capitalize text-white">{formData.frequency}</span></div>
                     <div><span className="block text-xs font-bold uppercase text-gray-500">Active Activity</span><span className="font-medium text-white">{selectedActivity}</span></div>
-                    <div className="border-t border-[#253041] pt-3 md:col-span-2">
+                    <div className="border-t border-[var(--rigmd-border)] pt-3 md:col-span-2">
                       <span className="mb-1 block text-xs font-bold uppercase text-gray-500">Your Description</span>
                       <span className="text-xs italic text-gray-300">{formData.system_state || 'No additional description added.'}</span>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {step === 5 && (
-                <div className="animate-fadeIn flex flex-1 flex-col justify-center py-4">
+                <motion.div key="step-5" variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition} className="flex flex-1 flex-col justify-center py-4">
                   {loading && (
                     <div className="space-y-4 py-12 text-center">
                       <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent" />
@@ -979,7 +1197,7 @@ export default function NewDiagnosisView() {
 
                   {report && (
                     <div className="space-y-6">
-                      <div className="flex items-center justify-between border-b border-[#30363d] pb-4">
+                      <div className="flex items-center justify-between border-b border-[var(--rigmd-border)] pb-4">
                         <div>
                           <span className={`rounded-md border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${getActionStyles(report.action_category).badge}`}>
                             {report.action_category}
@@ -994,7 +1212,7 @@ export default function NewDiagnosisView() {
 
                       <div>
                         <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">What's Happening Under the Hood</h5>
-                        <p className="rounded-xl border border-[#253041] bg-[#0d1117] p-4 text-sm leading-relaxed text-gray-300 shadow-inner">
+                        <p className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm leading-relaxed text-gray-300 shadow-inner">
                           {report.ai_explanation}
                         </p>
                       </div>
@@ -1015,12 +1233,12 @@ export default function NewDiagnosisView() {
                       )}
 
                       {!isNoActiveIssue(report) && (
-                        <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+                        <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                           <h5 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-500">
                             <FileText size={14} className="text-cyan-400" /> Targeted Verification Area
                           </h5>
-                          <div className="flex flex-col items-start justify-between gap-3 rounded-lg border border-[#253041] bg-[#161b22] p-3 md:flex-row md:items-center">
-                            <div className="w-full flex-1 select-all break-all rounded border border-[#30363d] bg-[#0d1117] px-3 py-2 font-mono text-xs text-cyan-400 md:w-auto">
+                          <div className="flex flex-col items-start justify-between gap-3 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-3 md:flex-row md:items-center">
+                            <div className="w-full flex-1 select-all break-all rounded border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-3 py-2 font-mono text-xs text-cyan-400 md:w-auto">
                               {getVerificationTarget()}
                             </div>
                             <button type="button" disabled={inspecting} onClick={handleVerifyLocation} className="w-full shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-center text-xs font-bold text-cyan-400 transition-all hover:bg-cyan-500/10 disabled:opacity-50 md:w-auto">
@@ -1036,7 +1254,7 @@ export default function NewDiagnosisView() {
                         <p className="text-xs leading-relaxed text-gray-400">{report.recommended_next_step}</p>
                       </div>
                       {!isNoActiveIssue(report) && report.session_id && (
-                        <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
+                        <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div>
                               <h5 className="text-xs font-bold uppercase tracking-wider text-white">Resolution Status</h5>
@@ -1058,7 +1276,7 @@ export default function NewDiagnosisView() {
                           {report.resolution_proof && report.resolution_proof.length > 0 && (
                             <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
                               {report.resolution_proof.map((item) => (
-                                <div key={item.label} className="rounded-lg border border-[#253041] bg-[#161b22] p-3">
+                                <div key={item.label} className="rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-3">
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
                                   <p className="mt-1 text-xs font-semibold text-white">{item.value}</p>
                                   <p className="mt-1 text-[11px] text-slate-500">{item.meaning}</p>
@@ -1099,7 +1317,7 @@ export default function NewDiagnosisView() {
 
                                       <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
                                         {buildActionProof(result).map((proofItem) => (
-                                          <div key={`${action.id}-${proofItem.label}`} className="rounded-lg border border-[#253041] bg-[#0d1117] p-3">
+                                          <div key={`${action.id}-${proofItem.label}`} className="rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-3">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{proofItem.label}</p>
                                             <p className="mt-1 text-xs font-semibold text-white">
                                               {proofItem.change ?? proofItem.after ?? proofItem.status ?? 'Checked'}
@@ -1130,41 +1348,55 @@ export default function NewDiagnosisView() {
                       )}
 
                       {!isNoActiveIssue(report) && remediationActions.length === 0 && (
-                        <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-xs text-gray-500">
+                        <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-xs text-gray-500">
                           No automated fix is available for this diagnosis. RigMD will keep this case in guided mode to avoid unsafe changes.
                         </div>
                       )}
                     </div>
                   )}
-                </div>
+                </motion.div>
+              )}
+              </AnimatePresence>
+
+              {error && step !== 5 && (
+                <motion.div
+                  variants={cardFadeUp}
+                  initial="hidden"
+                  animate="visible"
+                  transition={cardTransition}
+                  className="mt-5 rounded-xl border border-red-400/25 bg-red-400/10 p-4 text-sm text-red-200"
+                >
+                  <p className="font-bold text-red-100">Diagnosis could not be completed.</p>
+                  <p className="mt-1 leading-relaxed text-red-200/80">{error}</p>
+                </motion.div>
               )}
 
-              <div className="mt-9 flex items-center justify-between border-t border-[#30363d] pt-5">
+              <div className="mt-6 flex items-center justify-between border-t border-[var(--rigmd-border)] pt-4">
                 {step > 1 && step < 5 ? (
-                  <button type="button" onClick={prevStep} className="flex items-center gap-2 rounded-xl border border-[#30363d] bg-[#0d1117] px-5 py-3 text-sm font-semibold text-gray-300 transition-colors hover:bg-[#161b22]">
+                  <motion.button type="button" onClick={prevStep} whileTap={buttonTap} className="flex items-center gap-2 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-3 text-sm font-semibold text-gray-300 transition-colors hover:bg-[var(--rigmd-card)]">
                     <ArrowLeft size={16} /> Back
-                  </button>
+                  </motion.button>
                 ) : <div />}
 
                 {step < 4 ? (
-                  <button type="button" disabled={!canContinue()} onClick={nextStep} className="ml-auto flex items-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 text-sm font-bold text-[#041014] shadow-[0_0_12px_rgba(6,182,212,0.2)] transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+                  <motion.button type="button" disabled={!canContinue()} onClick={nextStep} whileTap={buttonTap} className="ml-auto flex items-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 text-sm font-bold text-[#041014] shadow-[0_0_12px_rgba(6,182,212,0.2)] transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
                     Next <ArrowRight size={16} />
-                  </button>
+                  </motion.button>
                 ) : step === 4 ? (
-                  <button type="button" onClick={handleFormSubmit} className="ml-auto flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-7 py-3.5 text-sm font-bold text-white shadow-[0_0_16px_rgba(6,182,212,0.3)] transition-all hover:opacity-90">
+                  <motion.button type="button" onClick={handleFormSubmit} whileHover={hoverLift} whileTap={buttonTap} className="ml-auto flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-7 py-3.5 text-sm font-bold text-white shadow-[0_0_16px_rgba(6,182,212,0.3)] transition-all hover:opacity-90">
                     <Zap size={16} /> Run Diagnostics
-                  </button>
+                  </motion.button>
                 ) : step === 5 && !loading ? (
-                  <button type="button" onClick={resetDiagnosis} className="ml-auto flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-6 py-3 text-sm font-bold text-cyan-400 transition-colors hover:bg-cyan-500/10">
+                  <motion.button type="button" onClick={resetDiagnosis} whileTap={buttonTap} className="ml-auto flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-6 py-3 text-sm font-bold text-cyan-400 transition-colors hover:bg-cyan-500/10">
                     <Stethoscope size={16} /> Check Another Issue
-                  </button>
+                  </motion.button>
                 ) : <div />}
               </div>
             </div>
           </div>
 
-          <aside className="hidden self-start overflow-hidden rounded-2xl border border-[#30363d] bg-[#161b22] xl:block">
-            <div className="flex items-center justify-between border-b border-[#30363d] px-4 py-4">
+          <aside className="hidden self-start overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] xl:block">
+            <div className="flex items-center justify-between border-b border-[var(--rigmd-border)] px-4 py-4">
               <div className="flex items-center gap-2">
                 <FileText size={14} className="text-cyan-400" />
                 <h3 className="text-[13px] font-bold uppercase tracking-[0.18em] text-white">Your Answers</h3>
@@ -1177,20 +1409,31 @@ export default function NewDiagnosisView() {
                 const isAnswered = Boolean(item.value);
 
                 return (
-                  <div key={item.label} className="rounded-xl border border-[#253041] bg-[#0d1117] px-3.5 py-3">
+                  <motion.div
+                    key={item.label}
+                    variants={fadeIn}
+                    initial="hidden"
+                    animate="visible"
+                    transition={{ duration: 0.2 }}
+                    className={`rounded-lg border px-3.5 py-3 ${
+                      isAnswered
+                        ? 'border-teal-300/18 bg-teal-300/[0.045]'
+                        : 'border-[var(--rigmd-border-soft)] bg-[var(--rigmd-main-surface)]/45'
+                    }`}
+                  >
                     <div className="mb-1 flex items-center justify-between gap-2">
                       <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-600">{item.label}</span>
-                      {isAnswered ? <CheckCircle2 size={12} className="text-emerald-400" /> : <span className="h-3 w-3 rounded-full border border-slate-600" />}
+                      {isAnswered ? <CheckCircle2 size={12} className="text-teal-300" /> : <span className="h-3 w-3 rounded-full border border-slate-700" />}
                     </div>
                     <p className={`line-clamp-2 text-[13px] font-semibold ${isAnswered ? 'text-slate-200' : 'text-slate-600'}`}>
                       {isAnswered ? item.value : 'Not answered'}
                     </p>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
 
-            <div className="m-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <div className="m-3 rounded-lg border border-[#164e63]/45 bg-[#0b3340]/25 p-3">
               <div className="mb-2 flex items-center gap-2">
                 <Info size={14} className="text-cyan-400" />
                 <p className="text-[11px] font-bold uppercase tracking-wider text-white">Session Note</p>
@@ -1201,19 +1444,20 @@ export default function NewDiagnosisView() {
             </div>
           </aside>
         </div>
-      </div>
+      </motion.div>
 
+      <AnimatePresence>
       {isModalOpen && selectedAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeIn">
-          <div className="relative w-full max-w-lg rounded-2xl border border-[#30363d] bg-[#161b22] p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-[#30363d] pb-3">
+        <motion.div variants={fadeIn} initial="hidden" animate="visible" exit="exit" transition={pageTransition} className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <motion.div variants={cardFadeUp} initial="hidden" animate="visible" exit="exit" transition={cardTransition} className="relative w-full max-w-lg rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between border-b border-[var(--rigmd-border)] pb-3">
               <div className="flex items-center gap-2.5 text-orange-400">
                 <ShieldCheck size={22} className="text-cyan-400" />
                 <h4 className="text-base font-bold text-white">Before RigMD Runs This</h4>
               </div>
-              <button type="button" onClick={() => { setIsModalOpen(false); setSelectedAction(null); }} className="text-gray-500 transition-colors hover:text-white">
+              <motion.button type="button" onClick={() => { setIsModalOpen(false); setSelectedAction(null); }} whileTap={buttonTap} className="text-gray-500 transition-colors hover:text-white">
                 <X size={18} />
-              </button>
+              </motion.button>
             </div>
 
             <p className="mb-4 text-xs leading-relaxed text-gray-400">
@@ -1237,17 +1481,17 @@ export default function NewDiagnosisView() {
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:items-stretch">
-                      <div className="rounded-xl border border-[#253041] bg-[#0d1117] p-3">
+                      <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-3">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Before</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-300">{preview.before}</p>
                       </div>
                       <div className="hidden items-center text-cyan-400 md:flex"><ArrowRight size={18} /></div>
-                      <div className="rounded-xl border border-cyan-500/20 bg-[#0d1117] p-3">
+                      <div className="rounded-xl border border-cyan-500/20 bg-[var(--rigmd-bg)] p-3">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">RigMD Does</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-300">{preview.during}</p>
                       </div>
                       <div className="hidden items-center text-cyan-400 md:flex"><ArrowRight size={18} /></div>
-                      <div className="rounded-xl border border-emerald-500/20 bg-[#0d1117] p-3">
+                      <div className="rounded-xl border border-emerald-500/20 bg-[var(--rigmd-bg)] p-3">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">After</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-300">{preview.after}</p>
                       </div>
@@ -1268,7 +1512,7 @@ export default function NewDiagnosisView() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-3">
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-3">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proof RigMD Will Show After</p>
                       <ul className="mt-2 space-y-1 text-[11px] text-slate-400">
                         {preview.proof.map((item) => <li key={item}>- {item}</li>)}
@@ -1279,17 +1523,18 @@ export default function NewDiagnosisView() {
               })()}
             </div>
 
-            <div className="flex items-center justify-end gap-3 border-t border-[#30363d] pt-3">
-              <button type="button" onClick={() => { setIsModalOpen(false); setSelectedAction(null); }} className="rounded-xl border border-[#30363d] bg-[#0d1117] px-4 py-2 text-xs font-semibold text-gray-300 transition-colors hover:bg-[#161b22]">
+            <div className="flex items-center justify-end gap-3 border-t border-[var(--rigmd-border)] pt-3">
+              <motion.button type="button" onClick={() => { setIsModalOpen(false); setSelectedAction(null); }} whileTap={buttonTap} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-2 text-xs font-semibold text-gray-300 transition-colors hover:bg-[var(--rigmd-card)]">
                 Cancel
-              </button>
-              <button type="button" onClick={handleApplyFix} className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:opacity-90">
+              </motion.button>
+              <motion.button type="button" onClick={handleApplyFix} whileTap={buttonTap} className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:opacity-90">
                 Confirm & Run
-              </button>
+              </motion.button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </>
   );
 }

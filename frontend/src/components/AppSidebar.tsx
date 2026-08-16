@@ -6,9 +6,11 @@ import {
   HelpCircle,
   History,
   LayoutDashboard,
+  Menu,
   Server,
   Settings,
   Stethoscope,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -42,6 +44,7 @@ interface SidebarItemProps {
   active?: boolean;
   badge?: string | number | null;
   alert?: boolean;
+  collapsed?: boolean;
   onClick?: () => void;
 }
 
@@ -51,32 +54,38 @@ function SidebarItem({
   active = false,
   badge = null,
   alert = false,
+  collapsed = false,
   onClick,
 }: SidebarItemProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`mb-1 flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-left transition-colors ${
+      title={collapsed ? label : undefined}
+      className={`relative mb-1 flex w-full items-center transition-colors ${
+        collapsed ? 'h-10 justify-center px-0' : 'justify-between px-4 py-2.5 text-left'
+      } ${
         active
-          ? 'border-l-2 border-cyan-400 bg-[#172232] text-cyan-400'
-          : 'text-slate-300 hover:bg-[#172232] hover:text-white'
+          ? 'bg-cyan-400/10 text-cyan-200 shadow-[inset_3px_0_0_rgba(34,211,238,0.72)]'
+          : 'text-slate-300 hover:bg-cyan-400/[0.045] hover:text-white'
       }`}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <Icon size={18} />
-        <span className="truncate text-sm font-medium">{label}</span>
+      <div className={`flex min-w-0 items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
+        <Icon size={18} className="shrink-0" />
+        {!collapsed && <span className="truncate text-sm font-medium">{label}</span>}
       </div>
 
-      {alert ? (
+      {collapsed && (alert || badge !== null) ? (
+        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-400" />
+      ) : alert ? (
         <span
           title="Live warning detected"
-          className="ml-3 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-500/40 bg-orange-500/10 text-orange-400"
+          className="ml-3 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-400/35 bg-amber-400/10 text-amber-300"
         >
           <AlertTriangle size={13} />
         </span>
       ) : badge !== null ? (
-        <span className="ml-3 shrink-0 text-xs font-bold text-cyan-400">{badge}</span>
+        <span className="ml-3 shrink-0 text-xs font-bold text-cyan-300">{badge}</span>
       ) : null}
     </button>
   );
@@ -89,6 +98,8 @@ interface AppSidebarProps {
   liveWarningActive?: boolean;
   liveStatus?: LiveDataStatus;
   hardwareUpdatedAt?: Date | null;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 function getStatusCopy(status: LiveDataStatus) {
@@ -97,7 +108,7 @@ function getStatusCopy(status: LiveDataStatus) {
       title: 'System Status',
       label: 'Syncing Hardware',
       dotClassName: 'bg-cyan-400 animate-pulse',
-      textClassName: 'text-cyan-400',
+      textClassName: 'text-cyan-300',
     };
   }
 
@@ -106,7 +117,7 @@ function getStatusCopy(status: LiveDataStatus) {
       title: 'System Status',
       label: 'Offline',
       dotClassName: 'bg-red-400',
-      textClassName: 'text-red-400',
+      textClassName: 'text-red-300',
     };
   }
 
@@ -114,16 +125,16 @@ function getStatusCopy(status: LiveDataStatus) {
     return {
       title: 'System Status',
       label: 'Stale Data',
-      dotClassName: 'bg-orange-400',
-      textClassName: 'text-orange-400',
+      dotClassName: 'bg-amber-400',
+      textClassName: 'text-amber-300',
     };
   }
 
   return {
     title: 'System Status',
     label: 'Live Scan Active',
-    dotClassName: 'bg-emerald-400',
-    textClassName: 'text-emerald-400',
+      dotClassName: 'bg-emerald-400',
+      textClassName: 'text-emerald-300',
   };
 }
 
@@ -151,18 +162,25 @@ export default function AppSidebar({
   liveWarningActive,
   liveStatus = 'syncing',
   hardwareUpdatedAt,
+  mobileOpen = false,
+  onMobileClose,
 }: AppSidebarProps) {
   const totalSessions = dashboard.totals?.total_sessions ?? 0;
   const recurringIssues = dashboard.recurring_issues_count ?? 0;
 
   const [seenHistoryCount, setSeenHistoryCount] = useState(() => readSeenCount(HISTORY_SEEN_KEY));
   const [seenRecurringCount, setSeenRecurringCount] = useState(() => readSeenCount(RECURRING_SEEN_KEY));
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
   const historyBadgeCount = Math.max(totalSessions - seenHistoryCount, 0);
   const recurringBadgeCount = Math.max(recurringIssues - seenRecurringCount, 0);
 
   const warningAlert = liveWarningActive ?? (dashboard.warning_signs_active_count ?? 0) > 0;
   const statusCopy = getStatusCopy(liveStatus);
+  const navigate = (page: PageKey) => {
+    setActivePage(page);
+    onMobileClose?.();
+  };
 
   useEffect(() => {
     if (activePage === 'diagnosticHistory') {
@@ -178,114 +196,210 @@ export default function AppSidebar({
     }
   }, [activePage, recurringIssues]);
 
-  return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-[#253041] bg-[#111827] md:flex">
-      <div className="flex items-center gap-3 border-b border-[#253041] px-6 py-5">
-        <Activity className="text-cyan-400" size={28} />
+  useEffect(() => {
+    if (!mobileOpen) return;
 
-        <div>
-          <h1 className="text-lg font-bold leading-tight text-white">RigMD</h1>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Diagnostic Support</p>
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onMobileClose?.();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileOpen, onMobileClose]);
+
+  const renderSectionLabel = (label: string, collapsed: boolean) =>
+    collapsed ? (
+      <div className="mx-2 my-4 border-t border-white/15" aria-hidden="true" />
+    ) : (
+      <p className="mb-2 overflow-hidden px-4 text-[11px] font-bold tracking-wider text-cyan-300/80">{label}</p>
+    );
+
+  const renderContent = (collapsed = false, isMobile = false) => (
+    <>
+      <div className={`border-b border-white/10 ${collapsed ? 'px-0 py-2' : 'px-4 py-4'}`}>
+        <div className={`flex items-center ${collapsed ? 'flex-col gap-3' : 'justify-between gap-3'}`}>
+          <div className={`flex min-w-0 items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-cyan-400/22 bg-cyan-400/10 text-cyan-200">
+              <Activity size={22} />
+            </div>
+
+            {!collapsed && (
+              <div className="overflow-hidden">
+                <h1 className="text-lg font-bold leading-tight text-white">RigMD</h1>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Diagnostic Support</p>
+              </div>
+            )}
+          </div>
+
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={onMobileClose}
+              className="flex h-9 w-9 items-center justify-center border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] text-slate-400 transition hover:border-cyan-400/35 hover:text-white md:hidden"
+              aria-label="Close navigation menu"
+            >
+              <X size={18} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setDesktopCollapsed((value) => !value)}
+              className="flex h-9 w-9 items-center justify-center text-slate-300 transition hover:bg-white/[0.055] hover:text-white"
+              aria-label={desktopCollapsed ? 'Expand navigation menu' : 'Collapse navigation menu'}
+              title={desktopCollapsed ? 'Expand navigation menu' : 'Collapse navigation menu'}
+            >
+              <Menu size={19} />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-5">
+      <div className={`custom-scrollbar flex-1 overflow-y-auto py-4 ${collapsed ? 'px-0' : 'px-3'}`}>
         <div className="mb-6">
-          <p className="mb-2 px-4 text-[11px] font-bold tracking-wider text-slate-500">OVERVIEW</p>
+          {renderSectionLabel('OVERVIEW', collapsed)}
 
           <SidebarItem
             icon={LayoutDashboard}
             label="Home"
+            collapsed={collapsed}
             active={activePage === 'home'}
-            onClick={() => setActivePage('home')}
-          />
-
-          <SidebarItem
-            icon={Server}
-            label="System Profile"
-            active={activePage === 'systemProfile'}
-            onClick={() => setActivePage('systemProfile')}
+            onClick={() => navigate('home')}
           />
         </div>
 
         <div className="mb-6">
-          <p className="mb-2 px-4 text-[11px] font-bold tracking-wider text-slate-500">DIAGNOSTICS</p>
+          {renderSectionLabel('DIAGNOSTICS', collapsed)}
+
+          <SidebarItem
+            icon={Server}
+            label="System Profile"
+            collapsed={collapsed}
+            active={activePage === 'systemProfile'}
+            onClick={() => navigate('systemProfile')}
+          />
 
           <SidebarItem
             icon={Stethoscope}
             label="New Diagnosis"
+            collapsed={collapsed}
             active={activePage === 'newDiagnosis'}
-            onClick={() => setActivePage('newDiagnosis')}
+            onClick={() => navigate('newDiagnosis')}
           />
 
           <SidebarItem
             icon={History}
             label="Diagnostic History"
             badge={historyBadgeCount > 0 ? formatBadge(historyBadgeCount) : null}
+            collapsed={collapsed}
             active={activePage === 'diagnosticHistory'}
-            onClick={() => setActivePage('diagnosticHistory')}
+            onClick={() => navigate('diagnosticHistory')}
           />
 
           <SidebarItem
             icon={Activity}
             label="Recurring Patterns"
             badge={recurringBadgeCount > 0 ? formatBadge(recurringBadgeCount) : null}
+            collapsed={collapsed}
             active={activePage === 'recurringPatterns'}
-            onClick={() => setActivePage('recurringPatterns')}
+            onClick={() => navigate('recurringPatterns')}
           />
 
           <SidebarItem
             icon={AlertTriangle}
             label="Warning Signs"
             alert={warningAlert}
+            collapsed={collapsed}
             active={activePage === 'warningSigns'}
-            onClick={() => setActivePage('warningSigns')}
+            onClick={() => navigate('warningSigns')}
           />
         </div>
 
         <div className="mb-6">
-          <p className="mb-2 px-4 text-[11px] font-bold tracking-wider text-slate-500">DATA</p>
+          {renderSectionLabel('DATA', collapsed)}
 
           <SidebarItem
             icon={FileText}
             label="Reports"
+            collapsed={collapsed}
             active={activePage === 'reports'}
-            onClick={() => setActivePage('reports')}
+            onClick={() => navigate('reports')}
           />
         </div>
 
         <div className="mb-6">
-          <p className="mb-2 px-4 text-[11px] font-bold tracking-wider text-slate-500">SYSTEM</p>
+          {renderSectionLabel('SYSTEM', collapsed)}
 
           <SidebarItem
             icon={Settings}
             label="Settings"
+            collapsed={collapsed}
             active={activePage === 'settings'}
-            onClick={() => setActivePage('settings')}
+            onClick={() => navigate('settings')}
           />
 
           <SidebarItem
             icon={HelpCircle}
             label="Help / Scope"
+            collapsed={collapsed}
             active={activePage === 'help'}
-            onClick={() => setActivePage('help')}
+            onClick={() => navigate('help')}
           />
         </div>
       </div>
 
-      <div className="m-4 rounded-xl border border-[#253041] bg-[#1b2738] p-4">
-        <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500">
-          <Activity size={14} className={statusCopy.textClassName} />
-          {statusCopy.title}
-        </div>
+      <div className={`border-t border-white/10 ${collapsed ? 'mx-2 flex justify-center py-4' : 'm-4 border border-[var(--rigmd-border-soft)] bg-black/10 p-3'}`}>
+        {collapsed ? (
+          <span
+            title={`${statusCopy.label} - ${formatRelativeUpdate(hardwareUpdatedAt)}`}
+            className={`h-2.5 w-2.5 rounded-full ${statusCopy.dotClassName}`}
+          />
+        ) : (
+          <>
+            <div className="mb-2 flex items-center gap-2 overflow-hidden text-[11px] uppercase tracking-wider text-slate-500">
+              <Activity size={14} className={statusCopy.textClassName} />
+              {statusCopy.title}
+            </div>
 
-        <div className={`flex items-center gap-2 text-sm font-semibold ${statusCopy.textClassName}`}>
-          <span className={`h-2 w-2 rounded-full ${statusCopy.dotClassName}`} />
-          {statusCopy.label}
-        </div>
+            <div className={`flex items-center gap-2 text-sm font-semibold ${statusCopy.textClassName}`}>
+              <span className={`h-2 w-2 rounded-full ${statusCopy.dotClassName}`} />
+              <span className="overflow-hidden">{statusCopy.label}</span>
+            </div>
 
-        <p className="mt-2 text-xs text-slate-500">{formatRelativeUpdate(hardwareUpdatedAt)}</p>
+            <p className="mt-2 overflow-hidden text-xs text-slate-500">{formatRelativeUpdate(hardwareUpdatedAt)}</p>
+          </>
+        )}
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside
+        className={`rigmd-sidebar-surface hidden shrink-0 flex-col overflow-hidden border-r transition-[width] duration-300 ease-out md:flex ${
+          desktopCollapsed ? 'w-10' : 'w-64'
+        }`}
+      >
+        {renderContent(desktopCollapsed)}
+      </aside>
+
+      <div
+        className={`fixed inset-0 z-40 bg-black/55 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
+          mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={onMobileClose}
+        aria-hidden="true"
+      />
+
+      <aside
+        className={`rigmd-sidebar-surface fixed inset-y-0 left-0 z-50 flex w-[min(18rem,86vw)] flex-col border-r shadow-2xl transition-transform duration-300 ease-out md:hidden ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {renderContent(false, true)}
+      </aside>
+    </>
   );
 }
