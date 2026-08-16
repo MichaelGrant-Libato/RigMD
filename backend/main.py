@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from backend.config import FRONTEND_URL
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
 from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 from backend.services.diagnostic_engine import run_diagnostic
@@ -25,7 +26,12 @@ app.add_middleware(
         FRONTEND_URL,
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5273",
+        "http://127.0.0.1:5273",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,7 +58,7 @@ def clean_profile_value(value, fallback="Unknown"):
     return str(value)
 
 
-def get_or_create_live_profile(live_hardware_profile: dict, db: DbSession) -> Profile:
+def get_or_create_live_profile(live_hardware_profile: dict, client_id: str, db: DbSession) -> Profile:
     cpu_model = clean_profile_value(
         live_hardware_profile.get("cpu", {}).get("name"),
         "Unknown CPU",
@@ -89,8 +95,10 @@ def get_or_create_live_profile(live_hardware_profile: dict, db: DbSession) -> Pr
         "Unknown",
     )
 
+    # Scope the lookup to this client only to prevent profile cross-contamination
     existing_profile = (
         db.query(Profile)
+        .filter(Profile.client_id == client_id)
         .filter(Profile.cpu_model == cpu_model)
         .filter(Profile.ram_capacity == ram_capacity)
         .filter(Profile.storage_type == storage_type)
@@ -102,7 +110,8 @@ def get_or_create_live_profile(live_hardware_profile: dict, db: DbSession) -> Pr
     if existing_profile:
         return existing_profile
 
-    profile = Profile(
+    new_profile = Profile(
+        client_id=client_id,
         cpu_model=cpu_model,
         ram_capacity=ram_capacity,
         storage_type=storage_type,
@@ -113,10 +122,10 @@ def get_or_create_live_profile(live_hardware_profile: dict, db: DbSession) -> Pr
         system_age=system_age,
     )
 
-    db.add(profile)
+    db.add(new_profile)
     db.flush()
 
-    return profile
+    return new_profile
 
 
 def apply_resolution_fields(session: DiagnosticSession, values: dict) -> None:
@@ -129,9 +138,10 @@ def save_diagnostic_session(
     payload: dict,
     result: dict,
     live_hardware_profile: dict,
+    client_id: str,
     db: DbSession,
 ) -> dict:
-    profile = get_or_create_live_profile(live_hardware_profile, db)
+    profile = get_or_create_live_profile(live_hardware_profile, client_id, db)
 
     session = DiagnosticSession(
         profile_id=profile.id,
@@ -181,7 +191,11 @@ def save_diagnostic_session(
 
 
 @app.post("/api/diagnosis/submit")
-def run_diagnostic_endpoint(payload: dict, db: DbSession = Depends(get_db)):
+def run_diagnostic_endpoint(
+    payload: dict,
+    client_id: str = Depends(get_client_id),
+    db: DbSession = Depends(get_db),
+):
     try:
         live_hardware_profile = hardware.get_live_hardware_stats()
     except Exception:
@@ -194,6 +208,7 @@ def run_diagnostic_endpoint(payload: dict, db: DbSession = Depends(get_db)):
             payload=payload,
             result=result,
             live_hardware_profile=live_hardware_profile,
+            client_id=client_id,
             db=db,
         )
     except SQLAlchemyError as error:
@@ -205,10 +220,17 @@ def run_diagnostic_endpoint(payload: dict, db: DbSession = Depends(get_db)):
 
 
 @app.post("/api/diagnosis/{session_id}/needs-recheck")
-def mark_diagnosis_needs_recheck(session_id: UUID, db: DbSession = Depends(get_db)):
+def mark_diagnosis_needs_recheck(
+    session_id: UUID,
+    client_id: str = Depends(get_client_id),
+    db: DbSession = Depends(get_db),
+):
+    # Verify the session belongs to this client via the profile relationship
     session = (
         db.query(DiagnosticSession)
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
         .filter(DiagnosticSession.id == session_id)
+        .filter(Profile.client_id == client_id)
         .first()
     )
 
@@ -232,10 +254,17 @@ def mark_diagnosis_needs_recheck(session_id: UUID, db: DbSession = Depends(get_d
 
 
 @app.post("/api/diagnosis/{session_id}/check-resolution")
-def check_diagnosis_resolution(session_id: UUID, db: DbSession = Depends(get_db)):
+def check_diagnosis_resolution(
+    session_id: UUID,
+    client_id: str = Depends(get_client_id),
+    db: DbSession = Depends(get_db),
+):
+    # Verify the session belongs to this client via the profile relationship
     session = (
         db.query(DiagnosticSession)
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
         .filter(DiagnosticSession.id == session_id)
+        .filter(Profile.client_id == client_id)
         .first()
     )
 

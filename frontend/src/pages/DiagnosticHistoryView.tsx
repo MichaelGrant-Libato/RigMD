@@ -19,10 +19,8 @@ import {
 
 import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
+import { apiFetch } from '../lib/api';
 import type { SessionSummary } from '../types/rigmd';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 const filters = [
   'All Sessions',
@@ -386,8 +384,8 @@ export default function DiagnosticHistoryView({
       setError(null);
 
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/api/diagnosis/sessions`
+        const response = await apiFetch(
+          '/api/diagnosis/sessions'
         );
 
         if (!response.ok) {
@@ -398,24 +396,10 @@ export default function DiagnosticHistoryView({
 
         const data = await response.json();
 
-        /*
-         * C# endpoint currently returns:
-         *
-         * [
-         *   { session_id: "...", ... },
-         *   { session_id: "...", ... }
-         * ]
-         *
-         * It does NOT return:
-         *
-         * {
-         *   sessions: [...]
-         * }
-         */
         if (Array.isArray(data)) {
-          setSessions(
-            data as SessionSummary[]
-          );
+          setSessions(data as SessionSummary[]);
+        } else if (Array.isArray(data?.sessions)) {
+          setSessions(data.sessions as SessionSummary[]);
         } else {
           console.warn(
             'Unexpected diagnostic sessions response:',

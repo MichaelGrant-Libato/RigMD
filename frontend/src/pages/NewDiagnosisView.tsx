@@ -1,5 +1,4 @@
 import { useMemo, useState, ChangeEvent } from 'react';
-import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Stethoscope,
@@ -18,9 +17,7 @@ import {
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, fadeIn, hoverLift, pageFade, pageTransition } from '../lib/motion';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
+import { apiGet, apiPost } from '../lib/api';
 
 interface DiagnosticFormData {
   symptom_type: string;
@@ -309,9 +306,7 @@ function analyzeSystemStateNote(note: string) {
   };
 }
 
-function getActionPreview(action: RemediationAction, report: DiagnosticReport | null) {
-  const category = report?.diagnosed_category ?? 'this diagnosis';
-
+function getActionPreview(action: RemediationAction, _report?: DiagnosticReport | null) {
   const previews: Record<string, {
     mode: 'automated' | 'assisted' | 'read-only';
     buttonLabel: string;
@@ -619,7 +614,7 @@ export default function NewDiagnosisView() {
   setCheckingResolution(true);
 
   try {
-    const response = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/check-resolution`);
+    const response = await apiPost<any>(`/api/diagnosis/${report.session_id}/check-resolution`);
 
     setReport((prev) =>
       prev
@@ -670,7 +665,7 @@ export default function NewDiagnosisView() {
         recent_changes_label: selectedChange || formData.recent_changes,
       };
 
-      const response = await axios.post<DiagnosticReport>(`${API_BASE_URL}/api/diagnosis/submit`, payload, {
+      const response = await apiPost<DiagnosticReport>(`/api/diagnosis/submit`, payload, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -682,11 +677,11 @@ export default function NewDiagnosisView() {
         return;
       }
 
-      const actionsResponse = await axios.get(`${API_BASE_URL}/api/remediation/actions`, {
+      const actionsResponse = await apiGet<{ actions?: RemediationAction[] }>(`/api/remediation/actions`, {
         params: { category: diagnosis.diagnosed_category },
       });
 
-      setRemediationActions(actionsResponse.data.actions ?? []);
+      setRemediationActions(actionsResponse.data?.actions ?? []);
     } catch (err: any) {
       console.error('Diagnostic error:', err);
       setError(getApiErrorMessage(err, 'The engine encountered an error parsing the issue.'));
@@ -734,7 +729,7 @@ export default function NewDiagnosisView() {
                   : category.includes('os performance') ? 'task_manager'
                     : 'reliability_monitor');
 
-      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target: targetParam });
+      await apiPost(`/api/remediation/open-target`, { target: targetParam });
     } catch (err) {
       console.error('Inspection error:', err);
       setError('RigMD could not open the Windows verification tool. You can still open it manually from Windows Search.');
@@ -750,7 +745,7 @@ export default function NewDiagnosisView() {
     setRemediating(true);
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/remediation/execute`, {
+      const response = await apiPost<ActionResult>(`/api/remediation/execute`, {
         action_id: selectedAction.id,
       });
 
@@ -759,15 +754,19 @@ export default function NewDiagnosisView() {
         [selectedAction.id]: response.data,
       }));
       if (response.data?.success && report?.session_id) {
-        const statusResponse = await axios.post(`${API_BASE_URL}/api/diagnosis/${report.session_id}/needs-recheck`);
+        const statusResponse = await apiPost<{
+          resolution_status?: string;
+          last_action_status?: string | null;
+          last_action_summary?: string;
+        }>(`/api/diagnosis/${report.session_id}/needs-recheck`);
 
         setReport((prev) =>
           prev
             ? {
                 ...prev,
-                resolution_status: statusResponse.data.resolution_status,
-                last_action_status: statusResponse.data.last_action_status,
-                last_action_summary: statusResponse.data.last_action_summary,
+                resolution_status: statusResponse.data?.resolution_status,
+                last_action_status: statusResponse.data?.last_action_status,
+                last_action_summary: statusResponse.data?.last_action_summary,
               }
             : prev
         );
@@ -795,7 +794,7 @@ export default function NewDiagnosisView() {
     setInspecting(true);
 
     try {
-      await axios.post(`${API_BASE_URL}/api/remediation/open-target`, { target });
+      await apiPost(`/api/remediation/open-target`, { target });
     } catch (err) {
       console.error('Post-execution inspection error:', err);
       setError('RigMD could not open the related Windows location. You can still open it manually from Windows Search.');

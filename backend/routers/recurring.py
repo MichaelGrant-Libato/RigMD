@@ -8,6 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession, joinedload
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
+from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 
 
@@ -229,10 +231,15 @@ def empty_response(database_warning: str | None = None) -> dict[str, Any]:
 
 
 @router.get("/patterns")
-def get_recurring_patterns(db: DbSession = Depends(get_db)):
+def get_recurring_patterns(
+    client_id: str = Depends(get_client_id),
+    db: DbSession = Depends(get_db),
+):
     try:
         sessions = (
             db.query(DiagnosticSession)
+            .join(Profile, DiagnosticSession.profile_id == Profile.id)
+            .filter(Profile.client_id == client_id)
             .options(joinedload(DiagnosticSession.recommendations))
             .order_by(DiagnosticSession.created_at.asc())
             .all()
@@ -337,8 +344,12 @@ def get_recurring_patterns(db: DbSession = Depends(get_db)):
 
 
 @router.get("/patterns/{pattern_id}")
-def get_recurring_pattern_detail(pattern_id: str, db: DbSession = Depends(get_db)):
-    response = get_recurring_patterns(db)
+def get_recurring_pattern_detail(
+    pattern_id: str,
+    client_id: str = Depends(get_client_id),
+    db: DbSession = Depends(get_db),
+):
+    response = get_recurring_patterns(client_id=client_id, db=db)
 
     for pattern in response.get("patterns", []):
         if pattern["id"] == pattern_id:

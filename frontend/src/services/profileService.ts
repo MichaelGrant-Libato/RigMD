@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
+import { apiFetch } from '../lib/api';
 
 export interface StorageDetail {
   model: string;
@@ -57,13 +56,10 @@ export async function saveHardwareProfile(
   payload: SaveProfilePayload
 ): Promise<SaveProfileResponse> {
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/profiles/save`,
+    const response = await apiFetch(
+      '/api/profiles/save',
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(payload),
       }
     );
