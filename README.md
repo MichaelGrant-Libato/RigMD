@@ -44,15 +44,7 @@ The target architecture combines:
 
 ## 2. Current Migration Status
 
-The active backend migration from Python/FastAPI to C#/.NET has reached **functional parity for the routes currently used by the React frontend**.
-
-### C# Migration Checkpoint
-
-```
-Commit: 983190e
-Tag: csharp-migration-complete
-Branch: feature/csharp-migration
-```
+The active backend migration from Python/FastAPI to C#/.NET has reached **functional parity** and has been officially merged into the `main` branch. 
 
 ### Legacy Python Reference
 
