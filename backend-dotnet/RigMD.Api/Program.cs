@@ -41,7 +41,8 @@ builder.Services.AddScoped<WarningSignService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationRegistry, RigMD.Application.Services.Autonomy.RemediationRegistry>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationPlanner, RigMD.Application.Services.Autonomy.RemediationPlanner>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.ISafetyPolicy, RigMD.Application.Services.Autonomy.SafetyPolicy>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor, RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IVerificationService, RigMD.Infrastructure.Remediation.VerificationService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
 
 var app = builder.Build();

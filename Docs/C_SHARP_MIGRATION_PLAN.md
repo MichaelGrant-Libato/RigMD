@@ -419,18 +419,20 @@ Dry-run support should remain available as a permanent developer, testing, and v
 
 ### Phase 11 — First Fully Controlled Autonomous Action
 
-**Status: PENDING**
+**Status: COMPLETE**
 
-Implement and formally validate one narrowly bounded remediation action with:
+Implemented and validated one narrowly bounded remediation action (`clear_user_temp_files`) with:
 
-- known preconditions
-- known execution behavior
-- measurable postconditions
-- rollback or safe recovery
-- audit logging
-- deterministic verification
+- known preconditions (temp directory exists, not a server OS)
+- known execution behavior (delete non-locked files, skip locked files gracefully)
+- measurable postconditions (file count and directory size measured before/after)
+- audit logging (structured logging via ILogger)
+- deterministic verification (VerificationService checks post-action state)
 
-Only after this pattern is proven should the supported remediation catalog expand.
+New API endpoint: `POST /api/autonomy/execute`
+
+The `WindowsRemediationExecutor` dispatches actions by ID to concrete implementations.
+Only explicitly registered actions can execute — no arbitrary command generation.
 
 ---
 

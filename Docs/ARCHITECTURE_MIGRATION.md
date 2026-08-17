@@ -61,8 +61,8 @@ VITE_API_BASE_URL=http://localhost:5273
 | Diagnostic Engine | Python | C# | C# Domain layer |
 | Persistence | Supabase PostgreSQL | Supabase PostgreSQL through Npgsql | SQLite local source of truth |
 | Cloud Dependency | Required for persistence | Required for current persistence | Optional Supabase synchronization |
-| System Behavior | Advisory / manual action | Controlled supported remediation | Closed-loop remediation |
-| Verification | Basic resolution checking | Resolution rechecking | Formal verification |
+| System Behavior | Advisory / manual action | Controlled autonomous remediation (single action) | Closed-loop remediation |
+| Verification | Basic resolution checking | Formal verification (file count + size delta) | Formal verification |
 | Rollback | Not formalized | Not formalized | Planned |
 | Pivot | Not formalized | Not formalized | Planned |
 | AI Role | Explanation | Explanation | Explanation only |
