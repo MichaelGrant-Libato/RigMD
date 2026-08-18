@@ -15,6 +15,7 @@ class Profile(Base):
     __tablename__ = "profiles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id = Column(String, nullable=False, index=True)
     cpu_model = Column(String, nullable=False)
     ram_capacity = Column(String, nullable=False)
     storage_type = Column(String, nullable=False)       # e.g. SSD, HDD, NVMe

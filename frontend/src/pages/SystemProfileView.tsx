@@ -395,7 +395,6 @@ function ComponentWorkloadPanel({
   const gameDetected = insights?.game_detected ?? false;
   const gameProcesses = insights?.game_processes ?? [];
 
-  const browserTone = browserHeavy ? 'orange' : 'cyan';
   const ramTone = stats.ram.usage_percent >= 85 ? 'red' : stats.ram.usage_percent >= 75 ? 'orange' : 'emerald';
   const cpuTone = stats.cpu.usage_percent >= 85 ? 'red' : stats.cpu.usage_percent >= 70 ? 'orange' : 'emerald';
   const diskTone = stats.disk.usage_percent >= 90 ? 'red' : stats.disk.usage_percent >= 80 ? 'orange' : 'emerald';
@@ -546,16 +545,6 @@ function ComponentWorkloadPanel({
               <h3 className="text-sm font-semibold text-gray-300">Detected System Information - Storage</h3>
               <div className="space-y-2">
                 {stats.storage_drives.map((drive, idx) => {
-                  // Determine color for type badge
-                  let typeColor = "bg-gray-700/30 text-gray-300"; // Unknown
-                  if (drive.type.includes("NVMe")) {
-                    typeColor = "bg-blue-900/30 text-blue-300";
-                  } else if (drive.type.includes("SATA")) {
-                    typeColor = "bg-purple-900/30 text-purple-300";
-                  } else if (drive.type.includes("HDD")) {
-                    typeColor = "bg-orange-900/30 text-orange-300";
-                  }
-                  
                   const sizeDisplay = formatStorageSize(drive.size_gb);
                   const usageDisplay = formatStorageUsage(drive.usage_percent);
                   

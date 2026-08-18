@@ -1,4 +1,4 @@
-    import { useState } from "react";
+import { useState } from "react";
 import {
   SYMPTOM_TYPES,
   FREQUENCY_OPTIONS,
@@ -11,9 +11,7 @@ import {
   type SymptomIntakePayload, 
   type DiagnosisResult,      
 } from "../types/rigmd";
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5273";
+import { apiFetch } from "../lib/api";
 
     const STEPS = [
     { key: "symptom_type",      label: "Symptom Type",      hint: "What is your PC doing that brought you here?" },
@@ -44,22 +42,6 @@ const API_BASE =
     interface Props {
     profileId: string;
     onResult: (result: DiagnosisResult) => void;
-    }
-
-    // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-    function actionColor(action: string): string {
-    const a = action.toLowerCase();
-    if (a.includes("escalate"))   return "#ef4444";
-    if (a.includes("troubleshoot")) return "#f59e0b";
-    if (a.includes("maintain"))   return "#22c55e";
-    return "#3b82f6";
-    }
-
-    function confidenceDot(label: string): string {
-    if (label === "High")     return "#22c55e";
-    if (label === "Moderate") return "#f59e0b";
-    return "#64748b";
     }
 
     // ─── Component ───────────────────────────────────────────────────────────────
@@ -107,7 +89,7 @@ const API_BASE =
         };
 
         try {
-        const res = await fetch(`${API_BASE}/api/diagnosis/submit`, {
+        const res = await apiFetch(`/api/diagnosis/submit`, {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
             body:    JSON.stringify(payload),

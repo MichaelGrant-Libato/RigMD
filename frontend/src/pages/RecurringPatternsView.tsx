@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -18,10 +17,8 @@ import {
 
 import TopHeader from '../components/TopHeader';
 import { accordionReveal, buttonTap, cardFadeUp, cardTransition, hoverLift, pageFade, pageTransition, staggerContainer } from '../lib/motion';
+import { apiGet } from '../lib/api';
 import type { PageKey } from '../types/rigmd';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 interface RecurringMetrics {
   recurring_issues: number;
@@ -651,7 +648,7 @@ export default function RecurringPatternsView({
     setIsLoading(true);
 
     try {
-      const response = await axios.get<RecurringResponse>(`${API_BASE_URL}/api/recurring/patterns`);
+      const response = await apiGet<RecurringResponse>('/api/recurring/patterns');
       setData(response.data);
       setLoadError(null);
     } catch {

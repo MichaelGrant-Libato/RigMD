@@ -5,6 +5,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
+from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 from backend.models.session_model import Recommendation
 
@@ -121,20 +123,30 @@ def split_warning_signs(raw_warning_signs: str | None) -> list[str]:
     return [item.strip() for item in cleaned.splitlines() if item.strip()]
 
 
-def collect_observed_warning_texts(db: DbSession) -> list[str]:
+def collect_observed_warning_texts(db: DbSession, client_id: str) -> list[str]:
     observed_texts: list[str] = []
 
-    recommendation_rows = db.query(Recommendation).all()
+    recommendation_rows = (
+        db.query(Recommendation)
+        .join(DiagnosticSession, Recommendation.session_id == DiagnosticSession.id)
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
+        .filter(Profile.client_id == client_id)
+        .all()
+    )
 
     for row in recommendation_rows:
         if row.warning_sign:
             observed_texts.append(row.warning_sign)
 
     # Only collect warning signs from sessions where an actual issue was found
-    # Exclude "No active issue detected" sessions
-    session_rows = db.query(DiagnosticSession).filter(
-        DiagnosticSession.diagnosed_category != "No active issue detected"
-    ).all()
+    # Exclude "No active issue detected" sessions, scoped to this client
+    session_rows = (
+        db.query(DiagnosticSession)
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
+        .filter(Profile.client_id == client_id)
+        .filter(DiagnosticSession.diagnosed_category != "No active issue detected")
+        .all()
+    )
 
     for row in session_rows:
         observed_texts.extend(split_warning_signs(row.warning_signs))
@@ -213,10 +225,11 @@ def get_warning_signs_reference(
     category: str = Query(default="all"),
     search: str = Query(default=""),
     observed_only: bool = Query(default=False),
+    client_id: str = Depends(get_client_id),
     db: DbSession = Depends(get_db),
 ):
     try:
-        observed_texts = collect_observed_warning_texts(db)
+        observed_texts = collect_observed_warning_texts(db, client_id)
         rows = build_reference_rows(
             observed_texts=observed_texts,
             category=category,

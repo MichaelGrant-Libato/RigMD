@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session as DbSession, joinedload
 from sqlalchemy.exc import OperationalError
 
 from backend.database import get_db
+from backend.dependencies.client_id import get_client_id
+from backend.models.profile_model import Profile
 from backend.models.session_model import Session as DiagnosticSession
 
 router = APIRouter(prefix="/api/diagnosis", tags=["Diagnostic History"])
@@ -81,9 +83,11 @@ def get_recommended_next_step(action_category: str, probable_cause: str) -> str:
     return f"Monitor the issue related to {probable_cause}. Run another diagnostic session if symptoms continue."
 
 
-def build_recurring_lookup(db: DbSession) -> set[str]:
+def build_recurring_lookup(db: DbSession, client_id: str) -> set[str]:
     rows = (
         db.query(DiagnosticSession.symptom_type, func.count(DiagnosticSession.id))
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
+        .filter(Profile.client_id == client_id)
         .group_by(DiagnosticSession.symptom_type)
         .having(func.count(DiagnosticSession.id) >= 2)
         .all()
@@ -154,14 +158,23 @@ def session_to_dict(
     }
 
 
-def build_metrics(db: DbSession) -> dict[str, int]:
+def build_metrics(db: DbSession, client_id: str) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    total_sessions = db.query(DiagnosticSession).count()
+    # All counts are scoped to this client via the Profile join
+    base_query = (
+        db.query(DiagnosticSession)
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
+        .filter(Profile.client_id == client_id)
+    )
+
+    total_sessions = base_query.count()
 
     recurring_rows = (
         db.query(DiagnosticSession.symptom_type, func.count(DiagnosticSession.id))
+        .join(Profile, DiagnosticSession.profile_id == Profile.id)
+        .filter(Profile.client_id == client_id)
         .group_by(DiagnosticSession.symptom_type)
         .having(func.count(DiagnosticSession.id) >= 2)
         .all()
@@ -169,13 +182,13 @@ def build_metrics(db: DbSession) -> dict[str, int]:
     recurring_issues = len(recurring_rows)
 
     escalated = (
-        db.query(DiagnosticSession)
+        base_query
         .filter(DiagnosticSession.action_category.ilike("%escalate%"))
         .count()
     )
 
     this_month = (
-        db.query(DiagnosticSession)
+        base_query
         .filter(DiagnosticSession.created_at >= month_start)
         .count()
     )
@@ -194,11 +207,17 @@ def get_history_sessions(
     action: str = Query(default="all"),
     recurring_only: bool = Query(default=False),
     sort: str = Query(default="newest"),
+    client_id: str = Depends(get_client_id),
     db: DbSession = Depends(get_db),
 ):
     try:
-        recurring_symptoms = build_recurring_lookup(db)
-        query = db.query(DiagnosticSession).options(joinedload(DiagnosticSession.recommendations))
+        recurring_symptoms = build_recurring_lookup(db, client_id)
+        query = (
+            db.query(DiagnosticSession)
+            .join(Profile, DiagnosticSession.profile_id == Profile.id)
+            .filter(Profile.client_id == client_id)
+            .options(joinedload(DiagnosticSession.recommendations))
+        )
 
         if search.strip():
             keyword = f"%{search.strip()}%"
@@ -243,7 +262,7 @@ def get_history_sessions(
         ]
 
         return {
-            "metrics": build_metrics(db),
+            "metrics": build_metrics(db, client_id),
             "sessions": items,
         }
 
@@ -259,12 +278,15 @@ def get_history_sessions(
 @router.get("/sessions/{session_id}")
 def get_history_session_detail(
     session_id: UUID,
+    client_id: str = Depends(get_client_id),
     db: DbSession = Depends(get_db),
 ):
     try:
-        recurring_symptoms = build_recurring_lookup(db)
+        recurring_symptoms = build_recurring_lookup(db, client_id)
         session = (
             db.query(DiagnosticSession)
+            .join(Profile, DiagnosticSession.profile_id == Profile.id)
+            .filter(Profile.client_id == client_id)
             .options(joinedload(DiagnosticSession.recommendations))
             .filter(DiagnosticSession.id == session_id)
             .first()

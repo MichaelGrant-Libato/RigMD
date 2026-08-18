@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Stethoscope } from 'lucide-react';
-import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Activity,
@@ -35,13 +34,9 @@ import {
   cardTransition,
   hoverLift,
   pageFade,
-  pageTransition,
 } from '../lib/motion';
+import { apiGet, apiPost } from '../lib/api';
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  'http://localhost:5273';
 
 interface DashboardMetricCardProps {
   icon: LucideIcon;
@@ -552,7 +547,8 @@ function DashboardMetricCard({
 }
 
 function RecentActivityCard({ dashboard }: { dashboard: DashboardSummary }) {
-  const maxCount = Math.max(...dashboard.action_distribution.map((item) => item.count), 1);
+  const distribution = dashboard?.action_distribution || emptyDashboard.action_distribution;
+  const maxCount = Math.max(...distribution.map((item) => item.count), 1);
 
   const colorMap: Record<string, string> = {
     Monitor: 'bg-cyan-400',
@@ -579,7 +575,7 @@ function RecentActivityCard({ dashboard }: { dashboard: DashboardSummary }) {
       </div>
 
       <div className="flex h-52 items-end gap-10 border-b border-[var(--rigmd-border)] px-8 pb-0">
-        {dashboard.action_distribution.map((item) => (
+        {distribution.map((item) => (
           <div key={item.label} className="flex flex-1 flex-col items-center justify-end gap-2">
             <div
               className={`w-full max-w-[76px] rounded-t ${colorMap[item.label] ?? 'bg-cyan-400'}`}
@@ -594,7 +590,7 @@ function RecentActivityCard({ dashboard }: { dashboard: DashboardSummary }) {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-400">
-        {dashboard.action_distribution.map((item) => (
+        {distribution.map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${colorMap[item.label] ?? 'bg-cyan-400'}`} />
             <span>
@@ -608,7 +604,8 @@ function RecentActivityCard({ dashboard }: { dashboard: DashboardSummary }) {
 }
 
 function SessionFrequencyCard({ dashboard }: { dashboard: DashboardSummary }) {
-  const points = dashboard.session_frequency.slice(-8);
+  const frequency = dashboard?.session_frequency || emptyDashboard.session_frequency;
+  const points = frequency.slice(-8);
   const maxCount = Math.max(...points.map((item) => item.count), 1);
 
   const pathData =
@@ -654,12 +651,12 @@ function SessionFrequencyCard({ dashboard }: { dashboard: DashboardSummary }) {
       <div className="mt-4 flex items-end justify-between">
         <div>
           <p className="text-xs text-gray-500">Total sessions</p>
-          <p className="text-xl font-bold text-white">{dashboard.totals.total_sessions}</p>
+          <p className="text-xl font-bold text-white">{dashboard?.totals?.total_sessions || 0}</p>
         </div>
 
         <div className="text-right">
           <p className="text-xs text-gray-500">This month</p>
-          <p className="text-xl font-bold text-cyan-400">{dashboard.totals.this_month_count}</p>
+          <p className="text-xl font-bold text-cyan-400">{dashboard?.totals?.this_month_count || 0}</p>
         </div>
       </div>
     </motion.section>
@@ -673,6 +670,7 @@ function ActiveWarningSignsCard({
   dashboard: DashboardSummary;
   setActivePage: (page: PageKey) => void;
 }) {
+  const warningSigns = dashboard?.recent_warning_signs || emptyDashboard.recent_warning_signs;
   return (
     <motion.section
       variants={cardFadeUp}
@@ -696,11 +694,11 @@ function ActiveWarningSignsCard({
         </button>
       </div>
 
-      {dashboard.recent_warning_signs.length === 0 ? (
+      {warningSigns.length === 0 ? (
         <p className="text-sm text-gray-500">No warning signs recorded yet.</p>
       ) : (
         <div className="space-y-3">
-          {dashboard.recent_warning_signs.map((warning, index) => (
+          {warningSigns.map((warning, index) => (
             <div key={warning.id} className="flex items-start gap-3 rounded-md border border-transparent py-1">
               <span className={`mt-1.5 h-2 w-2 rounded-full ${getWarningDotColor(index)}`} />
 
@@ -983,7 +981,7 @@ export default function HardwareDashboard() {
 
   const fetchHardware = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/hardware/live`);
+      const response = await apiGet<HardwareStats>('/api/hardware/live');
 
       setStats(response.data);
       setHardwareUpdatedAt(new Date());
@@ -997,7 +995,7 @@ export default function HardwareDashboard() {
     setIsRefreshingHardware(true);
 
     try {
-      await axios.post(`${API_BASE_URL}/api/hardware/refresh`);
+      await apiPost('/api/hardware/refresh');
     } catch {
       // Still fetch live hardware data even if cache refresh fails.
     }
@@ -1017,9 +1015,11 @@ export default function HardwareDashboard() {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/dashboard/summary`);
-
-        setDashboard(response.data);
+        const response = await apiGet<DashboardSummary>('/api/dashboard/summary');
+        setDashboard({
+          ...emptyDashboard,
+          ...(response.data || {}),
+        });
       } catch {
         setDashboard(emptyDashboard);
       }

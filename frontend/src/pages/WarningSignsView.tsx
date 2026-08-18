@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -11,9 +10,7 @@ import {
 
 import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
+import { apiGet } from '../lib/api';
 
 interface WarningSummary {
   observed_warning_signs: number;
@@ -72,7 +69,7 @@ function getActionStyle(action: string) {
   return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
 
-function getCategoryStyle(category: string) {
+function getCategoryStyle(_category?: string) {
   return 'border-slate-500/25 bg-slate-500/10 text-slate-400';
 }
 
@@ -444,8 +441,8 @@ export default function WarningSignsView() {
     setIsLoading(true);
 
     try {
-      const response = await axios.get<WarningSignsResponse>(
-        `${API_BASE_URL}/api/warning-signs/reference`,
+      const response = await apiGet<WarningSignsResponse>(
+        '/api/warning-signs/reference',
         {
           params: {
             category: activeCategory,
