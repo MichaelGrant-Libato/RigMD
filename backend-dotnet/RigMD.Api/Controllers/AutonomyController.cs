@@ -73,8 +73,7 @@ public class AutonomyController : ControllerBase
             ConfidenceLabel = "High"
         };
 
-        // Run the orchestrator (which now uses the real WindowsRemediationExecutor)
-        var result = await _orchestrator.RunDryRunCycleAsync(diagnostic, hardware);
+        var result = await _orchestrator.RunExecutionCycleAsync(diagnostic, hardware);
 
         // If execution succeeded, run verification on the first action
         if (result.Execution?.Success == true && result.Plan?.PlannedActions.Count > 0)

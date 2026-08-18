@@ -5,7 +5,7 @@ using RigMD.Application.Models;
 
 namespace RigMD.Application.Services.Autonomy;
 
-public class DryRunRemediationExecutor : IRemediationExecutor
+public class DryRunRemediationExecutor : IDryRunRemediationExecutor
 {
     public Task<ExecutionResult> ExecuteAsync(RemediationActionDef action)
     {
