@@ -137,26 +137,55 @@ Use `System.Management` (WMI), CIM, and `System.Diagnostics` to query the Window
 
 ---
 
-## Phase 5 — SQLite + EF Core Persistence ✅ COMPLETE (Partially)
+## Phase 5 — SQLite + EF Core Persistence 🔲 PENDING
 
-**Purpose:**  
-Make the system 100% offline-capable. All data must be persisted locally to SQLite. Cloud (Supabase) is explicitly optional and cannot be required for the system to function.
+### Purpose
+Move RigMD toward full offline operation by using SQLite as the local source of truth.
 
-**Function:**  
-Define repository interfaces in the Application layer. Implement them with Entity Framework Core backed by SQLite in the Infrastructure layer. The Application layer never directly touches the database — it only calls repository interfaces.
+### Current Verified State
 
-**Key Files:**
-- `RigMD.Application/Contracts/Repositories/IProfileRepository.cs` — save/load system profiles
-- `RigMD.Application/Contracts/Repositories/IDiagnosticSessionRepository.cs` — save/load sessions
-- `RigMD.Infrastructure/Persistence/RigMdDbContext.cs` — EF Core DbContext
-- `RigMD.Infrastructure/Persistence/Repositories/*.cs` — concrete repository implementations
+The active C# backend does not yet use Entity Framework Core or SQLite.
 
-**Note:** As of Phase 10, full repository wiring to all endpoints is a known in-progress item. Session data is currently held in memory between requests.
+Current persistence is:
 
-**Acceptance Criteria:**
-- [ ] EF Core migration runs successfully and creates the SQLite file
-- [ ] DiagnosticSession records are saved to SQLite after each diagnosis
-- [ ] Sessions survive a backend restart (in-memory is NOT sufficient)
+ASP.NET Core
+    ↓
+DatabaseSessionService
+    ↓
+Npgsql
+    ↓
+Supabase PostgreSQL
+
+Repository verification confirmed:
+- no RigMdDbContext
+- no EF Core persistence implementation
+- no UseSqlite
+- no SQLite repository implementations
+- controllers currently depend directly on DatabaseSessionService
+
+The current Npgsql/Supabase implementation is retained as a migration-compatibility persistence layer.
+
+The target remains:
+
+Application
+    ↓
+Repository Contracts
+    ↓
+Entity Framework Core
+    ↓
+SQLite
+    ↓
+Optional Supabase Sync
+
+
+### Acceptance Criteria
+- [ ] Application repository contracts are implemented
+- [ ] EF Core SQLite provider is configured
+- [ ] RigMdDbContext is implemented
+- [ ] EF Core migration successfully creates the SQLite database
+- [ ] Diagnostic sessions persist locally
+- [ ] Sessions survive backend restart without Supabase
+- [ ] Core diagnostic functionality works without internet
 
 ---
 
@@ -228,103 +257,177 @@ Translate `diagnostic_engine.py` (34 KB, the largest and most complex Python fil
 
 ## Phase 9 — Build the Autonomous Remediation Framework ✅ COMPLETE
 
-**Purpose:**  
-Define the contracts (interfaces) that govern the entire autonomous system before implementing any of it. This enforces a clean separation between "what the system must do" (interfaces) and "how it does it" (implementations). It also allows Dry-Run mode to substitute real execution with a simulation.
+### Purpose
+Define the contracts and core structure for controlled autonomous remediation before expanding real Windows actions.
 
-**Function:**  
-Create C# interfaces in the Application layer for every step of the autonomous loop. No Windows commands are written yet — only the contracts.
+### Current Verified State
 
-**Key Files (all in `RigMD.Application/Contracts/Autonomy/`):**
-- `IRemediationRegistry.cs` — catalog of officially approved actions; executor may ONLY run registered actions
-- `IRemediationPlanner.cs` — takes `DiagnosticOutput`, formulates a `RemediationPlan`
-- `ISafetyPolicy.cs` — evaluates a plan against the current system state; approves, rejects, or requires consent
-- `IRemediationExecutor.cs` — executes one specific action (implemented as Dry-Run or Real in later phases)
-- `IVerificationService.cs` — measures whether the action resolved the problem
-- `IRollbackManager.cs` — reverses a failed or harmful action
-- `IPivotEngine.cs` — decides the next step when an action fails (try next action, escalate, or stop)
+The following autonomy contracts exist:
 
-**Key Models (in `RigMD.Application/Models/AutonomyModels.cs`):**
-- `RemediationActionDef` — action descriptor with ID, name, category, risk level, reversibility
-- `RemediationPlan` — ordered list of planned actions with strategy reasoning
-- `SafetyEvaluation` — approval status, rejection reason, and warnings
-- `ExecutionResult` / `ExecutionProof` — result of an execution attempt with before/after proof
-- `VerificationStatus` enum — `Resolved`, `Unresolved`, `Worse`, `Unknown`
+- `IRemediationRegistry`
+- `IRemediationPlanner`
+- `ISafetyPolicy`
+- `IRemediationExecutor`
+- `IVerificationService`
+- `IRollbackManager`
+- `IPivotEngine`
+- `IAutonomousOrchestrator`
 
-**Acceptance Criteria:**
-- [x] All interfaces compile cleanly with 0 errors
-- [x] Models are sufficient to represent the entire autonomous loop state
+Concrete implementations also exist for:
+
+- remediation registry
+- remediation planner
+- safety policy
+- autonomous orchestrator
+- dry-run executor
+- Windows remediation executor
+- verification service
+
+### Current Registered Actions
+
+The current remediation registry contains:
+
+- `clear_user_temp_files`
+- `restart_explorer`
+- `flush_dns`
+
+Only `clear_user_temp_files` currently has a verified real Windows execution implementation.
+
+The other registered actions must not be considered fully implemented merely because they exist in the registry.
+
+### Acceptance Criteria
+
+- [x] Autonomy interfaces compile successfully
+- [x] Registry exists
+- [x] Planner exists
+- [x] Safety policy exists
+- [x] Orchestrator exists
+- [x] Dry-run executor exists
+- [x] Real Windows executor exists
+- [x] Verification service exists
+- [ ] Additional registered actions are implemented and tested
 
 ---
 
 ## Phase 10 — Dry-Run Autonomous Engine ✅ COMPLETE
 
-**Purpose:**  
-Wire together all Phase 9 interfaces with concrete implementations — but use a safe "Dry Run" executor that simulates actions without touching the system. This allows the entire autonomous loop to be tested and demonstrated before any real Windows changes are made.
+### Purpose
+Provide a safe simulation mode that runs the remediation planning and safety pipeline without modifying Windows.
 
-**Function:**  
-Implement all autonomy interfaces. The `AutonomousOrchestrator` runs the full pipeline: Plan → Safety Check → Execute (dry run). Expose a `POST /api/autonomy/dry-run` endpoint to trigger and inspect the loop from Postman or the frontend.
+### Current Verified State
 
-**Key Files (all in `RigMD.Application/Services/Autonomy/`):**
-- `RemediationRegistry.cs` — the concrete action catalog (10 approved Windows actions)
-- `RemediationPlanner.cs` — maps a diagnosed category to matching registry actions
-- `SafetyPolicy.cs` — rejects high-risk actions on server OS; flags actions needing consent
-- `DryRunRemediationExecutor.cs` — simulates execution, returns "DRY RUN: Simulated..." result
-- `AutonomousOrchestrator.cs` — coordinates the full Plan → SafetyCheck → Execute loop
+The dry-run architecture exists through:
 
-**New Interface:**
-- `IAutonomousOrchestrator.cs` / `OrchestrationResult` — the top-level orchestrator contract
+- `IDryRunRemediationExecutor`
+- `DryRunRemediationExecutor`
+- `AutonomousOrchestrator`
+- `POST /api/autonomy/dry-run`
 
-**New API Endpoint:**
-- `POST /api/autonomy/dry-run` — trigger the orchestrator with a diagnosed category; returns full trace
+A safety issue was discovered during verification.
 
-**How to Test (Postman):**
-```
-POST http://localhost:5273/api/autonomy/dry-run
-Content-Type: application/json
+The dry-run and real execution paths previously shared the same `IRemediationExecutor` registration, which allowed the dry-run path to resolve the real `WindowsRemediationExecutor`.
 
-{
-  "DiagnosedCategory": "OS performance degradation"
-}
-```
+The implementation has been refactored so that:
 
-**Acceptance Criteria:**
-- [x] `dotnet build` succeeds with 0 errors
-- [x] Dry-run endpoint returns a complete JSON trace showing Plan, SafetyCheck, and Execution
-- [x] Different input categories produce different plans
+/api/autonomy/dry-run
+        ↓
+RunDryRunCycleAsync
+        ↓
+IDryRunRemediationExecutor
+        ↓
+DryRunRemediationExecutor
+
+while real execution uses:
+
+/api/autonomy/execute
+        ↓
+RunExecutionCycleAsync
+        ↓
+IRemediationExecutor
+        ↓
+WindowsRemediationExecutor
+
+Regression tests were added to keep the two execution paths isolated.
+
+### Current Validation
+- `dotnet build` — PASS
+- `dotnet test` — 8 passed, 0 failed
+- dry-run executor isolation test — PASS
+- real executor isolation test — PASS
+- safety rejection test — PASS
+
+### Acceptance Criteria
+- [x] Dry-run executor exists
+- [x] Dry-run endpoint exists
+- [x] Planner and safety policy run during dry run
+- [x] Dry-run executor performs no real Windows changes
+- [x] Real executor is isolated from dry-run execution
+- [x] Regression tests verify executor separation
+- [x] Safety fix reviewed and merged into `main`
 
 ---
 
-## Phase 11 — First Real Autonomous Remediation ✅ COMPLETE
+## Phase 11 — First Real Autonomous Remediation 🟡 PARTIALLY COMPLETE
 
-**Purpose:**  
-Move from simulated execution to a single real, narrowly-scoped, low-risk Windows action. This is the first time the system makes an actual change to the PC — with full verification capability.
+### Purpose
+Introduce the first narrowly scoped real Windows remediation action with controlled execution and verification.
 
-**Function:**  
-Select one action from the registry (`clear_user_temp_files`) and implement it as a real `WindowsRemediationExecutor`. Add a concrete `VerificationService` that measures the disk space before and after.
+### Current Verified State
 
-**Key Files Created:**
-- `RigMD.Infrastructure/Remediation/WindowsRemediationExecutor.cs` — dispatcher that routes action IDs to concrete implementations
-- `RigMD.Infrastructure/Remediation/Actions/ClearTempFilesAction.cs` — real action that safely clears `%TEMP%`, skipping locked files
-- `RigMD.Infrastructure/Remediation/VerificationService.cs` — measures file count and directory size to verify cleanup success
+The real remediation implementation includes:
 
-**New API Endpoint:**
-- `POST /api/autonomy/execute` — runs a real remediation cycle: Plan → Safety Check → Execute → Verify
+- `WindowsRemediationExecutor.cs`
+- `ClearTempFilesAction.cs`
+- `VerificationService.cs`
+- `POST /api/autonomy/execute`
 
-**How to Test (Postman / PowerShell):**
-```
-POST http://localhost:5273/api/autonomy/execute
-Content-Type: application/json
+The currently implemented real action is:
 
-{
-  "DiagnosedCategory": "OS performance degradation"
-}
-```
+clear_user_temp_files
 
-**Acceptance Criteria:**
-- [x] Executing `clear_user_temp_files` deletes files from `%TEMP%`
-- [x] `VerificationService` measures disk space before and after and reports the delta
-- [x] If the action fails mid-way, no partial state is left (locked files are gracefully skipped)
-- [x] Safety Policy rejects the action if the system is a server OS
+
+The action operates on the current user's temporary directory and attempts to delete accessible temporary files while skipping locked or inaccessible files.
+The real executor also fails safely for unsupported action IDs instead of attempting arbitrary execution.
+
+### Important Safety Note
+`clear_user_temp_files` is currently defined as:
+
+- RiskLevel = Low
+- IsReversible = false
+
+Deleted temporary files cannot be restored by RigMD.
+The action must therefore not be described as rollback-capable.
+A partial cleanup is also possible.
+For example:
+
+- File A → deleted
+- File B → deleted
+- File C → locked and skipped
+
+This is acceptable only if the result is reported accurately and no unrelated paths are modified.
+
+### Current Verification
+The current `VerificationService` checks the state of the temp directory after execution.
+It currently considers the result resolved when:
+
+- remaining files < 500
+AND
+- remaining size < 100 MB
+
+This is useful as an initial heuristic, but stronger before/after evidence should eventually be tied to the exact remediation attempt.
+
+### Remaining Safety Work
+- [x] real Windows executor exists
+- [x] `clear_user_temp_files` implementation exists
+- [x] unsupported action IDs fail safely
+- [x] locked files are skipped
+- [x] post-action verification exists
+- [ ] irreversible actions require explicit user confirmation
+- [ ] verification should use stronger before/after evidence
+- [ ] real execution needs more automated coverage
+- [ ] manual safety validation should be documented
+
+Phase 11 should remain partially complete until the remaining safety requirements are satisfied.
 
 ---
 
@@ -466,16 +569,42 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 2 | Build the C#/.NET Foundation | ✅ Complete |
 | 3 | Final Domain Model & ERD | ✅ Complete |
 | 4 | Windows Observation Layer | ✅ Complete |
-| 5 | SQLite + EF Core Persistence | 🟡 Partially Complete |
+| 5 | SQLite + EF Core Persistence | 🔲 Pending |
 | 6 | ASP.NET Core API | ✅ Complete |
 | 7 | Connect the React Frontend | ✅ Complete |
 | 8 | Migrate the Diagnostic Engine | ✅ Complete |
 | 9 | Build the Autonomous Remediation Framework | ✅ Complete |
 | 10 | Dry-Run Autonomous Engine | ✅ Complete |
-| 11 | First Real Autonomous Remediation | 🔲 Pending |
+| 11 | First Real Autonomous Remediation | 🟡 Partially Complete |
 | 12 | Verification, Rollback, and Pivot | 🔲 Pending |
 | 13 | History, Audit, & Recurring Patterns | 🔲 Pending |
 | 14 | AI Explanation Integration | 🔲 Pending |
-| 15 | Optional Cloud Sync (Supabase) | 🔲 Pending |
+| 15 | Optional Cloud Sync | 🔲 Pending |
 | 16 | Desktop Packaging | 🔲 Pending |
 | 17 | Performance, Testing, & Thesis Validation | 🔲 Pending |
+
+---
+
+## Current Verified Test Status
+
+As of the latest autonomy safety validation:
+
+dotnet test
+Total: 8
+Passed: 8
+Failed: 0
+Skipped: 0
+
+
+Current automated coverage includes:
+
+- dry-run executor isolation
+- real executor isolation
+- rejected safety plan prevents execution
+- Windows Server remediation rejection
+- high-risk plan rejection
+- empty plan rejection
+- valid low-risk plan approval
+- unsupported real remediation action failure
+
+Automated coverage is still limited and must continue expanding before the legacy Python backend is retired.
