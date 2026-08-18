@@ -1,4 +1,3 @@
-using System;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,54 +11,112 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
 {
     private readonly IRemediationPlanner _planner;
     private readonly ISafetyPolicy _safetyPolicy;
-    private readonly IRemediationExecutor _executor;
+    private readonly IDryRunRemediationExecutor _dryRunExecutor;
+    private readonly IRemediationExecutor _realExecutor;
 
     public AutonomousOrchestrator(
         IRemediationPlanner planner,
         ISafetyPolicy safetyPolicy,
-        IRemediationExecutor executor)
+        IDryRunRemediationExecutor dryRunExecutor,
+        IRemediationExecutor realExecutor)
     {
         _planner = planner;
         _safetyPolicy = safetyPolicy;
-        _executor = executor;
+        _dryRunExecutor = dryRunExecutor;
+        _realExecutor = realExecutor;
     }
 
-    public async Task<OrchestrationResult> RunDryRunCycleAsync(DiagnosticOutput diagnostic, HardwareProfileDto hardware)
+    public Task<OrchestrationResult> RunDryRunCycleAsync(
+        DiagnosticOutput diagnostic,
+        HardwareProfileDto hardware)
+    {
+        return RunCycleAsync(
+            diagnostic,
+            hardware,
+            _dryRunExecutor.ExecuteAsync,
+            isDryRun: true);
+    }
+
+    public Task<OrchestrationResult> RunExecutionCycleAsync(
+        DiagnosticOutput diagnostic,
+        HardwareProfileDto hardware)
+    {
+        return RunCycleAsync(
+            diagnostic,
+            hardware,
+            _realExecutor.ExecuteAsync,
+            isDryRun: false);
+    }
+
+    private async Task<OrchestrationResult> RunCycleAsync(
+        DiagnosticOutput diagnostic,
+        HardwareProfileDto hardware,
+        Func<RemediationActionDef, Task<ExecutionResult>> executeAction,
+        bool isDryRun)
     {
         var trace = new StringBuilder();
-        trace.AppendLine($"[ORCHESTRATOR] Starting Dry Run for Diagnosis: {diagnostic.DiagnosedCategory}");
+        var mode = isDryRun ? "Dry Run" : "Real Execution";
 
-        // 1. Plan
+        trace.AppendLine(
+            $"[ORCHESTRATOR] Starting {mode} for Diagnosis: {diagnostic.DiagnosedCategory}");
+
         trace.AppendLine("[PLANNER] Formulating plan...");
+
         var plan = _planner.CreatePlan(diagnostic);
-        trace.AppendLine($"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
-        trace.AppendLine($"[PLANNER] Reasoning: {plan.StrategyReasoning}");
+
+        trace.AppendLine(
+            $"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
+
+        trace.AppendLine(
+            $"[PLANNER] Reasoning: {plan.StrategyReasoning}");
 
         if (plan.PlannedActions.Count == 0)
         {
-            trace.AppendLine("[ORCHESTRATOR] Cycle stopped. No actions to execute.");
-            return new OrchestrationResult { Plan = plan, Trace = trace.ToString() };
+            trace.AppendLine(
+                "[ORCHESTRATOR] Cycle stopped. No actions to execute.");
+
+            return new OrchestrationResult
+            {
+                Plan = plan,
+                Trace = trace.ToString()
+            };
         }
 
-        // 2. Safety Check
         trace.AppendLine("[SAFETY] Evaluating plan...");
+
         var safety = _safetyPolicy.Evaluate(plan, hardware);
+
         if (!safety.IsApproved)
         {
-            trace.AppendLine($"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
-            return new OrchestrationResult { Plan = plan, Safety = safety, Trace = trace.ToString() };
+            trace.AppendLine(
+                $"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
+
+            return new OrchestrationResult
+            {
+                Plan = plan,
+                Safety = safety,
+                Trace = trace.ToString()
+            };
         }
+
         trace.AppendLine("[SAFETY] Plan APPROVED.");
 
-        // 3. Execute (Dry Run)
         var actionToExecute = plan.PlannedActions.First();
-        trace.AppendLine($"[EXECUTOR] Attempting execution of {actionToExecute.Name}...");
-        var executionResult = await _executor.ExecuteAsync(actionToExecute);
-        
-        trace.AppendLine($"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
-        trace.AppendLine($"[EXECUTOR] Output: {executionResult.Summary}");
 
-        trace.AppendLine("[ORCHESTRATOR] Dry run cycle complete.");
+        trace.AppendLine(
+            $"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
+
+        var executionResult =
+            await executeAction(actionToExecute);
+
+        trace.AppendLine(
+            $"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
+
+        trace.AppendLine(
+            $"[EXECUTOR] Output: {executionResult.Summary}");
+
+        trace.AppendLine(
+            $"[ORCHESTRATOR] {mode} cycle complete.");
 
         return new OrchestrationResult
         {

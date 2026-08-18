@@ -44,7 +44,7 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.ISafetyPolicy, R
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor, RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IVerificationService, RigMD.Infrastructure.Remediation.VerificationService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
-
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediationExecutor,RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
