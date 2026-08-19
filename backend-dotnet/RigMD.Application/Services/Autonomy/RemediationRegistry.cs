@@ -24,7 +24,7 @@ public class RemediationRegistry : IRemediationRegistry
             Name = "Restart Windows Explorer",
             Category = "OS performance degradation",
             RiskLevel = "Low",
-            IsReversible = true
+            IsReversible = false
         },
         new RemediationActionDef
         {
