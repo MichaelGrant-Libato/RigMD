@@ -58,7 +58,49 @@ public enum VerificationStatus
 public class OrchestrationResult
 {
     public RemediationPlan? Plan { get; set; }
+
     public SafetyEvaluation? Safety { get; set; }
+
     public ExecutionResult? Execution { get; set; }
+
+    public VerificationStatus? Verification { get; set; }
+
+    public RemediationAttempt? Attempt { get; set; }
+
     public string Trace { get; set; } = string.Empty;
+}
+
+public enum RemediationAttemptState
+{
+    Planned,
+    SafetyRejected,
+    AwaitingConsent,
+    Executing,
+    ExecutionFailed,
+    VerificationPending,
+    Resolved,
+    Unresolved,
+    Worse,
+    VerificationUnknown,
+    RollbackPending,
+    RolledBack,
+    RollbackFailed,
+    PivotPending,
+    Pivoted,
+    Completed
+}
+
+public class RemediationAttempt
+{
+    public RemediationActionDef? Action { get; set; }
+
+    public RemediationAttemptState State { get; set; }
+
+    public ExecutionResult? Execution { get; set; }
+
+    public VerificationStatus? Verification { get; set; }
+
+    public ExecutionResult? RollbackResult { get; set; }
+
+    public string Notes { get; set; } = string.Empty;
 }
