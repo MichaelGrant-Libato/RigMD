@@ -5,5 +5,9 @@ namespace RigMD.Application.Contracts.Autonomy;
 
 public interface IRollbackManager
 {
-    Task<ExecutionResult> RollbackAsync(RemediationActionDef action);
+    bool CanRollback(RemediationActionDef action);
+
+    Task<ExecutionResult> RollbackAsync(
+        RemediationActionDef action,
+        ExecutionResult originalExecution);
 }

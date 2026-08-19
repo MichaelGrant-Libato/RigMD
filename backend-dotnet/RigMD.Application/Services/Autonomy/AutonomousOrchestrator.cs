@@ -15,19 +15,22 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
     private readonly IDryRunRemediationExecutor _dryRunExecutor;
     private readonly IRemediationExecutor _realExecutor;
     private readonly IVerificationService _verificationService;
+    private readonly IRollbackManager _rollbackManager;
 
     public AutonomousOrchestrator(
         IRemediationPlanner planner,
         ISafetyPolicy safetyPolicy,
         IDryRunRemediationExecutor dryRunExecutor,
         IRemediationExecutor realExecutor,
-        IVerificationService verificationService)
+        IVerificationService verificationService,
+        IRollbackManager rollbackManager)
     {
         _planner = planner;
         _safetyPolicy = safetyPolicy;
         _dryRunExecutor = dryRunExecutor;
         _realExecutor = realExecutor;
         _verificationService = verificationService;
+        _rollbackManager = rollbackManager;
     }
 
     public Task<OrchestrationResult> RunDryRunCycleAsync(
@@ -210,6 +213,9 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
 
         attempt.Verification = verificationStatus;
 
+        trace.AppendLine(
+            $"[VERIFICATION] Result: {verificationStatus}");
+
         switch (verificationStatus)
         {
             case VerificationStatus.Resolved:
@@ -238,8 +244,62 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                 break;
         }
 
-        trace.AppendLine(
-            $"[VERIFICATION] Result: {verificationStatus}");
+        var shouldAttemptRollback =
+            verificationStatus == VerificationStatus.Unresolved ||
+            verificationStatus == VerificationStatus.Worse;
+
+        if (shouldAttemptRollback)
+        {
+            if (!actionToExecute.IsReversible)
+            {
+                trace.AppendLine(
+                    "[ROLLBACK] Action is irreversible. Rollback skipped.");
+
+                attempt.Notes +=
+                    " Rollback was not attempted because the action is irreversible.";
+            }
+            else if (!_rollbackManager.CanRollback(actionToExecute))
+            {
+                trace.AppendLine(
+                    "[ROLLBACK] No verified rollback handler is available.");
+
+                attempt.Notes +=
+                    " Rollback was not attempted because no verified rollback handler is available.";
+            }
+            else
+            {
+                attempt.State = RemediationAttemptState.RollbackPending;
+
+                trace.AppendLine(
+                    $"[ROLLBACK] Attempting rollback for {actionToExecute.Name}...");
+
+                var rollbackResult =
+                    await _rollbackManager.RollbackAsync(
+                        actionToExecute,
+                        executionResult);
+
+                attempt.RollbackResult = rollbackResult;
+
+                if (rollbackResult.Success)
+                {
+                    attempt.State = RemediationAttemptState.RolledBack;
+                    attempt.Notes =
+                        "Verification did not confirm a safe outcome. The remediation was rolled back successfully.";
+
+                    trace.AppendLine(
+                        "[ROLLBACK] Rollback completed successfully.");
+                }
+                else
+                {
+                    attempt.State = RemediationAttemptState.RollbackFailed;
+                    attempt.Notes =
+                        $"Rollback failed: {rollbackResult.Summary}";
+
+                    trace.AppendLine(
+                        $"[ROLLBACK] Rollback failed: {rollbackResult.Summary}");
+                }
+            }
+        }
 
         trace.AppendLine(
             $"[ORCHESTRATOR] {mode} cycle complete.");

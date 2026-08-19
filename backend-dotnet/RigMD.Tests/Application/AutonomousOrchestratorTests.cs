@@ -19,24 +19,24 @@ public class AutonomousOrchestratorTests
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
         var verificationService = new FakeVerificationService();
+        var rollbackManager = new FakeRollbackManager();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
-
-        var diagnostic = CreateDiagnostic();
-        var hardware = CreateHardware();
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunDryRunCycleAsync(
-            diagnostic,
-            hardware);
+            CreateDiagnostic(),
+            CreateHardware());
 
         Assert.True(dryRunExecutor.WasCalled);
         Assert.False(realExecutor.WasCalled);
         Assert.Equal(0, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Execution);
         Assert.True(result.Execution.Success);
@@ -59,32 +59,36 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+
         var verificationService = new FakeVerificationService
         {
             StatusToReturn = VerificationStatus.Resolved
         };
+
+        var rollbackManager = new FakeRollbackManager();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
-
-        var diagnostic = CreateDiagnostic();
-        var hardware = CreateHardware();
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
-            diagnostic,
-            hardware);
+            CreateDiagnostic(),
+            CreateHardware());
 
         Assert.False(dryRunExecutor.WasCalled);
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Execution);
         Assert.True(result.Execution.Success);
-        Assert.Contains("REAL EXECUTION", result.Execution.Summary);
+        Assert.Contains(
+            "REAL EXECUTION",
+            result.Execution.Summary);
 
         Assert.Equal(
             VerificationStatus.Resolved,
@@ -106,13 +110,15 @@ public class AutonomousOrchestratorTests
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
         var verificationService = new FakeVerificationService();
+        var rollbackManager = new FakeRollbackManager();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunDryRunCycleAsync(
             CreateDiagnostic(),
@@ -121,6 +127,7 @@ public class AutonomousOrchestratorTests
         Assert.False(dryRunExecutor.WasCalled);
         Assert.False(realExecutor.WasCalled);
         Assert.Equal(0, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Safety);
         Assert.False(result.Safety.IsApproved);
@@ -142,13 +149,15 @@ public class AutonomousOrchestratorTests
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
         var verificationService = new FakeVerificationService();
+        var rollbackManager = new FakeRollbackManager();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -158,6 +167,7 @@ public class AutonomousOrchestratorTests
         Assert.False(realExecutor.WasCalled);
         Assert.False(dryRunExecutor.WasCalled);
         Assert.Equal(0, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Safety);
         Assert.False(result.Safety.IsApproved);
@@ -183,17 +193,21 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new RequiresConsentSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+
         var verificationService = new FakeVerificationService
         {
             StatusToReturn = VerificationStatus.Resolved
         };
+
+        var rollbackManager = new FakeRollbackManager();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -203,6 +217,7 @@ public class AutonomousOrchestratorTests
         Assert.False(dryRunExecutor.WasCalled);
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Safety);
         Assert.True(result.Safety.IsApproved);
@@ -229,9 +244,15 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+
         var verificationService = new FakeVerificationService
         {
             StatusToReturn = VerificationStatus.Unresolved
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = false
         };
 
         var orchestrator = new AutonomousOrchestrator(
@@ -239,7 +260,8 @@ public class AutonomousOrchestratorTests
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -247,6 +269,7 @@ public class AutonomousOrchestratorTests
 
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.Equal(
             VerificationStatus.Unresolved,
@@ -267,9 +290,15 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+
         var verificationService = new FakeVerificationService
         {
             StatusToReturn = VerificationStatus.Worse
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = false
         };
 
         var orchestrator = new AutonomousOrchestrator(
@@ -277,7 +306,8 @@ public class AutonomousOrchestratorTests
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -285,6 +315,7 @@ public class AutonomousOrchestratorTests
 
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.Equal(
             VerificationStatus.Worse,
@@ -305,9 +336,15 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+
         var verificationService = new FakeVerificationService
         {
             StatusToReturn = VerificationStatus.Unknown
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true
         };
 
         var orchestrator = new AutonomousOrchestrator(
@@ -315,7 +352,8 @@ public class AutonomousOrchestratorTests
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -323,6 +361,9 @@ public class AutonomousOrchestratorTests
 
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(1, verificationService.CallCount);
+
+        // Unknown results must not trigger automatic rollback.
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.Equal(
             VerificationStatus.Unknown,
@@ -335,25 +376,33 @@ public class AutonomousOrchestratorTests
     }
 
     [Fact]
-    public async Task RunExecutionCycleAsync_WhenExecutionFails_DoesNotRunVerification()
+    public async Task RunExecutionCycleAsync_WhenExecutionFails_DoesNotRunVerificationOrRollback()
     {
         var action = CreateAction();
 
         var planner = new FakePlanner(action);
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
+
         var realExecutor = new FakeRealExecutor
         {
             ShouldSucceed = false
         };
+
         var verificationService = new FakeVerificationService();
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true
+        };
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
             realExecutor,
-            verificationService);
+            verificationService,
+            rollbackManager);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -361,6 +410,7 @@ public class AutonomousOrchestratorTests
 
         Assert.True(realExecutor.WasCalled);
         Assert.Equal(0, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
 
         Assert.NotNull(result.Execution);
         Assert.False(result.Execution.Success);
@@ -371,6 +421,197 @@ public class AutonomousOrchestratorTests
         Assert.Equal(
             RemediationAttemptState.ExecutionFailed,
             result.Attempt.State);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenUnresolvedAndIrreversible_DoesNotRollback()
+    {
+        var action = CreateAction();
+        action.IsReversible = false;
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Unresolved
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService,
+            rollbackManager);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Unresolved,
+            result.Attempt.State);
+
+        Assert.Null(result.Attempt.RollbackResult);
+
+        Assert.Contains(
+            "irreversible",
+            result.Attempt.Notes);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenUnresolvedAndRollbackSupported_RollsBackSuccessfully()
+    {
+        var action = CreateAction();
+        action.IsReversible = true;
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Unresolved
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true,
+            RollbackShouldSucceed = true
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService,
+            rollbackManager);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(1, rollbackManager.CallCount);
+
+        Assert.NotNull(result.Attempt);
+
+        Assert.Equal(
+            RemediationAttemptState.RolledBack,
+            result.Attempt.State);
+
+        Assert.NotNull(result.Attempt.RollbackResult);
+        Assert.True(result.Attempt.RollbackResult.Success);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenWorseAndRollbackFails_SetsRollbackFailed()
+    {
+        var action = CreateAction();
+        action.IsReversible = true;
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Worse
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true,
+            RollbackShouldSucceed = false
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService,
+            rollbackManager);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(1, rollbackManager.CallCount);
+
+        Assert.NotNull(result.Attempt);
+
+        Assert.Equal(
+            RemediationAttemptState.RollbackFailed,
+            result.Attempt.State);
+
+        Assert.NotNull(result.Attempt.RollbackResult);
+        Assert.False(result.Attempt.RollbackResult.Success);
+
+        Assert.Contains(
+            "Rollback failed",
+            result.Attempt.Notes);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenUnknownAndRollbackSupported_DoesNotRollback()
+    {
+        var action = CreateAction();
+        action.IsReversible = true;
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Unknown
+        };
+
+        var rollbackManager = new FakeRollbackManager
+        {
+            CanRollbackResult = true
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService,
+            rollbackManager);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.Equal(1, verificationService.CallCount);
+        Assert.Equal(0, rollbackManager.CallCount);
+
+        Assert.NotNull(result.Attempt);
+
+        Assert.Equal(
+            RemediationAttemptState.VerificationUnknown,
+            result.Attempt.State);
+
+        Assert.Null(result.Attempt.RollbackResult);
     }
 
     private static RemediationActionDef CreateAction()
@@ -407,7 +648,8 @@ public class AutonomousOrchestratorTests
     {
         private readonly RemediationActionDef _action;
 
-        public FakePlanner(RemediationActionDef action)
+        public FakePlanner(
+            RemediationActionDef action)
         {
             _action = action;
         }
@@ -520,6 +762,36 @@ public class AutonomousOrchestratorTests
             CallCount++;
 
             return Task.FromResult(StatusToReturn);
+        }
+    }
+
+    private sealed class FakeRollbackManager : IRollbackManager
+    {
+        public int CallCount { get; private set; }
+
+        public bool CanRollbackResult { get; set; }
+
+        public bool RollbackShouldSucceed { get; set; } = true;
+
+        public bool CanRollback(
+            RemediationActionDef action)
+        {
+            return CanRollbackResult;
+        }
+
+        public Task<ExecutionResult> RollbackAsync(
+            RemediationActionDef action,
+            ExecutionResult originalExecution)
+        {
+            CallCount++;
+
+            return Task.FromResult(new ExecutionResult
+            {
+                Success = RollbackShouldSucceed,
+                Summary = RollbackShouldSucceed
+                    ? "Rollback successful."
+                    : "Rollback failed."
+            });
         }
     }
 }
