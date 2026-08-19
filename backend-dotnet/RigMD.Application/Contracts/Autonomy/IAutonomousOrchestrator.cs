@@ -12,5 +12,6 @@ public interface IAutonomousOrchestrator
 
     Task<OrchestrationResult> RunExecutionCycleAsync(
         DiagnosticOutput diagnostic,
-        HardwareProfileDto hardware);
+        HardwareProfileDto hardware,
+        bool userConsentProvided = false);
 }

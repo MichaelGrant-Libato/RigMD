@@ -54,6 +54,7 @@ public class AutonomyController : ControllerBase
     public class ExecuteRequest
     {
         public string DiagnosedCategory { get; set; } = string.Empty;
+        public bool UserConsentProvided { get; set; }
     }
 
     /// <summary>
@@ -73,13 +74,13 @@ public class AutonomyController : ControllerBase
             ConfidenceLabel = "High"
         };
 
-        var result = await _orchestrator.RunExecutionCycleAsync(diagnostic, hardware);
+        var result = await _orchestrator.RunExecutionCycleAsync(diagnostic, hardware, request.UserConsentProvided);
 
         // If execution succeeded, run verification on the first action
         if (result.Execution?.Success == true && result.Plan?.PlannedActions.Count > 0)
         {
             var verificationStatus = await _verificationService.VerifyAsync(
-                result.Plan.PlannedActions[0], hardware);
+                result.Plan.PlannedActions[0], result.Execution, hardware);
 
             result.Trace += $"\n[VERIFICATION] Post-execution status: {verificationStatus}";
         }
