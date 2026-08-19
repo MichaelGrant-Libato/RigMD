@@ -497,6 +497,7 @@ Already implemented:
 
 Remaining:
 
+- repository abstractions (clean architecture/DI for SQLite transition)
 - formal remediation-attempt audit trail
 - verification history
 - rollback history
@@ -597,6 +598,13 @@ Current validation:
 - recurring patterns verified against current data
 - warning-sign results verified against current data
 - resolution flow tested
+
+Remaining Automated Validation:
+
+- diagnosis confidence weighting tests
+- recurring patterns correctness tests
+- warning signs edge-case/anomaly tests
+- diagnostic-to-resolution mapping tests
 
 Automated test coverage is still limited.
 

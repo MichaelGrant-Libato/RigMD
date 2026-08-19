@@ -97,6 +97,58 @@ public class AutonomousOrchestratorTests
         Assert.Null(result.Execution);
     }
 
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenConsentRequiredAndNoConsent_RejectsExecution()
+    {
+        var action = CreateAction();
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new RequiresConsentSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware(),
+            userConsentProvided: false);
+
+        Assert.False(realExecutor.WasCalled);
+        Assert.NotNull(result.Safety);
+        Assert.False(result.Safety.IsApproved);
+        Assert.Contains("requires explicit user consent", result.Safety.RejectionReason);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenConsentRequiredAndConsentGiven_ExecutesAction()
+    {
+        var action = CreateAction();
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new RequiresConsentSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware(),
+            userConsentProvided: true);
+
+        Assert.True(realExecutor.WasCalled);
+        Assert.NotNull(result.Safety);
+        Assert.True(result.Safety.IsApproved);
+        Assert.True(result.Execution.Success);
+    }
+
     private static RemediationActionDef CreateAction()
     {
         return new RemediationActionDef
@@ -172,6 +224,20 @@ public class AutonomousOrchestratorTests
             {
                 IsApproved = false,
                 RejectionReason = "Rejected for test."
+            };
+        }
+    }
+
+    private sealed class RequiresConsentSafetyPolicy : ISafetyPolicy
+    {
+        public SafetyEvaluation Evaluate(
+            RemediationPlan plan,
+            HardwareProfileDto systemState)
+        {
+            return new SafetyEvaluation
+            {
+                IsApproved = true,
+                RequiresUserConfirmation = true
             };
         }
     }

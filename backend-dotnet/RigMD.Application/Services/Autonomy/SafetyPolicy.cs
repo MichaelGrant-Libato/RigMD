@@ -10,6 +10,7 @@ public class SafetyPolicy : ISafetyPolicy
     public SafetyEvaluation Evaluate(RemediationPlan plan, HardwareProfileDto hardwareProfile)
     {
         var warnings = new List<string>();
+        var requiresConsent = false;
 
         if (plan.PlannedActions.Count == 0)
         {
@@ -44,16 +45,17 @@ public class SafetyPolicy : ISafetyPolicy
             };
         }
 
-        // Warn about irreversible actions but still approve
+        // Require explicit user consent for irreversible actions
         if (plan.PlannedActions.Any(a => !a.IsReversible))
         {
-            warnings.Add("Plan contains irreversible action(s). Deleted files cannot be recovered.");
+            requiresConsent = true;
+            warnings.Add("Plan contains irreversible action(s). Deleted files cannot be recovered. Explicit user consent is required.");
         }
 
         return new SafetyEvaluation
         {
             IsApproved = true,
-            RequiresUserConfirmation = false,
+            RequiresUserConfirmation = requiresConsent,
             RejectionReason = string.Empty,
             Warnings = warnings
         };

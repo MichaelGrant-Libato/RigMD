@@ -57,6 +57,8 @@ app.UseCors("AllowReact");
 
 app.UseHttpsRedirection();
 
+app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
+
 app.MapControllers();
 
 app.Run();

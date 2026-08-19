@@ -22,13 +22,13 @@ public class VerificationService : IVerificationService
         _logger = logger;
     }
 
-    public Task<VerificationStatus> VerifyAsync(RemediationActionDef action, HardwareProfileDto currentSystemState)
+    public Task<VerificationStatus> VerifyAsync(RemediationActionDef action, ExecutionResult executionResult, HardwareProfileDto currentSystemState)
     {
         _logger.LogInformation("VerificationService: verifying action '{ActionId}'", action.Id);
 
         var status = action.Id switch
         {
-            "clear_user_temp_files" => VerifyTempFilesCleaned(),
+            "clear_user_temp_files" => VerifyTempFilesCleaned(executionResult),
             _ => VerificationStatus.Unknown
         };
 
@@ -40,46 +40,32 @@ public class VerificationService : IVerificationService
 
     /// <summary>
     /// Checks whether the %TEMP% directory is in a "healthy" state after cleanup.
-    /// Considers the action resolved if fewer than 500 files remain or total size is under 100 MB.
+    /// Uses the exact before/after evidence provided in the ExecutionResult's Proof.
     /// </summary>
-    private VerificationStatus VerifyTempFilesCleaned()
+    private VerificationStatus VerifyTempFilesCleaned(ExecutionResult executionResult)
     {
-        var tempPath = Path.GetTempPath();
-
-        if (!Directory.Exists(tempPath))
+        if (executionResult == null || !executionResult.Success)
         {
-            return VerificationStatus.Unknown;
-        }
-
-        try
-        {
-            int fileCount = Directory.EnumerateFiles(tempPath, "*", SearchOption.AllDirectories).Count();
-            long totalBytes = Directory.EnumerateFiles(tempPath, "*", SearchOption.AllDirectories)
-                .Sum(f =>
-                {
-                    try { return new FileInfo(f).Length; }
-                    catch { return 0L; }
-                });
-
-            long totalMb = totalBytes / (1024 * 1024);
-
-            _logger.LogInformation(
-                "VerifyTempFilesCleaned: {FileCount} files remaining, {TotalMb} MB",
-                fileCount, totalMb);
-
-            // Heuristic: consider resolved if temp is reasonably clean
-            if (fileCount < 500 && totalMb < 100)
-            {
-                return VerificationStatus.Resolved;
-            }
-
-            // Still a lot of files — action helped but didn't fully resolve
             return VerificationStatus.Unresolved;
         }
-        catch (Exception ex)
+
+        var countProof = executionResult.Proof.FirstOrDefault(p => p.Label == "File Count");
+        var sizeProof = executionResult.Proof.FirstOrDefault(p => p.Label == "Directory Size");
+
+        if (countProof == null)
         {
-            _logger.LogWarning(ex, "VerifyTempFilesCleaned: failed to measure temp directory");
             return VerificationStatus.Unknown;
         }
+
+        _logger.LogInformation(
+            "VerifyTempFilesCleaned: File Count Proof = {Status}, Size Proof = {SizeStatus}",
+            countProof.Status, sizeProof?.Status ?? "None");
+
+        if (countProof.Status == "Reduced" || countProof.Before == "0")
+        {
+            return VerificationStatus.Resolved;
+        }
+
+        return VerificationStatus.Unresolved;
     }
 }

@@ -34,25 +34,29 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             diagnostic,
             hardware,
             _dryRunExecutor.ExecuteAsync,
-            isDryRun: true);
+            isDryRun: true,
+            userConsentProvided: false);
     }
 
     public Task<OrchestrationResult> RunExecutionCycleAsync(
         DiagnosticOutput diagnostic,
-        HardwareProfileDto hardware)
+        HardwareProfileDto hardware,
+        bool userConsentProvided = false)
     {
         return RunCycleAsync(
             diagnostic,
             hardware,
             _realExecutor.ExecuteAsync,
-            isDryRun: false);
+            isDryRun: false,
+            userConsentProvided: userConsentProvided);
     }
 
     private async Task<OrchestrationResult> RunCycleAsync(
         DiagnosticOutput diagnostic,
         HardwareProfileDto hardware,
         Func<RemediationActionDef, Task<ExecutionResult>> executeAction,
-        bool isDryRun)
+        bool isDryRun,
+        bool userConsentProvided)
     {
         var trace = new StringBuilder();
         var mode = isDryRun ? "Dry Run" : "Real Execution";
@@ -85,6 +89,13 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         trace.AppendLine("[SAFETY] Evaluating plan...");
 
         var safety = _safetyPolicy.Evaluate(plan, hardware);
+
+        // Override safety approval if consent is required but missing
+        if (safety.RequiresUserConfirmation && !userConsentProvided)
+        {
+            safety.IsApproved = false;
+            safety.RejectionReason = "This action requires explicit user consent (e.g., irreversible actions).";
+        }
 
         if (!safety.IsApproved)
         {

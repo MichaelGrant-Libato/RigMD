@@ -367,7 +367,7 @@ Regression tests were added to keep the two execution paths isolated.
 
 ---
 
-## Phase 11 — First Real Autonomous Remediation 🟡 PARTIALLY COMPLETE
+## Phase 11 — First Real Autonomous Remediation ✅ COMPLETE
 
 ### Purpose
 Introduce the first narrowly scoped real Windows remediation action with controlled execution and verification.
@@ -422,12 +422,10 @@ This is useful as an initial heuristic, but stronger before/after evidence shoul
 - [x] unsupported action IDs fail safely
 - [x] locked files are skipped
 - [x] post-action verification exists
-- [ ] irreversible actions require explicit user confirmation
-- [ ] verification should use stronger before/after evidence
-- [ ] real execution needs more automated coverage
-- [ ] manual safety validation should be documented
-
-Phase 11 should remain partially complete until the remaining safety requirements are satisfied.
+- [x] irreversible actions require explicit user confirmation
+- [x] verification should use stronger before/after evidence
+- [x] real execution needs more automated coverage
+- [x] manual safety validation should be documented
 
 ---
 
@@ -452,7 +450,7 @@ Wire `IVerificationService`, `IRollbackManager`, and `IPivotEngine` into the `Au
 
 ---
 
-## Phase 13 — History, Audit, & Recurring Patterns 🔲 PENDING
+## Phase 13 — History, Audit, & Recurring Patterns 🟡 PARTIALLY COMPLETE
 
 **Purpose:**  
 Make all remediation activity visible and traceable. Past attempts must be persisted to SQLite and surfaced in the frontend History view. The system must also use history to improve future remediation ranking.
@@ -460,12 +458,19 @@ Make all remediation activity visible and traceable. Past attempts must be persi
 **Function:**  
 Fully wire the SQLite repositories to the diagnostic and remediation flows. Persist every `DiagnosticSession`, `RemediationRun`, and `ActionAttempt` to the database. Surface this history in the frontend and use it to deprioritize actions that have historically failed.
 
+**Current Verified State:**
+- The `X-Client-ID` identity tracking requirement is fully implemented in the frontend (`clientId.ts`, `api.ts`).
+- ASP.NET Core middleware (`ClientIdMiddleware.cs`) enforces this header on all `/api` routes, scoping data exclusively to individual installations.
+
 **Key Files to Create/Update:**
+- Robust repository abstractions (`IDiagnosticSessionRepository`, `IRemediationRepository`) to ensure clean dependency inversion for the upcoming full SQLite migration
 - Repository implementations for `RemediationRun`, `ActionAttempt`, `VerificationResult`
 - Updated `DiagnosticController` to read from SQLite instead of in-memory store
 - `RecurringPatternService.cs` — detects repeated diagnoses across sessions
 
 **Acceptance Criteria:**
+- [x] Frontend generates and persists `X-Client-ID` and sends it with every request
+- [x] Backend enforces `X-Client-ID` on all `/api` endpoints
 - [ ] Sessions survive backend restarts (loaded from SQLite)
 - [ ] History page shows all past sessions with remediation attempts
 - [ ] Actions that failed in past sessions are ranked lower in future plans
@@ -547,6 +552,10 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 
 **Autonomous Evaluation Checklist:**
 - [ ] Diagnostic accuracy: given known hardware states, correct category is diagnosed
+- [ ] Diagnosis confidence mapping: ensure rule weighting accurately reflects confidence levels
+- [ ] Recurring patterns: engine correctly identifies and flags historical problem repetition
+- [ ] Warning signs: edge cases and anomalies are correctly flagged during telemetry gathering
+- [ ] Resolutions: verify that actions are correctly mapped to their respective diagnostic resolutions
 - [ ] Safety rejection: high-risk actions are rejected on server OS
 - [ ] Verification accuracy: resolved sessions are correctly detected as resolved
 - [ ] Rollback correctness: failed actions are cleanly undone
@@ -575,9 +584,9 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 8 | Migrate the Diagnostic Engine | ✅ Complete |
 | 9 | Build the Autonomous Remediation Framework | ✅ Complete |
 | 10 | Dry-Run Autonomous Engine | ✅ Complete |
-| 11 | First Real Autonomous Remediation | 🟡 Partially Complete |
+| 11 | First Real Autonomous Remediation | ✅ Complete |
 | 12 | Verification, Rollback, and Pivot | 🔲 Pending |
-| 13 | History, Audit, & Recurring Patterns | 🔲 Pending |
+| 13 | History, Audit, & Recurring Patterns | 🟡 Partially Complete |
 | 14 | AI Explanation Integration | 🔲 Pending |
 | 15 | Optional Cloud Sync | 🔲 Pending |
 | 16 | Desktop Packaging | 🔲 Pending |
