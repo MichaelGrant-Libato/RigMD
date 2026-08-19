@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Models;
 using RigMD.Application.Services.Autonomy;
@@ -16,12 +18,14 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
-            realExecutor);
+            realExecutor,
+            verificationService);
 
         var diagnostic = CreateDiagnostic();
         var hardware = CreateHardware();
@@ -32,10 +36,18 @@ public class AutonomousOrchestratorTests
 
         Assert.True(dryRunExecutor.WasCalled);
         Assert.False(realExecutor.WasCalled);
+        Assert.Equal(0, verificationService.CallCount);
 
         Assert.NotNull(result.Execution);
         Assert.True(result.Execution.Success);
         Assert.Contains("DRY RUN", result.Execution.Summary);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Completed,
+            result.Attempt.State);
+
+        Assert.Null(result.Verification);
     }
 
     [Fact]
@@ -47,12 +59,17 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new FakeSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Resolved
+        };
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
-            realExecutor);
+            realExecutor,
+            verificationService);
 
         var diagnostic = CreateDiagnostic();
         var hardware = CreateHardware();
@@ -63,10 +80,20 @@ public class AutonomousOrchestratorTests
 
         Assert.False(dryRunExecutor.WasCalled);
         Assert.True(realExecutor.WasCalled);
+        Assert.Equal(1, verificationService.CallCount);
 
         Assert.NotNull(result.Execution);
         Assert.True(result.Execution.Success);
         Assert.Contains("REAL EXECUTION", result.Execution.Summary);
+
+        Assert.Equal(
+            VerificationStatus.Resolved,
+            result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Resolved,
+            result.Attempt.State);
     }
 
     [Fact]
@@ -78,12 +105,14 @@ public class AutonomousOrchestratorTests
         var safetyPolicy = new RejectingSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
-            realExecutor);
+            realExecutor,
+            verificationService);
 
         var result = await orchestrator.RunDryRunCycleAsync(
             CreateDiagnostic(),
@@ -91,26 +120,35 @@ public class AutonomousOrchestratorTests
 
         Assert.False(dryRunExecutor.WasCalled);
         Assert.False(realExecutor.WasCalled);
+        Assert.Equal(0, verificationService.CallCount);
 
         Assert.NotNull(result.Safety);
         Assert.False(result.Safety.IsApproved);
         Assert.Null(result.Execution);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.SafetyRejected,
+            result.Attempt.State);
     }
 
     [Fact]
     public async Task RunExecutionCycleAsync_WhenConsentRequiredAndNoConsent_RejectsExecution()
     {
         var action = CreateAction();
+
         var planner = new FakePlanner(action);
         var safetyPolicy = new RequiresConsentSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService();
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
-            realExecutor);
+            realExecutor,
+            verificationService);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -118,35 +156,221 @@ public class AutonomousOrchestratorTests
             userConsentProvided: false);
 
         Assert.False(realExecutor.WasCalled);
+        Assert.False(dryRunExecutor.WasCalled);
+        Assert.Equal(0, verificationService.CallCount);
+
         Assert.NotNull(result.Safety);
         Assert.False(result.Safety.IsApproved);
-        Assert.Contains("requires explicit user consent", result.Safety.RejectionReason);
+
+        Assert.Contains(
+            "requires explicit user consent",
+            result.Safety.RejectionReason);
+
+        Assert.Null(result.Execution);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.AwaitingConsent,
+            result.Attempt.State);
     }
 
     [Fact]
     public async Task RunExecutionCycleAsync_WhenConsentRequiredAndConsentGiven_ExecutesAction()
     {
         var action = CreateAction();
+
         var planner = new FakePlanner(action);
         var safetyPolicy = new RequiresConsentSafetyPolicy();
         var dryRunExecutor = new FakeDryRunExecutor();
         var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Resolved
+        };
 
         var orchestrator = new AutonomousOrchestrator(
             planner,
             safetyPolicy,
             dryRunExecutor,
-            realExecutor);
+            realExecutor,
+            verificationService);
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
             CreateHardware(),
             userConsentProvided: true);
 
+        Assert.False(dryRunExecutor.WasCalled);
         Assert.True(realExecutor.WasCalled);
+        Assert.Equal(1, verificationService.CallCount);
+
         Assert.NotNull(result.Safety);
         Assert.True(result.Safety.IsApproved);
+
+        Assert.NotNull(result.Execution);
         Assert.True(result.Execution.Success);
+
+        Assert.Equal(
+            VerificationStatus.Resolved,
+            result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Resolved,
+            result.Attempt.State);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenVerificationIsUnresolved_SetsAttemptToUnresolved()
+    {
+        var action = CreateAction();
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Unresolved
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.True(realExecutor.WasCalled);
+        Assert.Equal(1, verificationService.CallCount);
+
+        Assert.Equal(
+            VerificationStatus.Unresolved,
+            result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Unresolved,
+            result.Attempt.State);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenVerificationIsWorse_SetsAttemptToWorse()
+    {
+        var action = CreateAction();
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Worse
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.True(realExecutor.WasCalled);
+        Assert.Equal(1, verificationService.CallCount);
+
+        Assert.Equal(
+            VerificationStatus.Worse,
+            result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.Worse,
+            result.Attempt.State);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenVerificationIsUnknown_SetsAttemptToVerificationUnknown()
+    {
+        var action = CreateAction();
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor();
+        var verificationService = new FakeVerificationService
+        {
+            StatusToReturn = VerificationStatus.Unknown
+        };
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.True(realExecutor.WasCalled);
+        Assert.Equal(1, verificationService.CallCount);
+
+        Assert.Equal(
+            VerificationStatus.Unknown,
+            result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.VerificationUnknown,
+            result.Attempt.State);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_WhenExecutionFails_DoesNotRunVerification()
+    {
+        var action = CreateAction();
+
+        var planner = new FakePlanner(action);
+        var safetyPolicy = new FakeSafetyPolicy();
+        var dryRunExecutor = new FakeDryRunExecutor();
+        var realExecutor = new FakeRealExecutor
+        {
+            ShouldSucceed = false
+        };
+        var verificationService = new FakeVerificationService();
+
+        var orchestrator = new AutonomousOrchestrator(
+            planner,
+            safetyPolicy,
+            dryRunExecutor,
+            realExecutor,
+            verificationService);
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            CreateDiagnostic(),
+            CreateHardware());
+
+        Assert.True(realExecutor.WasCalled);
+        Assert.Equal(0, verificationService.CallCount);
+
+        Assert.NotNull(result.Execution);
+        Assert.False(result.Execution.Success);
+
+        Assert.Null(result.Verification);
+
+        Assert.NotNull(result.Attempt);
+        Assert.Equal(
+            RemediationAttemptState.ExecutionFailed,
+            result.Attempt.State);
     }
 
     private static RemediationActionDef CreateAction()
@@ -188,7 +412,8 @@ public class AutonomousOrchestratorTests
             _action = action;
         }
 
-        public RemediationPlan CreatePlan(DiagnosticOutput diagnosticOutput)
+        public RemediationPlan CreatePlan(
+            DiagnosticOutput diagnosticOutput)
         {
             return new RemediationPlan
             {
@@ -263,6 +488,8 @@ public class AutonomousOrchestratorTests
     {
         public bool WasCalled { get; private set; }
 
+        public bool ShouldSucceed { get; set; } = true;
+
         public Task<ExecutionResult> ExecuteAsync(
             RemediationActionDef action)
         {
@@ -270,9 +497,29 @@ public class AutonomousOrchestratorTests
 
             return Task.FromResult(new ExecutionResult
             {
-                Success = true,
-                Summary = "REAL EXECUTION: test executor"
+                Success = ShouldSucceed,
+                Summary = ShouldSucceed
+                    ? "REAL EXECUTION: test executor"
+                    : "REAL EXECUTION: simulated failure"
             });
+        }
+    }
+
+    private sealed class FakeVerificationService : IVerificationService
+    {
+        public int CallCount { get; private set; }
+
+        public VerificationStatus StatusToReturn { get; set; }
+            = VerificationStatus.Resolved;
+
+        public Task<VerificationStatus> VerifyAsync(
+            RemediationActionDef action,
+            ExecutionResult executionResult,
+            HardwareProfileDto currentSystemState)
+        {
+            CallCount++;
+
+            return Task.FromResult(StatusToReturn);
         }
     }
 }
