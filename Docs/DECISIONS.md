@@ -604,3 +604,22 @@ The repository should distinguish between:
 - current implementation
 - target architecture
 - formally approved academic scope
+
+---
+
+## DECISION-015: Remediation Pivot Engine for Failed Actions
+
+- **Date:** August 2026
+- **Status:** Implemented
+
+### Context
+
+During autonomous remediation, the system executes a planned action and verifies the outcome. If an action fails or rolls back, the system previously lacked a mechanism to attempt alternative solutions.
+
+### Decision
+
+A Pivot Engine (`IPivotEngine`) has been introduced to the `AutonomousOrchestrator` execution loop. When an action fails or is rolled back, the Pivot Engine removes the failed action from the `RemediationPlan`, updates the `StrategyReasoning` to reflect the pivot, and the orchestrator loop attempts the next available action.
+
+### Consequences
+
+The orchestrator now evaluates a `List<RemediationAttempt>` rather than a single attempt per cycle, tracking the history of all actions tried in a single plan until either resolution is achieved or all safe actions are exhausted.

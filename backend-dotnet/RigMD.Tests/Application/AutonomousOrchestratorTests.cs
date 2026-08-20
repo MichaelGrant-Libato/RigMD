@@ -27,7 +27,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunDryRunCycleAsync(
             CreateDiagnostic(),
@@ -42,10 +43,11 @@ public class AutonomousOrchestratorTests
         Assert.True(result.Execution.Success);
         Assert.Contains("DRY RUN", result.Execution.Summary);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Completed,
-            result.Attempt.State);
+            attempt.State);
 
         Assert.Null(result.Verification);
     }
@@ -73,7 +75,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -94,10 +97,11 @@ public class AutonomousOrchestratorTests
             VerificationStatus.Resolved,
             result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Resolved,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -118,7 +122,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunDryRunCycleAsync(
             CreateDiagnostic(),
@@ -133,10 +138,11 @@ public class AutonomousOrchestratorTests
         Assert.False(result.Safety.IsApproved);
         Assert.Null(result.Execution);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.SafetyRejected,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -157,7 +163,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -178,10 +185,11 @@ public class AutonomousOrchestratorTests
 
         Assert.Null(result.Execution);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.AwaitingConsent,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -207,7 +215,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -229,10 +238,11 @@ public class AutonomousOrchestratorTests
             VerificationStatus.Resolved,
             result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Resolved,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -261,7 +271,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -275,10 +286,11 @@ public class AutonomousOrchestratorTests
             VerificationStatus.Unresolved,
             result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Unresolved,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -307,7 +319,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -321,10 +334,11 @@ public class AutonomousOrchestratorTests
             VerificationStatus.Worse,
             result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Worse,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -353,7 +367,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -369,10 +384,11 @@ public class AutonomousOrchestratorTests
             VerificationStatus.Unknown,
             result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.VerificationUnknown,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -402,7 +418,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -417,10 +434,11 @@ public class AutonomousOrchestratorTests
 
         Assert.Null(result.Verification);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.ExecutionFailed,
-            result.Attempt.State);
+            attempt.State);
     }
 
     [Fact]
@@ -450,7 +468,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -459,16 +478,17 @@ public class AutonomousOrchestratorTests
         Assert.Equal(1, verificationService.CallCount);
         Assert.Equal(0, rollbackManager.CallCount);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
         Assert.Equal(
             RemediationAttemptState.Unresolved,
-            result.Attempt.State);
+            attempt.State);
 
-        Assert.Null(result.Attempt.RollbackResult);
+        Assert.Null(attempt.RollbackResult);
 
         Assert.Contains(
             "irreversible",
-            result.Attempt.Notes);
+            attempt.Notes);
     }
 
     [Fact]
@@ -499,7 +519,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -508,14 +529,15 @@ public class AutonomousOrchestratorTests
         Assert.Equal(1, verificationService.CallCount);
         Assert.Equal(1, rollbackManager.CallCount);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
 
         Assert.Equal(
             RemediationAttemptState.RolledBack,
-            result.Attempt.State);
+            attempt.State);
 
-        Assert.NotNull(result.Attempt.RollbackResult);
-        Assert.True(result.Attempt.RollbackResult.Success);
+        Assert.NotNull(attempt.RollbackResult);
+        Assert.True(attempt.RollbackResult.Success);
     }
 
     [Fact]
@@ -546,7 +568,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -555,18 +578,19 @@ public class AutonomousOrchestratorTests
         Assert.Equal(1, verificationService.CallCount);
         Assert.Equal(1, rollbackManager.CallCount);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
 
         Assert.Equal(
             RemediationAttemptState.RollbackFailed,
-            result.Attempt.State);
+            attempt.State);
 
-        Assert.NotNull(result.Attempt.RollbackResult);
-        Assert.False(result.Attempt.RollbackResult.Success);
+        Assert.NotNull(attempt.RollbackResult);
+        Assert.False(attempt.RollbackResult.Success);
 
         Assert.Contains(
             "Rollback failed",
-            result.Attempt.Notes);
+            attempt.Notes);
     }
 
     [Fact]
@@ -596,7 +620,8 @@ public class AutonomousOrchestratorTests
             dryRunExecutor,
             realExecutor,
             verificationService,
-            rollbackManager);
+            rollbackManager,
+            new FakePivotEngine());
 
         var result = await orchestrator.RunExecutionCycleAsync(
             CreateDiagnostic(),
@@ -605,13 +630,14 @@ public class AutonomousOrchestratorTests
         Assert.Equal(1, verificationService.CallCount);
         Assert.Equal(0, rollbackManager.CallCount);
 
-        Assert.NotNull(result.Attempt);
+        Assert.Single(result.Attempts);
+        var attempt = result.Attempts[0];
 
         Assert.Equal(
             RemediationAttemptState.VerificationUnknown,
-            result.Attempt.State);
+            attempt.State);
 
-        Assert.Null(result.Attempt.RollbackResult);
+        Assert.Null(attempt.RollbackResult);
     }
 
     private static RemediationActionDef CreateAction()
@@ -792,6 +818,19 @@ public class AutonomousOrchestratorTests
                     ? "Rollback successful."
                     : "Rollback failed."
             });
+        }
+    }
+
+    private sealed class FakePivotEngine : IPivotEngine
+    {
+        public RemediationPlan Pivot(DiagnosticOutput diagnosticOutput, RemediationPlan failedPlan, RemediationActionDef failedAction, HardwareProfileDto currentSystemState)
+        {
+            return new RemediationPlan
+            {
+                SessionId = failedPlan.SessionId,
+                PlannedActions = new List<RemediationActionDef>(),
+                StrategyReasoning = failedPlan.StrategyReasoning
+            };
         }
     }
 }

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using RigMD.Application.Models;
-using RigMD.Infrastructure;
+using RigMD.Application.Contracts.Persistence;
 
 namespace RigMD.Api.Controllers;
 
@@ -8,42 +7,26 @@ namespace RigMD.Api.Controllers;
 [Route("api/profiles")]
 public class ProfilesController : ControllerBase
 {
-    private readonly DatabaseSessionService
-        _databaseSessionService;
+    private readonly IDiagnosticSessionRepository _sessionRepository;
 
-    public ProfilesController(
-        DatabaseSessionService databaseSessionService)
+    public ProfilesController(IDiagnosticSessionRepository sessionRepository)
     {
-        _databaseSessionService =
-            databaseSessionService;
+        _sessionRepository = sessionRepository;
     }
 
-    [HttpPost("save")]
-    public async Task<IActionResult> SaveProfile(
-        [FromBody] SaveProfileRequestDto request)
+    [HttpGet]
+    public async Task<IActionResult> GetProfiles()
     {
         try
         {
-            var profile =
-                await _databaseSessionService
-                    .SaveProfileAsync(request);
-
-            return Ok(profile);
+            var profiles = await _sessionRepository.GetProfilesAsync();
+            return Ok(profiles);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"Failed to save profile: {ex}"
-            );
-
-            return StatusCode(
-                StatusCodes.Status500InternalServerError,
-                new
-                {
-                    detail =
-                        "Failed to save hardware profile."
-                }
-            );
+            Console.Error.WriteLine($"Failed to load profiles: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { detail = "Failed to load hardware profiles." });
         }
     }
 }

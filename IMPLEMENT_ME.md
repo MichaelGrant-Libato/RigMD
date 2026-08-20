@@ -429,7 +429,7 @@ This is useful as an initial heuristic, but stronger before/after evidence shoul
 
 ---
 
-## Phase 12 — Verification, Rollback, and Pivot 🔲 PENDING
+## Phase 12 — Verification, Rollback, and Pivot ✅ COMPLETE
 
 **Purpose:**  
 Complete the closed-loop engine. After executing an action, the system must objectively measure whether the problem was resolved. If not, it must undo the action (if reversible) and try the next best candidate from the plan.
@@ -443,10 +443,10 @@ Wire `IVerificationService`, `IRollbackManager`, and `IPivotEngine` into the `Au
 - Updated `AutonomousOrchestrator.cs` to run the full loop
 
 **Acceptance Criteria:**
-- [ ] If verification fails, rollback is attempted
-- [ ] After rollback, PivotEngine selects the next action from the plan
-- [ ] If all actions are exhausted, the system escalates (returns "Requires Human Intervention")
-- [ ] All loop states (attempt, verify, rollback, pivot) are recorded to `RemediationRun` and `ActionAttempt` entities
+- [x] If verification fails, rollback is attempted
+- [x] After rollback, PivotEngine selects the next action from the plan
+- [x] If all actions are exhausted, the system escalates (returns "Requires Human Intervention")
+- [x] All loop states (attempt, verify, rollback, pivot) are recorded to `RemediationRun` and `ActionAttempt` entities
 
 ---
 
@@ -585,7 +585,7 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 9 | Build the Autonomous Remediation Framework | ✅ Complete |
 | 10 | Dry-Run Autonomous Engine | ✅ Complete |
 | 11 | First Real Autonomous Remediation | ✅ Complete |
-| 12 | Verification, Rollback, and Pivot | 🔲 Pending |
+| 12 | Verification, Rollback, and Pivot | ✅ Complete |
 | 13 | History, Audit, & Recurring Patterns | 🟡 Partially Complete |
 | 14 | AI Explanation Integration | 🔲 Pending |
 | 15 | Optional Cloud Sync | 🔲 Pending |
@@ -599,8 +599,8 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 As of the latest autonomy safety validation:
 
 dotnet test
-Total: 8
-Passed: 8
+Total: 24
+Passed: 24
 Failed: 0
 Skipped: 0
 

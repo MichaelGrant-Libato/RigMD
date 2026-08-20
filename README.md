@@ -84,31 +84,26 @@ The frontend no longer depends on the Python backend at port 8000.
 | Backend API | C# / ASP.NET Core |
 | Domain Logic | C# |
 | Hardware Detection | WMI / System.Management |
-| Current Database | Supabase PostgreSQL |
-| Database Client | Npgsql |
+| Current Database | SQLite (Local Source of Truth) |
+| Database Client | Entity Framework Core (EF Core 10) |
 | AI Explanation | Gemini integration |
 | Testing | xUnit |
-| Target Local Persistence | SQLite + Entity Framework Core |
+| Target Local Persistence | ✅ Implemented |
 | Target Desktop Packaging | WPF + WebView2 |
 | Target Cloud Strategy | Optional Supabase synchronization |
 
 ### Important Persistence Note
 
-The current C# backend still connects directly to the existing Supabase PostgreSQL database.
+The C# backend has successfully migrated to using local **SQLite via Entity Framework Core** as the primary offline-first source of truth.
 
-This is intentional during migration so that:
+The database is automatically created in the local AppData directory:
+`%LOCALAPPDATA%/RigMD/rigmd.db`
 
-- existing profile and diagnostic history remains available
-- Python and C# behavior can be compared
-- frontend migration can be validated independently
-- database redesign does not interfere with runtime migration
+The previous direct Supabase integration (`DatabaseSessionService`) has been completely removed in favor of the Repository pattern.
 
-The long-term architecture remains:
-
+The long-term cloud architecture includes:
 - SQLite = local source of truth
-- Supabase = optional asynchronous cloud synchronization
-
-Direct Supabase persistence is therefore a migration-compatibility architecture, not the final offline-first design.
+- Supabase = optional asynchronous cloud synchronization (future)
 
 ---
 
@@ -714,7 +709,7 @@ Relevant files include:
 - ⏳ formalize verification
 - ⏳ add rollback
 - ⏳ add pivot logic
-- ⏳ implement SQLite local persistence
+- ✅ implement SQLite local persistence
 - ⏳ implement optional Supabase synchronization
 - ⏳ desktop packaging
 - ⏳ final thesis/SRS/SDD alignment
