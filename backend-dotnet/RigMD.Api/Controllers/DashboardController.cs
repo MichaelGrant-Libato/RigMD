@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using RigMD.Infrastructure;
+using RigMD.Application.Contracts.Persistence;
 
 namespace RigMD.Api.Controllers;
 
@@ -7,12 +7,11 @@ namespace RigMD.Api.Controllers;
 [Route("api/dashboard")]
 public class DashboardController : ControllerBase
 {
-    private readonly DatabaseSessionService _databaseSessionService;
+    private readonly IDiagnosticSessionRepository _sessionRepository;
 
-    public DashboardController(
-        DatabaseSessionService databaseSessionService)
+    public DashboardController(IDiagnosticSessionRepository sessionRepository)
     {
-        _databaseSessionService = databaseSessionService;
+        _sessionRepository = sessionRepository;
     }
 
     [HttpGet("summary")]
@@ -20,24 +19,14 @@ public class DashboardController : ControllerBase
     {
         try
         {
-            var dashboard =
-                await _databaseSessionService.GetDashboardSummaryAsync();
-
+            var dashboard = await _sessionRepository.GetDashboardSummaryAsync();
             return Ok(dashboard);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"Failed to load dashboard summary: {ex}"
-            );
-
-            return StatusCode(
-                StatusCodes.Status500InternalServerError,
-                new
-                {
-                    error = "Dashboard data could not be loaded."
-                }
-            );
+            Console.Error.WriteLine($"Failed to load dashboard summary: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { error = "Dashboard data could not be loaded." });
         }
     }
 }
