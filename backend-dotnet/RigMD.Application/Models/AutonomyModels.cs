@@ -65,7 +65,9 @@ public class OrchestrationResult
 
     public VerificationStatus? Verification { get; set; }
 
-    public RemediationAttempt? Attempt { get; set; }
+    public List<RemediationAttempt> Attempts { get; set; } = new();
+
+    public bool Escalated { get; set; }
 
     public string Trace { get; set; } = string.Empty;
 }

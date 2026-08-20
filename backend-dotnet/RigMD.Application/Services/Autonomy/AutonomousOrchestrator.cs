@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,6 +17,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
     private readonly IRemediationExecutor _realExecutor;
     private readonly IVerificationService _verificationService;
     private readonly IRollbackManager _rollbackManager;
+    private readonly IPivotEngine _pivotEngine;
 
     public AutonomousOrchestrator(
         IRemediationPlanner planner,
@@ -23,7 +25,8 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         IDryRunRemediationExecutor dryRunExecutor,
         IRemediationExecutor realExecutor,
         IVerificationService verificationService,
-        IRollbackManager rollbackManager)
+        IRollbackManager rollbackManager,
+        IPivotEngine pivotEngine)
     {
         _planner = planner;
         _safetyPolicy = safetyPolicy;
@@ -31,6 +34,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         _realExecutor = realExecutor;
         _verificationService = verificationService;
         _rollbackManager = rollbackManager;
+        _pivotEngine = pivotEngine;
     }
 
     public Task<OrchestrationResult> RunDryRunCycleAsync(
@@ -68,250 +72,189 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         var trace = new StringBuilder();
         var mode = isDryRun ? "Dry Run" : "Real Execution";
 
-        trace.AppendLine(
-            $"[ORCHESTRATOR] Starting {mode} for Diagnosis: {diagnostic.DiagnosedCategory}");
-
+        trace.AppendLine($"[ORCHESTRATOR] Starting {mode} for Diagnosis: {diagnostic.DiagnosedCategory}");
         trace.AppendLine("[PLANNER] Formulating plan...");
 
         var plan = _planner.CreatePlan(diagnostic);
 
-        trace.AppendLine(
-            $"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
+        trace.AppendLine($"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
+        trace.AppendLine($"[PLANNER] Reasoning: {plan.StrategyReasoning}");
 
-        trace.AppendLine(
-            $"[PLANNER] Reasoning: {plan.StrategyReasoning}");
+        var attempts = new List<RemediationAttempt>();
+        var result = new OrchestrationResult
+        {
+            Plan = plan,
+            Attempts = attempts,
+            Trace = ""
+        };
 
         if (plan.PlannedActions.Count == 0)
         {
-            trace.AppendLine(
-                "[ORCHESTRATOR] Cycle stopped. No actions to execute.");
-
-            return new OrchestrationResult
-            {
-                Plan = plan,
-                Trace = trace.ToString()
-            };
+            trace.AppendLine("[ORCHESTRATOR] Cycle stopped. No actions to execute.");
+            result.Trace = trace.ToString();
+            return result;
         }
 
-        var actionToExecute = plan.PlannedActions.First();
-
-        var attempt = new RemediationAttempt
+        while (plan.PlannedActions.Count > 0)
         {
-            Action = actionToExecute,
-            State = RemediationAttemptState.Planned,
-            Notes = "Action selected by remediation planner."
-        };
+            var actionToExecute = plan.PlannedActions.First();
 
-        trace.AppendLine("[SAFETY] Evaluating plan...");
-
-        var safety = _safetyPolicy.Evaluate(plan, hardware);
-
-        if (safety.RequiresUserConfirmation && !userConsentProvided)
-        {
-            safety.IsApproved = false;
-            safety.RejectionReason =
-                "This action requires explicit user consent.";
-
-            attempt.State = RemediationAttemptState.AwaitingConsent;
-            attempt.Notes = safety.RejectionReason;
-
-            trace.AppendLine(
-                "[SAFETY] Execution paused. Explicit user consent is required.");
-
-            return new OrchestrationResult
+            var attempt = new RemediationAttempt
             {
-                Plan = plan,
-                Safety = safety,
-                Attempt = attempt,
-                Trace = trace.ToString()
+                Action = actionToExecute,
+                State = RemediationAttemptState.Planned,
+                Notes = "Action selected by remediation planner."
             };
-        }
+            attempts.Add(attempt);
 
-        if (!safety.IsApproved)
-        {
-            attempt.State = RemediationAttemptState.SafetyRejected;
-            attempt.Notes = safety.RejectionReason;
+            trace.AppendLine($"\n[SAFETY] Evaluating plan for action {actionToExecute.Name}...");
 
-            trace.AppendLine(
-                $"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
+            var safety = _safetyPolicy.Evaluate(plan, hardware);
+            result.Safety = safety;
 
-            return new OrchestrationResult
+            if (safety.RequiresUserConfirmation && !userConsentProvided)
             {
-                Plan = plan,
-                Safety = safety,
-                Attempt = attempt,
-                Trace = trace.ToString()
-            };
-        }
+                safety.IsApproved = false;
+                safety.RejectionReason = "This action requires explicit user consent.";
 
-        trace.AppendLine("[SAFETY] Plan APPROVED.");
+                attempt.State = RemediationAttemptState.AwaitingConsent;
+                attempt.Notes = safety.RejectionReason;
 
-        attempt.State = RemediationAttemptState.Executing;
-
-        trace.AppendLine(
-            $"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
-
-        var executionResult = await executeAction(actionToExecute);
-
-        attempt.Execution = executionResult;
-
-        trace.AppendLine(
-            $"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
-
-        trace.AppendLine(
-            $"[EXECUTOR] Output: {executionResult.Summary}");
-
-        if (!executionResult.Success)
-        {
-            attempt.State = RemediationAttemptState.ExecutionFailed;
-            attempt.Notes = executionResult.Summary;
-
-            trace.AppendLine(
-                "[ORCHESTRATOR] Execution failed. Verification skipped.");
-
-            return new OrchestrationResult
-            {
-                Plan = plan,
-                Safety = safety,
-                Execution = executionResult,
-                Attempt = attempt,
-                Trace = trace.ToString()
-            };
-        }
-
-        // Dry-run simulates execution only.
-        // It must never verify real Windows state.
-        if (isDryRun)
-        {
-            attempt.State = RemediationAttemptState.Completed;
-            attempt.Notes =
-                "Dry-run simulation completed successfully. No real system changes were made.";
-
-            trace.AppendLine(
-                "[ORCHESTRATOR] Dry-run completed. Real-state verification skipped.");
-
-            return new OrchestrationResult
-            {
-                Plan = plan,
-                Safety = safety,
-                Execution = executionResult,
-                Attempt = attempt,
-                Trace = trace.ToString()
-            };
-        }
-
-        attempt.State = RemediationAttemptState.VerificationPending;
-
-        trace.AppendLine(
-            "[VERIFICATION] Verifying remediation outcome...");
-
-        var verificationStatus =
-            await _verificationService.VerifyAsync(
-                actionToExecute,
-                executionResult,
-                hardware);
-
-        attempt.Verification = verificationStatus;
-
-        trace.AppendLine(
-            $"[VERIFICATION] Result: {verificationStatus}");
-
-        switch (verificationStatus)
-        {
-            case VerificationStatus.Resolved:
-                attempt.State = RemediationAttemptState.Resolved;
-                attempt.Notes =
-                    "Verification confirmed that the remediation resolved the targeted condition.";
+                trace.AppendLine("[SAFETY] Execution paused. Explicit user consent is required.");
                 break;
-
-            case VerificationStatus.Unresolved:
-                attempt.State = RemediationAttemptState.Unresolved;
-                attempt.Notes =
-                    "Execution succeeded, but verification did not confirm resolution.";
-                break;
-
-            case VerificationStatus.Worse:
-                attempt.State = RemediationAttemptState.Worse;
-                attempt.Notes =
-                    "Verification indicates that the targeted condition became worse.";
-                break;
-
-            case VerificationStatus.Unknown:
-            default:
-                attempt.State = RemediationAttemptState.VerificationUnknown;
-                attempt.Notes =
-                    "The remediation executed successfully, but the result could not be verified.";
-                break;
-        }
-
-        var shouldAttemptRollback =
-            verificationStatus == VerificationStatus.Unresolved ||
-            verificationStatus == VerificationStatus.Worse;
-
-        if (shouldAttemptRollback)
-        {
-            if (!actionToExecute.IsReversible)
-            {
-                trace.AppendLine(
-                    "[ROLLBACK] Action is irreversible. Rollback skipped.");
-
-                attempt.Notes +=
-                    " Rollback was not attempted because the action is irreversible.";
             }
-            else if (!_rollbackManager.CanRollback(actionToExecute))
-            {
-                trace.AppendLine(
-                    "[ROLLBACK] No verified rollback handler is available.");
 
-                attempt.Notes +=
-                    " Rollback was not attempted because no verified rollback handler is available.";
+            if (!safety.IsApproved)
+            {
+                attempt.State = RemediationAttemptState.SafetyRejected;
+                attempt.Notes = safety.RejectionReason;
+
+                trace.AppendLine($"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
+                break;
             }
-            else
+
+            trace.AppendLine("[SAFETY] Plan APPROVED.");
+
+            attempt.State = RemediationAttemptState.Executing;
+            trace.AppendLine($"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
+
+            var executionResult = await executeAction(actionToExecute);
+            attempt.Execution = executionResult;
+            result.Execution = executionResult;
+
+            trace.AppendLine($"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
+            trace.AppendLine($"[EXECUTOR] Output: {executionResult.Summary}");
+
+            if (!executionResult.Success)
             {
-                attempt.State = RemediationAttemptState.RollbackPending;
+                attempt.State = RemediationAttemptState.ExecutionFailed;
+                attempt.Notes = executionResult.Summary;
 
-                trace.AppendLine(
-                    $"[ROLLBACK] Attempting rollback for {actionToExecute.Name}...");
+                trace.AppendLine("[ORCHESTRATOR] Execution failed. Verification skipped.");
+                
+                // Pivot
+                plan = _pivotEngine.Pivot(diagnostic, plan, actionToExecute, hardware);
+                result.Plan = plan;
+                trace.AppendLine($"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
+                continue;
+            }
 
-                var rollbackResult =
-                    await _rollbackManager.RollbackAsync(
-                        actionToExecute,
-                        executionResult);
+            if (isDryRun)
+            {
+                attempt.State = RemediationAttemptState.Completed;
+                attempt.Notes = "Dry-run simulation completed successfully. No real system changes were made.";
 
-                attempt.RollbackResult = rollbackResult;
+                trace.AppendLine("[ORCHESTRATOR] Dry-run completed. Real-state verification skipped.");
+                break; // Stop after first successful dry run
+            }
 
-                if (rollbackResult.Success)
+            attempt.State = RemediationAttemptState.VerificationPending;
+            trace.AppendLine("[VERIFICATION] Verifying remediation outcome...");
+
+            var verificationStatus = await _verificationService.VerifyAsync(actionToExecute, executionResult, hardware);
+            attempt.Verification = verificationStatus;
+            result.Verification = verificationStatus;
+
+            trace.AppendLine($"[VERIFICATION] Result: {verificationStatus}");
+
+            switch (verificationStatus)
+            {
+                case VerificationStatus.Resolved:
+                    attempt.State = RemediationAttemptState.Resolved;
+                    attempt.Notes = "Verification confirmed that the remediation resolved the targeted condition.";
+                    break;
+                case VerificationStatus.Unresolved:
+                    attempt.State = RemediationAttemptState.Unresolved;
+                    attempt.Notes = "Execution succeeded, but verification did not confirm resolution.";
+                    break;
+                case VerificationStatus.Worse:
+                    attempt.State = RemediationAttemptState.Worse;
+                    attempt.Notes = "Verification indicates that the targeted condition became worse.";
+                    break;
+                case VerificationStatus.Unknown:
+                default:
+                    attempt.State = RemediationAttemptState.VerificationUnknown;
+                    attempt.Notes = "The remediation executed successfully, but the result could not be verified.";
+                    break;
+            }
+
+            if (verificationStatus == VerificationStatus.Resolved)
+            {
+                trace.AppendLine("[ORCHESTRATOR] Issue resolved. Cycle complete.");
+                break;
+            }
+
+            var shouldAttemptRollback = verificationStatus == VerificationStatus.Unresolved || verificationStatus == VerificationStatus.Worse;
+
+            if (shouldAttemptRollback)
+            {
+                if (!actionToExecute.IsReversible)
                 {
-                    attempt.State = RemediationAttemptState.RolledBack;
-                    attempt.Notes =
-                        "Verification did not confirm a safe outcome. The remediation was rolled back successfully.";
-
-                    trace.AppendLine(
-                        "[ROLLBACK] Rollback completed successfully.");
+                    trace.AppendLine("[ROLLBACK] Action is irreversible. Rollback skipped.");
+                    attempt.Notes += " Rollback was not attempted because the action is irreversible.";
+                }
+                else if (!_rollbackManager.CanRollback(actionToExecute))
+                {
+                    trace.AppendLine("[ROLLBACK] No verified rollback handler is available.");
+                    attempt.Notes += " Rollback was not attempted because no verified rollback handler is available.";
                 }
                 else
                 {
-                    attempt.State = RemediationAttemptState.RollbackFailed;
-                    attempt.Notes =
-                        $"Rollback failed: {rollbackResult.Summary}";
+                    attempt.State = RemediationAttemptState.RollbackPending;
+                    trace.AppendLine($"[ROLLBACK] Attempting rollback for {actionToExecute.Name}...");
 
-                    trace.AppendLine(
-                        $"[ROLLBACK] Rollback failed: {rollbackResult.Summary}");
+                    var rollbackResult = await _rollbackManager.RollbackAsync(actionToExecute, executionResult);
+                    attempt.RollbackResult = rollbackResult;
+
+                    if (rollbackResult.Success)
+                    {
+                        attempt.State = RemediationAttemptState.RolledBack;
+                        attempt.Notes = "Verification did not confirm a safe outcome. The remediation was rolled back successfully.";
+                        trace.AppendLine("[ROLLBACK] Rollback completed successfully.");
+                    }
+                    else
+                    {
+                        attempt.State = RemediationAttemptState.RollbackFailed;
+                        attempt.Notes = $"Rollback failed: {rollbackResult.Summary}";
+                        trace.AppendLine($"[ROLLBACK] Rollback failed: {rollbackResult.Summary}");
+                    }
                 }
             }
+            
+            // Pivot to next action
+            plan = _pivotEngine.Pivot(diagnostic, plan, actionToExecute, hardware);
+            result.Plan = plan;
+            attempt.Notes += " Pivoted to next action.";
+            trace.AppendLine($"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
         }
 
-        trace.AppendLine(
-            $"[ORCHESTRATOR] {mode} cycle complete.");
-
-        return new OrchestrationResult
+        if (plan.PlannedActions.Count == 0 && result.Verification != VerificationStatus.Resolved && !isDryRun)
         {
-            Plan = plan,
-            Safety = safety,
-            Execution = executionResult,
-            Verification = verificationStatus,
-            Attempt = attempt,
-            Trace = trace.ToString()
-        };
+            trace.AppendLine("[ORCHESTRATOR] All planned actions exhausted. Escalating for human intervention.");
+            result.Escalated = true;
+        }
+
+        result.Trace = trace.ToString();
+        return result;
     }
 }

@@ -40,6 +40,7 @@ builder.Services.AddScoped<WarningSignService>();
 // Autonomy
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationRegistry, RigMD.Application.Services.Autonomy.RemediationRegistry>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationPlanner, RigMD.Application.Services.Autonomy.RemediationPlanner>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IPivotEngine, RigMD.Application.Services.Autonomy.PivotEngine>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.ISafetyPolicy, RigMD.Application.Services.Autonomy.SafetyPolicy>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor, RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IVerificationService, RigMD.Infrastructure.Remediation.VerificationService>();
