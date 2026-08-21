@@ -302,6 +302,63 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return new { profiles };
     }
 
+    public async Task<object> SaveProfileAsync(SaveProfilePayload payload)
+    {
+        var profile = await _db.SystemProfiles.FirstOrDefaultAsync(p =>
+            p.CpuModel == payload.CpuModel &&
+            p.OsVersion == payload.OsVersion);
+
+        if (profile == null)
+        {
+            profile = new SystemProfile
+            {
+                CpuModel = payload.CpuModel,
+                RamCapacity = payload.RamCapacity,
+                StorageType = payload.StorageType,
+                StorageCapacity = payload.StorageCapacity,
+                StorageDetails = payload.StorageDetails != null 
+                    ? JsonSerializer.Serialize(payload.StorageDetails) 
+                    : null,
+                OsVersion = payload.OsVersion,
+                GpuDriver = payload.GpuDriver,
+                ChipsetDriver = payload.ChipsetDriver,
+                SystemAge = payload.SystemAge
+            };
+            _db.SystemProfiles.Add(profile);
+            await _db.SaveChangesAsync();
+        }
+        else
+        {
+            // Optionally update existing profile
+            profile.RamCapacity = payload.RamCapacity;
+            profile.StorageType = payload.StorageType;
+            profile.StorageCapacity = payload.StorageCapacity;
+            if (payload.StorageDetails != null)
+                profile.StorageDetails = JsonSerializer.Serialize(payload.StorageDetails);
+            profile.GpuDriver = payload.GpuDriver;
+            profile.ChipsetDriver = payload.ChipsetDriver;
+            profile.SystemAge = payload.SystemAge;
+            
+            await _db.SaveChangesAsync();
+        }
+
+        return new
+        {
+            id = profile.Id.ToString(),
+            cpu_model = profile.CpuModel,
+            ram_capacity = profile.RamCapacity,
+            storage_type = profile.StorageType,
+            storage_capacity = profile.StorageCapacity,
+            storage_details = string.IsNullOrWhiteSpace(profile.StorageDetails) 
+                ? null : JsonSerializer.Deserialize<object>(profile.StorageDetails),
+            os_version = profile.OsVersion,
+            gpu_driver = profile.GpuDriver,
+            chipset_driver = profile.ChipsetDriver,
+            system_age = profile.SystemAge,
+            created_at = profile.CreatedAt.ToString("o")
+        };
+    }
+
     // ---------------------------------------------------------------
     // HELPERS
     // ---------------------------------------------------------------
