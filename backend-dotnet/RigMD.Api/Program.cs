@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient();
 
 // Add CORS policy to allow the React frontend
 builder.Services.AddCors(options =>
@@ -53,7 +54,8 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IWindowsSystemP
 // ---------------------------------------------------------------
 // Application Services
 // ---------------------------------------------------------------
-builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer,              RigMD.Infrastructure.Ai.OfflineAiExplainer>();
+builder.Services.AddScoped<RigMD.Infrastructure.Ai.OfflineAiExplainer>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.GeminiAiExplainer>();
 builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService,      RigMD.Application.Services.DiagnosticEngineService>();
 builder.Services.AddScoped<ResolutionService>();
 builder.Services.AddScoped<RecurringPatternService>();
