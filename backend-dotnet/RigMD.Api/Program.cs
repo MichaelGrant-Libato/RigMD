@@ -35,6 +35,9 @@ Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 builder.Services.AddDbContext<RigMdDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
+// Client identification & isolation
+builder.Services.AddScoped<RigMD.Application.Contracts.Common.ICurrentClientProvider, RigMD.Api.Services.HttpCurrentClientProvider>();
+
 // Repository abstractions
 builder.Services.AddScoped<IDiagnosticSessionRepository, DiagnosticSessionRepository>();
 builder.Services.AddScoped<IRemediationRepository, RemediationRepository>();
@@ -74,13 +77,18 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrche
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRollbackManager,        RigMD.Infrastructure.Remediation.RollbackManager>();
 
+builder.Services.AddScoped<DatabaseSyncService>();
+
 var app = builder.Build();
 
-// Auto-create SQLite schema on startup (no manual migration step required)
+// Auto-create SQLite schema and synchronize with Supabase PostgreSQL on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<RigMdDbContext>();
     db.Database.EnsureCreated();
+
+    var syncService = scope.ServiceProvider.GetRequiredService<DatabaseSyncService>();
+    await syncService.SyncFromPostgresAsync();
 }
 
 // Configure the HTTP request pipeline.

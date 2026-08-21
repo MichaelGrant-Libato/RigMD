@@ -2,6 +2,7 @@ namespace RigMD.Domain.Entities;
 
 public class SystemProfile : BaseEntity
 {
+    public string ClientId { get; set; } = string.Empty;
     public string CpuModel { get; set; } = string.Empty;
     public string RamCapacity { get; set; } = string.Empty;
     public string StorageType { get; set; } = string.Empty;

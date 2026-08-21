@@ -100,8 +100,30 @@ public class DiagnosticController : ControllerBase
     {
         try
         {
-            var sessions = await _sessionRepository.GetSessionsAsync();
-            return Ok(sessions);
+            var sessions = (await _sessionRepository.GetSessionsAsync()).ToList();
+            var count = sessions.Count;
+            for (var i = 0; i < count; i++)
+            {
+                sessions[i].SessionCode = $"S-{count - i:D3}";
+            }
+
+            var recurringCount = sessions.Count(s => s.IsRecurring);
+            var escalatedCount = sessions.Count(s => s.ActionCategory.Contains("escalate", StringComparison.OrdinalIgnoreCase));
+            var now = DateTime.UtcNow;
+            var thisMonthCount = sessions.Count(s => 
+                DateTime.TryParse(s.CreatedAt, out var dt) && dt.Month == now.Month && dt.Year == now.Year);
+
+            return Ok(new
+            {
+                metrics = new
+                {
+                    total_sessions = sessions.Count,
+                    recurring_issues = recurringCount,
+                    escalated = escalatedCount,
+                    this_month = thisMonthCount
+                },
+                sessions
+            });
         }
         catch (Exception ex)
         {
