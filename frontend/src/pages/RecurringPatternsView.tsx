@@ -289,7 +289,7 @@ function MetricCard({
   return (
     <motion.section variants={cardFadeUp} transition={cardTransition} className={`flex h-full min-h-[104px] items-center rounded-2xl border bg-[var(--rigmd-card)] p-5 ${borderColor}`}>
       <div className="flex items-center gap-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--rigmd-bg)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card-soft)]">
           {icon}
         </div>
 
@@ -385,7 +385,7 @@ function PatternCard({
       transition={{ duration: 0.18 }}
       className={`overflow-hidden rounded-2xl border border-l-2 transition-colors ${
         expanded
-          ? 'border-cyan-400/35 border-l-cyan-400 bg-[var(--rigmd-card-hover)]'
+          ? 'border-cyan-300/55 border-l-cyan-300 bg-[#12343a]'
           : `border-[var(--rigmd-border)] bg-[var(--rigmd-card)] ${getPatternBorder(pattern.status)}`
       }`}
     >
@@ -426,7 +426,7 @@ function PatternCard({
           </div>
 
           <div className="flex justify-end">
-            <span className="inline-flex min-w-[144px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-2 text-xs font-semibold text-slate-400">
+            <span className="inline-flex min-w-[144px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2 text-xs font-semibold text-slate-400">
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               {expanded ? 'Collapse Details' : 'View Details'}
             </span>
@@ -442,19 +442,19 @@ function PatternCard({
           animate="visible"
           exit="exit"
           transition={{ duration: 0.25 }}
-          className="overflow-hidden border-t border-[var(--rigmd-border)] bg-[var(--rigmd-sidebar)]"
+          className="overflow-hidden border-t border-[var(--rigmd-border)] bg-[#0f1824]"
         >
         <div className="px-5 py-5">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4">
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Recommended Next Step
                 </p>
                 <p className="text-sm leading-relaxed text-white">{getRecommendedNextStep(pattern)}</p>
               </section>
 
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Occurrences</p>
                   <span className="text-xs font-semibold text-cyan-400">{pattern.occurrences.length} related sessions</span>
@@ -513,7 +513,7 @@ function PatternCard({
             </div>
 
             <aside className="space-y-4">
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
                 <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Pattern Summary
                 </p>
@@ -588,7 +588,7 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-[150px_minmax(170px,1fr)_minmax(220px,1fr)_180px_190px_150px] border-b border-[var(--rigmd-border)] bg-[var(--rigmd-sidebar)] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+      <div className="grid grid-cols-[150px_minmax(170px,1fr)_minmax(220px,1fr)_180px_190px_150px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
         <div>Date</div>
         <div>Symptom</div>
         <div className="text-center">Probable Cause</div>
@@ -744,7 +744,7 @@ export default function RecurringPatternsView({
             />
           </motion.div>
 
-          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-5">
+          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-5">
             <div className="flex gap-3">
               <Info size={18} className="mt-0.5 shrink-0 text-cyan-400" />
 
@@ -776,7 +776,7 @@ export default function RecurringPatternsView({
               </div>
 
               {data.patterns.length > 0 && (
-                <div className="flex flex-col gap-3 rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-col gap-3 rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4 xl:flex-row xl:items-center xl:justify-between">
                   <div className="flex flex-wrap gap-2">
                     {patternFilters.map((item) => (
                       <motion.button
@@ -786,8 +786,8 @@ export default function RecurringPatternsView({
                         whileTap={buttonTap}
                         className={`rounded-full border px-3.5 py-2 text-xs font-bold uppercase transition ${
                           filter === item
-                            ? 'border-cyan-500/80 bg-cyan-500/10 text-cyan-300'
-                            : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-500 hover:border-cyan-500/40 hover:text-cyan-400'
+                            ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
+                            : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
                         }`}
                       >
                         {item}

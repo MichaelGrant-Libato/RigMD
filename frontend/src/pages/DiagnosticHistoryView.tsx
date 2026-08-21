@@ -178,7 +178,7 @@ function MetricCard({
       className={`flex h-full min-h-[104px] items-center rounded-2xl border bg-[var(--rigmd-card)] px-5 py-6 ${borderColor}`}
     >
       <div className="flex items-center gap-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--rigmd-bg)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card-soft)]">
           {icon}
         </div>
 
@@ -212,8 +212,8 @@ function FilterButton({
       whileTap={buttonTap}
       className={`rounded-full border px-4 py-2 text-xs font-bold uppercase transition ${
         active
-          ? 'border-cyan-500/80 bg-cyan-500/10 text-cyan-400'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-500 hover:border-cyan-500/40 hover:text-cyan-400'
+          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
+          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
       }`}
     >
       {label}
@@ -261,7 +261,7 @@ function SessionRow({
         canOpen ? 'cursor-pointer' : ''
       } ${
         selected
-          ? 'border-l-cyan-400 bg-cyan-400/[0.06]'
+          ? 'border-l-cyan-300 bg-[#12343a]'
           : 'border-l-transparent hover:border-l-cyan-400/50 hover:bg-[var(--rigmd-card-hover)]'
       }`}
     >
@@ -614,7 +614,7 @@ export default function DiagnosticHistoryView({
             />
           </motion.div>
 
-          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
+          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap gap-2">
                 {filters.map(
@@ -674,7 +674,7 @@ export default function DiagnosticHistoryView({
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]">
+          <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[#101821]">
             <div className="flex items-center justify-between border-b border-[var(--rigmd-border)] px-5 py-4">
               <div className="flex items-center gap-3">
                 <RefreshCw
@@ -703,7 +703,7 @@ export default function DiagnosticHistoryView({
 
             <div className="overflow-x-auto">
               <div className="min-w-[1380px]">
-                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] border-b border-[var(--rigmd-border)] bg-[var(--rigmd-sidebar)] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
                   <div>
                     Date
                   </div>
