@@ -16,11 +16,57 @@ interface RemediationAction {
   risk: string;
 }
  
+interface ExecutionProof {
+  label: string;
+  status: string;
+  meaning: string;
+  before?: string;
+  after?: string;
+}
+
+interface ExecutionResult {
+  success: boolean;
+  summary: string;
+  outputLog?: string;
+  proof?: ExecutionProof[];
+}
+
+interface SafetyEvaluation {
+  isApproved: boolean;
+  requiresUserConfirmation: boolean;
+  rejectionReason?: string;
+  warnings?: string[];
+}
+
+interface RemediationActionDef {
+  id: string;
+  name: string;
+  description: string;
+  riskLevel: string;
+}
+
+interface RemediationPlan {
+  plannedActions: RemediationActionDef[];
+  strategyReasoning: string;
+}
+
+// Represents the OrchestrationResult from the backend AutonomyController
+interface AutonomyResult {
+  plan?: RemediationPlan;
+  safety?: SafetyEvaluation;
+  execution?: ExecutionResult;
+  verification?: string | null;
+  escalated?: boolean;
+  trace?: string;
+}
+
+// Flat ActionResult used for legacy display compatibility
 interface ActionResult {
   success: boolean;
   summary: string;
-  cleared?: string;        // only on clear_temp_files
-  output?: string;         // only on chkdsk / sfc
+  cleared?: string;
+  output?: string;
+  autonomy?: AutonomyResult; // populated when the orchestrator ran
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -110,36 +156,66 @@ export default function DiagnosticResultView({ result, onRunAnother }: Props) {
   const nextSteps        = getNextSteps(result.action_category, result.diagnosed_category);
 
   const [remediationActions, setRemediationActions] = useState<RemediationAction[]>([]);
-const [runningAction, setRunningAction]           = useState<string | null>(null);
-const [actionResults, setActionResults]           = useState<Record<string, ActionResult>>({});
- 
-useEffect(() => {
-  if (!result.diagnosed_category) return;
-  apiFetch(`/api/remediation/actions?category=${encodeURIComponent(
-  result.diagnosed_category)}`)
-    .then(r => r.json())
-    .then(data => setRemediationActions(data.actions ?? []))
-    .catch(() => setRemediationActions([]));
-}, [result.diagnosed_category]);
- 
-async function handleFixNow(actionId: string) {
-  setRunningAction(actionId);
-  try {
-    const res = await apiFetch(`/api/remediation/execute`, {
-      method:  "POST",
-      body:    JSON.stringify({ action_id: actionId }),
-    });
-    const data = await res.json();
-    setActionResults(prev => ({ ...prev, [actionId]: data }));
-  } catch {
-    setActionResults(prev => ({
-      ...prev,
-      [actionId]: { success: false, summary: "Could not connect to the backend." },
-    }));
-  } finally {
-    setRunningAction(null);
+  const [runningAction, setRunningAction]           = useState<string | null>(null);
+  const [actionResults, setActionResults]           = useState<Record<string, ActionResult>>({});
+  const [dryRunResult, setDryRunResult]             = useState<AutonomyResult | null>(null);
+  const [dryRunLoading, setDryRunLoading]           = useState(false);
+
+  useEffect(() => {
+    if (!result.diagnosed_category) return;
+    apiFetch(`/api/remediation/actions?category=${encodeURIComponent(result.diagnosed_category)}`)
+      .then(r => r.json())
+      .then(data => setRemediationActions(data.actions ?? []))
+      .catch(() => setRemediationActions([]));
+  }, [result.diagnosed_category]);
+
+  async function handleFixNow(actionId: string) {
+    setRunningAction(actionId);
+    try {
+      const res = await apiFetch(`/api/autonomy/execute`, {
+        method: "POST",
+        body: JSON.stringify({
+          diagnosedCategory: result.diagnosed_category,
+          userConsentProvided: true,
+        }),
+      });
+      const data: AutonomyResult = await res.json();
+      setActionResults(prev => ({
+        ...prev,
+        [actionId]: {
+          success: data.execution?.success ?? false,
+          summary: data.execution?.summary ?? (data.safety?.isApproved === false
+            ? `Safety check blocked: ${data.safety.rejectionReason || "Action not approved."}`
+            : "Execution completed."),
+          autonomy: data,
+        },
+      }));
+    } catch {
+      setActionResults(prev => ({
+        ...prev,
+        [actionId]: { success: false, summary: "Could not connect to the backend." },
+      }));
+    } finally {
+      setRunningAction(null);
+    }
   }
-}
+
+  async function handleDryRun() {
+    setDryRunLoading(true);
+    setDryRunResult(null);
+    try {
+      const res = await apiFetch(`/api/autonomy/dry-run`, {
+        method: "POST",
+        body: JSON.stringify({ diagnosedCategory: result.diagnosed_category }),
+      });
+      const data: AutonomyResult = await res.json();
+      setDryRunResult(data);
+    } catch {
+      setDryRunResult({ trace: "Could not connect to the backend for simulation." });
+    } finally {
+      setDryRunLoading(false);
+    }
+  }
 
   const actionStyle: Record<string, React.CSSProperties> = {
     Monitor:     { borderColor: "#3b82f6", color: "#3b82f6" },
@@ -310,23 +386,88 @@ async function handleFixNow(actionId: string) {
           {remediationActions.length > 0 && (
   <div style={styles.card}>
     <div style={styles.sectionTitle}>
-      ⚡ Automated Safe Fixes&nbsp;
+      ⚡ Autonomous Safe Actions&nbsp;
       <span style={{ color: "#475569", fontSize: 11 }}>
         {remediationActions.length} action{remediationActions.length !== 1 ? "s" : ""} available
       </span>
     </div>
- 
+
     <p style={{ fontSize: 12, color: "#475569", marginBottom: 14, marginTop: 0, lineHeight: 1.6 }}>
-      These actions are safe, non-destructive, and reversible. RigMD will run them
-      automatically — no manual steps required.
+      RigMD will autonomously plan and apply the safest fix for your diagnosed category.
+      Use <strong style={{ color: "#60a5fa" }}>Simulate</strong> first to preview what it will do without making any changes.
     </p>
- 
+
+    {/* Dry Run / Simulate button */}
+    <div style={{ marginBottom: 14 }}>
+      <button
+        onClick={handleDryRun}
+        disabled={dryRunLoading || runningAction !== null}
+        style={{
+          padding: "8px 18px",
+          background: "transparent",
+          color: dryRunLoading ? "#64748b" : "#60a5fa",
+          border: "1px solid #1e4976",
+          borderRadius: 6,
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: dryRunLoading || runningAction !== null ? "not-allowed" : "pointer",
+          marginRight: 8,
+        }}
+      >
+        {dryRunLoading ? "Simulating…" : "🔍 Simulate (Dry Run)"}
+      </button>
+    </div>
+
+    {/* Dry Run result panel */}
+    {dryRunResult && (
+      <div style={{
+        marginBottom: 16,
+        padding: "12px 14px",
+        borderRadius: 8,
+        background: "rgba(96,165,250,0.05)",
+        border: "1px solid rgba(96,165,250,0.2)",
+        fontSize: 12,
+        color: "#94a3b8",
+        lineHeight: 1.7,
+      }}>
+        <div style={{ fontWeight: 700, color: "#60a5fa", marginBottom: 8 }}>🔍 Simulation Result (No changes made)</div>
+        {dryRunResult.plan?.plannedActions && dryRunResult.plan.plannedActions.length > 0 && (
+          <div style={{ marginBottom: 6 }}>
+            <strong>Planned Actions: </strong>
+            {dryRunResult.plan.plannedActions.map(a => a.name).join(" → ")}
+          </div>
+        )}
+        {dryRunResult.safety && (
+          <div style={{ marginBottom: 6 }}>
+            <strong>Safety: </strong>
+            <span style={{ color: dryRunResult.safety.isApproved ? "#4ade80" : "#f87171" }}>
+              {dryRunResult.safety.isApproved ? "Approved ✓" : `Blocked — ${dryRunResult.safety.rejectionReason || "Not approved"}`}
+            </span>
+            {dryRunResult.safety.warnings && dryRunResult.safety.warnings.length > 0 && (
+              <span style={{ color: "#fcd34d", marginLeft: 8 }}>
+                ⚠ {dryRunResult.safety.warnings.join(", ")}
+              </span>
+            )}
+          </div>
+        )}
+        {dryRunResult.plan?.strategyReasoning && (
+          <div style={{ color: "#64748b" }}>
+            <strong>Reasoning: </strong>{dryRunResult.plan.strategyReasoning}
+          </div>
+        )}
+        {dryRunResult.trace && !dryRunResult.plan && (
+          <div style={{ color: "#64748b" }}>{dryRunResult.trace}</div>
+        )}
+      </div>
+    )}
+
+    {/* Individual action cards with autonomous execution */}
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {remediationActions.map(action => {
         const result_  = actionResults[action.id];
         const isRunning = runningAction === action.id;
         const isDone    = !!result_;
- 
+
         return (
           <div
             key={action.id}
@@ -355,7 +496,7 @@ async function handleFixNow(actionId: string) {
                   🛡 {action.risk}
                 </div>
               </div>
- 
+
               {!isDone ? (
                 <button
                   onClick={() => handleFixNow(action.id)}
@@ -375,7 +516,7 @@ async function handleFixNow(actionId: string) {
                     minWidth: 90,
                   }}
                 >
-                  {isRunning ? "Running…" : "Fix Now"}
+                  {isRunning ? "Running…" : "Run Autonomous Fix"}
                 </button>
               ) : (
                 <div
@@ -394,8 +535,8 @@ async function handleFixNow(actionId: string) {
                 </div>
               )}
             </div>
- 
-            {/* Result feedback */}
+
+            {/* Orchestration result feedback */}
             {isDone && (
               <div
                 style={{
@@ -410,10 +551,19 @@ async function handleFixNow(actionId: string) {
                 }}
               >
                 <strong>Result: </strong>{result_.summary}
-                {result_.cleared && (
-                  <span style={{ color: "#4ade80", marginLeft: 8, fontWeight: 700 }}>
-                    ({result_.cleared} freed)
-                  </span>
+                {result_.autonomy?.execution?.proof && result_.autonomy.execution.proof.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {result_.autonomy.execution.proof.map((p, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                        {p.label}: <span style={{ color: "#94a3b8" }}>{p.status}</span>{p.after ? ` → ${p.after}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {result_.autonomy?.verification && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: "#60a5fa" }}>
+                    Verification: {result_.autonomy.verification}
+                  </div>
                 )}
               </div>
             )}

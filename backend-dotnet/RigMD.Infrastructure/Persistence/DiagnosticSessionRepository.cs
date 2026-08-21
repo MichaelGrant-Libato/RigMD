@@ -241,36 +241,60 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                 s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
         }
 
-        var total = await query.CountAsync();
-        var resolved = await query.CountAsync(s =>
-            s.Answers.Any(a => a.QuestionKey == "resolution_status" && a.AnswerValue == "resolved"));
-        var needsRecheck = await query.CountAsync(s =>
-            s.Answers.Any(a => a.QuestionKey == "resolution_status" && a.AnswerValue == "needs_recheck"));
-        var open = total - resolved - needsRecheck;
+        var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
 
-        var recentSessions = await query
-            .OrderByDescending(s => s.CreatedAt)
-            .Take(5)
-            .Select(s => new
-            {
-                session_id = s.Id.ToString(),
-                diagnosed_category = s.Output != null ? s.Output.DiagnosedCategory : string.Empty,
-                confidence_label = s.Output != null ? s.Output.ConfidenceLabel : string.Empty,
-                resolution_status = s.Answers
-                    .Where(a => a.QuestionKey == "resolution_status")
-                    .Select(a => a.AnswerValue)
-                    .FirstOrDefault() ?? "open",
-                created_at = s.CreatedAt.ToString("o")
-            })
-            .ToListAsync();
+        var total = sessions.Count;
+        var thisMonthCount = sessions.Count(s => s.CreatedAt.Year == DateTime.UtcNow.Year && s.CreatedAt.Month == DateTime.UtcNow.Month);
+        var escalatedCount = sessions.Count(s => string.Equals(s.Output?.ActionCategory, "Escalate", StringComparison.OrdinalIgnoreCase));
+
+        var lastSavedSession = sessions.FirstOrDefault();
+        var lastSavedSessionDto = lastSavedSession != null ? MapToDto(lastSavedSession) : null;
+
+        var recurringIssuesCount = sessions.Where(s => s.Output != null && !string.IsNullOrWhiteSpace(s.Output.DiagnosedCategory))
+                                           .GroupBy(s => s.Output!.DiagnosedCategory)
+                                           .Count(g => g.Count() > 1);
+
+        var warningSignsSessions = sessions.Where(s => s.Answers.Any(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue) && !a.AnswerValue.Equals("None", StringComparison.OrdinalIgnoreCase))).ToList();
+
+        var warningSignsActiveCount = warningSignsSessions.Count;
+
+        var labels = new[] { "Monitor", "Maintain", "Troubleshoot", "Escalate" };
+        var actionDistribution = labels.Select(label => new 
+        { 
+            label, 
+            count = sessions.Count(s => string.Equals(s.Output?.ActionCategory, label, StringComparison.OrdinalIgnoreCase)) 
+        }).ToList();
+
+        var sessionFrequency = sessions.GroupBy(s => s.CreatedAt.Date)
+                                       .OrderBy(g => g.Key)
+                                       .Select(g => new { date = g.Key.ToString("yyyy-MM-dd"), count = g.Count() })
+                                       .ToList();
+
+        var recentWarningSigns = warningSignsSessions.Take(5).Select(s => new {
+            id = s.Id.ToString(),
+            warning_sign = s.Answers.FirstOrDefault(a => a.QuestionKey == "warning_signs")?.AnswerValue ?? "Unknown",
+            threshold = "N/A",
+            recommended_action = s.Output?.ActionCategory ?? "Monitor",
+            created_at = s.CreatedAt.ToString("o"),
+            display_date = s.CreatedAt.ToLocalTime().ToString("MMM dd, yyyy")
+        }).ToList();
 
         return new
         {
-            total_sessions = total,
-            resolved_sessions = resolved,
-            needs_recheck_sessions = needsRecheck,
-            open_sessions = open,
-            recent_sessions = recentSessions
+            server_time = DateTime.UtcNow.ToString("o"),
+            totals = new {
+                total_sessions = total,
+                this_month_count = thisMonthCount,
+                escalated_count = escalatedCount
+            },
+            last_diagnosis = lastSavedSessionDto,
+            current_action_status = lastSavedSessionDto,
+            recurring_issues_count = recurringIssuesCount,
+            warning_signs_active_count = warningSignsActiveCount,
+            action_distribution = actionDistribution,
+            session_frequency = sessionFrequency,
+            recent_warning_signs = recentWarningSigns,
+            last_saved_session = lastSavedSessionDto
         };
     }
 
@@ -457,6 +481,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             : "No urgent intervention required. Continue monitoring system telemetry under normal use.";
 
         var localTime = s.CreatedAt.ToLocalTime();
+        var daysAgo = (int)(DateTime.UtcNow - s.CreatedAt).TotalDays;
 
         return new DiagnosticSessionDto
         {
@@ -482,6 +507,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             LastActionSummary = Answer("last_action_summary"),
             ClientId = Answer("client_id"),
             CreatedAt = s.CreatedAt.ToString("o"),
+            DaysAgo = daysAgo,
             DisplayDate = localTime.ToString("MMM dd, yyyy"),
             DisplayTime = localTime.ToString("hh:mm tt"),
             RecommendedNextStep = nextStep

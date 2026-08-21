@@ -54,6 +54,9 @@ public class DiagnosticSessionDto
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; set; }
 
+    [JsonPropertyName("days_ago")]
+    public int? DaysAgo { get; set; }
+
     [JsonPropertyName("display_date")]
     public string? DisplayDate { get; set; }
 

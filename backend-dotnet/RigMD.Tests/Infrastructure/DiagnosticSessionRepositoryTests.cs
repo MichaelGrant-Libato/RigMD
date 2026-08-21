@@ -108,9 +108,8 @@ public class DiagnosticSessionRepositoryTests
         // Assert
         var json = System.Text.Json.JsonSerializer.Serialize(summary);
         Assert.Contains("\"total_sessions\":3", json);
-        Assert.Contains("\"resolved_sessions\":1", json);
-        Assert.Contains("\"needs_recheck_sessions\":1", json);
-        Assert.Contains("\"open_sessions\":1", json);
+        Assert.Contains("\"action_distribution\"", json);
+        Assert.Contains("\"last_saved_session\"", json);
     }
 
     [Fact]

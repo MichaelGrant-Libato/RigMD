@@ -31,12 +31,50 @@ interface RemediationAction {
   risk: string;
 }
 
+interface ExecutionProof {
+  label: string;
+  status: string;
+  meaning: string;
+  after?: string;
+}
+
+interface ExecutionResult {
+  success: boolean;
+  summary: string;
+  proof?: ExecutionProof[];
+}
+
+interface SafetyEvaluation {
+  isApproved: boolean;
+  rejectionReason?: string;
+  warnings?: string[];
+}
+
+interface RemediationActionDef {
+  id: string;
+  name: string;
+}
+
+interface RemediationPlan {
+  plannedActions: RemediationActionDef[];
+  strategyReasoning: string;
+}
+
+interface AutonomyResult {
+  plan?: RemediationPlan;
+  safety?: SafetyEvaluation;
+  execution?: ExecutionResult;
+  verification?: string | null;
+  trace?: string;
+}
+
 interface ActionResult {
   success: boolean;
   summary: string;
   cleared?: string;
   deleted_items?: number;
   skipped_errors?: number;
+  autonomy?: AutonomyResult;
 }
 
 interface Props {
@@ -74,6 +112,8 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
   const [checking, setChecking] = useState(false);
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dryRunResult, setDryRunResult] = useState<AutonomyResult | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
 
   const fetchSession = useCallback(async () => {
     setLoading(true);
@@ -110,19 +150,28 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
     setError(null);
 
     try {
-      const response = await apiFetch(`/api/remediation/execute`, {
+      const response = await apiFetch(`/api/autonomy/execute`, {
         method: 'POST',
-        body: JSON.stringify({ action_id: action.id }),
+        body: JSON.stringify({
+          diagnosedCategory: session?.diagnosed_category ?? '',
+          userConsentProvided: true,
+        }),
       });
 
-      const result = await response.json();
+      const data: AutonomyResult = await response.json();
 
       setActionResults((prev) => ({
         ...prev,
-        [action.id]: result,
+        [action.id]: {
+          success: data.execution?.success ?? false,
+          summary: data.execution?.summary ?? (data.safety?.isApproved === false
+            ? `Safety check blocked: ${data.safety.rejectionReason || 'Action not approved.'}`
+            : 'Execution completed.'),
+          autonomy: data,
+        },
       }));
 
-      if (result?.success) {
+      if (data.execution?.success) {
         const statusResponse = await apiFetch(`/api/diagnosis/${sessionId}/needs-recheck`, {
           method: 'POST',
         });
@@ -148,6 +197,24 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
       }));
     } finally {
       setRunningActionId(null);
+    }
+  };
+
+  const handleDryRun = async () => {
+    if (!session?.diagnosed_category) return;
+    setDryRunLoading(true);
+    setDryRunResult(null);
+    try {
+      const response = await apiFetch(`/api/autonomy/dry-run`, {
+        method: 'POST',
+        body: JSON.stringify({ diagnosedCategory: session.diagnosed_category }),
+      });
+      const data: AutonomyResult = await response.json();
+      setDryRunResult(data);
+    } catch {
+      setDryRunResult({ trace: 'Could not connect to the backend for simulation.' });
+    } finally {
+      setDryRunLoading(false);
     }
   };
 
@@ -302,13 +369,48 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
               <motion.section variants={cardFadeUp} initial="hidden" animate="visible" transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
                 <div className="flex items-start gap-3">
                   <ShieldCheck size={20} className="mt-0.5 text-cyan-400" />
-                  <div>
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">Safe Actions Available</h3>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">Autonomous Safe Actions</h3>
                     <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                      Run one safe action, then use Check if Fixed to prove whether the issue is resolved.
+                      RigMD will plan and apply the safest fix autonomously. Use <strong className="text-cyan-400">Simulate</strong> to preview the plan without making any changes.
                     </p>
                   </div>
+                  <motion.button
+                    type="button"
+                    onClick={handleDryRun}
+                    disabled={dryRunLoading || runningActionId !== null}
+                    whileTap={buttonTap}
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-800/50 bg-transparent px-4 py-2 text-xs font-bold text-cyan-400 hover:bg-cyan-500/5 disabled:opacity-50"
+                  >
+                    {dryRunLoading ? 'Simulating...' : '🔍 Simulate'}
+                  </motion.button>
                 </div>
+
+                {dryRunResult && (
+                  <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 text-xs text-slate-300">
+                    <p className="mb-2 font-bold text-cyan-400">🔍 Simulation Result (No changes made)</p>
+                    {dryRunResult.plan?.plannedActions && dryRunResult.plan.plannedActions.length > 0 && (
+                      <p className="mb-1"><strong>Planned Actions: </strong>{dryRunResult.plan.plannedActions.map(a => a.name).join(' → ')}</p>
+                    )}
+                    {dryRunResult.safety && (
+                      <p className="mb-1">
+                        <strong>Safety: </strong>
+                        <span className={dryRunResult.safety.isApproved ? 'text-emerald-400' : 'text-red-400'}>
+                          {dryRunResult.safety.isApproved ? 'Approved ✓' : `Blocked — ${dryRunResult.safety.rejectionReason || 'Not approved'}`}
+                        </span>
+                        {dryRunResult.safety.warnings && dryRunResult.safety.warnings.length > 0 && (
+                          <span className="ml-2 text-yellow-400">⚠ {dryRunResult.safety.warnings.join(', ')}</span>
+                        )}
+                      </p>
+                    )}
+                    {dryRunResult.plan?.strategyReasoning && (
+                      <p className="text-slate-500"><strong>Reasoning: </strong>{dryRunResult.plan.strategyReasoning}</p>
+                    )}
+                    {dryRunResult.trace && !dryRunResult.plan && (
+                      <p className="text-slate-500">{dryRunResult.trace}</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-5 space-y-3">
                   {actions.length === 0 ? (
@@ -330,7 +432,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                               <p className="mt-1 text-[11px] text-slate-500">{action.risk}</p>
                             </div>
 
-                            {!result && (
+                          {!result && (
                               <motion.button
                                 type="button"
                                 onClick={() => runAction(action)}
@@ -338,7 +440,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                                 whileTap={buttonTap}
                                 className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/15 disabled:opacity-50"
                               >
-                                {running ? 'Running...' : getActionButtonLabel(action.id)}
+                                {running ? 'Running...' : 'Run Autonomous Fix'}
                               </motion.button>
                             )}
                           </div>
@@ -350,6 +452,18 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                                 : 'border-red-500/20 bg-red-500/5 text-red-300'
                             }`}>
                               <p className="font-semibold">{result.summary}</p>
+                              {result.autonomy?.execution?.proof && result.autonomy.execution.proof.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                  {result.autonomy.execution.proof.map((p, i) => (
+                                    <p key={i} className="text-slate-400">
+                                      {p.label}: <span className="text-slate-300">{p.status}</span>{p.after ? ` → ${p.after}` : ''}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              {result.autonomy?.verification && (
+                                <p className="mt-1 text-cyan-400">Verification: {result.autonomy.verification}</p>
+                              )}
                               {result.cleared && <p className="mt-1">Cleared: {result.cleared}</p>}
                             </div>
                           )}

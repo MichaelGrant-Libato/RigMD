@@ -75,6 +75,43 @@ interface ActionImpactProof {
   meaning?: string;
 }
 
+interface ExecutionProof {
+  label: string;
+  status: string;
+  meaning: string;
+  after?: string;
+}
+
+interface AutonomyExecutionResult {
+  success: boolean;
+  summary: string;
+  proof?: ExecutionProof[];
+}
+
+interface SafetyEvaluation {
+  isApproved: boolean;
+  rejectionReason?: string;
+  warnings?: string[];
+}
+
+interface RemediationActionDef {
+  id: string;
+  name: string;
+}
+
+interface RemediationPlan {
+  plannedActions: RemediationActionDef[];
+  strategyReasoning: string;
+}
+
+interface AutonomyResult {
+  plan?: RemediationPlan;
+  safety?: SafetyEvaluation;
+  execution?: AutonomyExecutionResult;
+  verification?: string | null;
+  trace?: string;
+}
+
 interface ActionResult {
   success: boolean;
   summary: string;
@@ -86,6 +123,7 @@ interface ActionResult {
   needs_admin?: boolean;
   output?: string;
   proof?: ActionImpactProof[];
+  autonomy?: AutonomyResult;
 }
 
 const CATEGORY_OPTIONS = [
@@ -535,6 +573,8 @@ export default function NewDiagnosisView() {
   const [remediationActions, setRemediationActions] = useState<RemediationAction[]>([]);
   const [selectedAction, setSelectedAction] = useState<RemediationAction | null>(null);
   const [actionResults, setActionResults] = useState<Record<string, ActionResult>>({});
+  const [dryRunResult, setDryRunResult] = useState<AutonomyResult | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
 
   const currentBranch = QUESTION_BRANCHES[formData.symptom_type] || QUESTION_BRANCHES['thermal condition'];
 
@@ -653,6 +693,7 @@ export default function NewDiagnosisView() {
     setRemediationActions([]);
     setActionResults({});
     setSelectedAction(null);
+    setDryRunResult(null);
     setStep(5);
 
     try {
@@ -745,15 +786,30 @@ export default function NewDiagnosisView() {
     setRemediating(true);
 
     try {
-      const response = await apiPost<ActionResult>(`/api/remediation/execute`, {
-        action_id: selectedAction.id,
+      const response = await apiPost<AutonomyResult>(`/api/autonomy/execute`, {
+        diagnosedCategory: report?.diagnosed_category ?? '',
+        userConsentProvided: true,
       });
+
+      const data = response.data;
+      const success = data?.execution?.success ?? false;
+      const summary = data?.execution?.summary ?? (
+        data?.safety?.isApproved === false
+          ? `Safety check blocked: ${data?.safety.rejectionReason || 'Action not approved.'}`
+          : 'Execution completed.'
+      );
 
       setActionResults((prev) => ({
         ...prev,
-        [selectedAction.id]: response.data,
+        [selectedAction.id]: {
+          success,
+          summary,
+          proof: data?.execution?.proof?.map(p => ({ label: p.label, status: p.status ?? '', meaning: p.meaning ?? '', after: p.after })),
+          autonomy: data,
+        },
       }));
-      if (response.data?.success && report?.session_id) {
+
+      if (success && report?.session_id) {
         const statusResponse = await apiPost<{
           resolution_status?: string;
           last_action_status?: string | null;
@@ -782,6 +838,22 @@ export default function NewDiagnosisView() {
     } finally {
       setRemediating(false);
       setSelectedAction(null);
+    }
+  };
+
+  const handleDryRun = async () => {
+    if (!report?.diagnosed_category) return;
+    setDryRunLoading(true);
+    setDryRunResult(null);
+    try {
+      const response = await apiPost<AutonomyResult>(`/api/autonomy/dry-run`, {
+        diagnosedCategory: report.diagnosed_category,
+      });
+      setDryRunResult(response.data);
+    } catch {
+      setDryRunResult({ trace: 'Could not connect to the backend for simulation.' });
+    } finally {
+      setDryRunLoading(false);
     }
   };
 
@@ -1294,7 +1366,44 @@ export default function NewDiagnosisView() {
 
                       {!isNoActiveIssue(report) && remediationActions.length > 0 && (
                         <div className="space-y-3">
-                          <h5 className="text-xs font-bold uppercase tracking-wider text-white">Safe Actions Available</h5>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-white">Autonomous Safe Actions</h5>
+                            <button
+                              type="button"
+                              disabled={dryRunLoading || remediating}
+                              onClick={handleDryRun}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-800/50 bg-transparent px-3 py-1.5 text-xs font-bold text-cyan-400 hover:bg-cyan-500/5 disabled:opacity-50"
+                            >
+                              {dryRunLoading ? 'Simulating...' : '🔍 Simulate (Dry Run)'}
+                            </button>
+                          </div>
+
+                          {dryRunResult && (
+                            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 text-xs text-slate-300">
+                              <p className="mb-2 font-bold text-cyan-400">🔍 Simulation Result (No changes made)</p>
+                              {dryRunResult.plan?.plannedActions && dryRunResult.plan.plannedActions.length > 0 && (
+                                <p className="mb-1"><strong>Planned Actions: </strong>{dryRunResult.plan.plannedActions.map(a => a.name).join(' → ')}</p>
+                              )}
+                              {dryRunResult.safety && (
+                                <p className="mb-1">
+                                  <strong>Safety: </strong>
+                                  <span className={dryRunResult.safety.isApproved ? 'text-emerald-400' : 'text-red-400'}>
+                                    {dryRunResult.safety.isApproved ? 'Approved ✓' : `Blocked — ${dryRunResult.safety.rejectionReason || 'Not approved'}`}
+                                  </span>
+                                  {dryRunResult.safety.warnings && dryRunResult.safety.warnings.length > 0 && (
+                                    <span className="ml-2 text-yellow-400">⚠ {dryRunResult.safety.warnings.join(', ')}</span>
+                                  )}
+                                </p>
+                              )}
+                              {dryRunResult.plan?.strategyReasoning && (
+                                <p className="text-slate-500"><strong>Reasoning: </strong>{dryRunResult.plan.strategyReasoning}</p>
+                              )}
+                              {dryRunResult.trace && !dryRunResult.plan && (
+                                <p className="text-slate-500">{dryRunResult.trace}</p>
+                              )}
+                            </div>
+                          )}
+
                           {remediationActions.map((action) => {
                             const result = actionResults[action.id];
 
@@ -1337,7 +1446,7 @@ export default function NewDiagnosisView() {
 
                                 {!result && (
                                   <button type="button" disabled={remediating} onClick={() => { setSelectedAction(action); setIsModalOpen(true); }} className="w-full shrink-0 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-5 py-2.5 text-center text-xs font-bold text-white shadow-lg transition-all hover:opacity-90 disabled:opacity-50 md:w-auto">
-                                    {remediating ? 'Running...' : getActionPreview(action, report).buttonLabel}
+                                    {remediating ? 'Running...' : 'Run Autonomous Fix'}
                                   </button>
                                 )}
                               </div>
