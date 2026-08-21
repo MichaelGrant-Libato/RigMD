@@ -103,7 +103,8 @@ public class DatabaseSyncService
                             ChipsetDriver = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
                             SystemAge = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
                             CreatedAt = reader.IsDBNull(9) ? DateTimeOffset.UtcNow : reader.GetDateTime(9),
-                            StorageDetails = reader.IsDBNull(10) ? null : reader.GetString(10)
+                            StorageDetails = reader.IsDBNull(10) ? null : reader.GetString(10),
+                            ClientId = reader.IsDBNull(11) ? string.Empty : reader.GetString(11)
                         };
                         _db.SystemProfiles.Add(profile);
                     }

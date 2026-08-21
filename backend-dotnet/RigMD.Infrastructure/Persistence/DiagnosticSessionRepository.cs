@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RigMD.Application.Contracts.Common;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Models;
 using RigMD.Domain.Entities;
@@ -9,16 +10,20 @@ namespace RigMD.Infrastructure.Persistence;
 
 /// <summary>
 /// EF Core + SQLite implementation of IDiagnosticSessionRepository.
-/// Replaces the Npgsql/Supabase DatabaseSessionService for local offline-first persistence.
+/// Scopes all queries and writes to the current client identity for strict data isolation.
 /// </summary>
 public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 {
     private readonly RigMdDbContext _db;
+    private readonly ICurrentClientProvider _clientProvider;
 
-    public DiagnosticSessionRepository(RigMdDbContext db)
+    public DiagnosticSessionRepository(RigMdDbContext db, ICurrentClientProvider clientProvider)
     {
         _db = db;
+        _clientProvider = clientProvider;
     }
+
+    private string GetCurrentClientId() => _clientProvider.GetCurrentClientId();
 
     // ---------------------------------------------------------------
     // SAVE
@@ -33,11 +38,17 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         string aiExplanation,
         string clientId = "")
     {
-        // Upsert system profile by fingerprinting cpu name + os
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            clientId = GetCurrentClientId();
+        }
+
+        // Upsert system profile by fingerprinting cpu name + os + client_id
         var cpuName = hardware.Cpu.Name;
         var osVersion = hardware.OsVersion;
 
         var profile = await _db.SystemProfiles.FirstOrDefaultAsync(p =>
+            (string.IsNullOrEmpty(clientId) || p.ClientId == clientId) &&
             p.CpuModel == cpuName &&
             p.OsVersion == osVersion);
 
@@ -46,6 +57,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             var primaryDrive = hardware.StorageDrives.FirstOrDefault();
             profile = new SystemProfile
             {
+                ClientId = clientId,
                 CpuModel = cpuName,
                 RamCapacity = $"{hardware.Ram.TotalGb:0.#} GB",
                 StorageType = hardware.PrimaryStorageType,
@@ -108,24 +120,41 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<IReadOnlyList<DiagnosticSessionDto>> GetSessionsAsync()
     {
-        var sessions = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
             .Include(s => s.Output)
             .Include(s => s.Profile)
-            .OrderByDescending(s => s.CreatedAt)
-            .ToListAsync();
+            .AsQueryable();
 
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
         return sessions.Select(MapToDto).ToList().AsReadOnly();
     }
 
     public async Task<DiagnosticSessionDto?> GetSessionAsync(Guid sessionId)
     {
-        var session = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
             .Include(s => s.Output)
             .Include(s => s.Profile)
-            .FirstOrDefaultAsync(s => s.Id == sessionId);
+            .Where(s => s.Id == sessionId);
 
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
         return session == null ? null : MapToDto(session);
     }
 
@@ -140,10 +169,20 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         string resolutionSummary,
         object[] resolutionProof)
     {
-        var session = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
-            .FirstOrDefaultAsync(s => s.Id == sessionId);
+            .Include(s => s.Profile)
+            .Where(s => s.Id == sessionId);
 
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
         if (session == null) return false;
 
         SetOrAddAnswer(session, "resolution_status", resolutionStatus);
@@ -151,21 +190,26 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         SetOrAddAnswer(session, "resolution_summary", resolutionSummary);
         SetOrAddAnswer(session, "resolution_proof", JsonSerializer.Serialize(resolutionProof));
 
-        foreach (var entry in _db.ChangeTracker.Entries().Where(e => e.State != EntityState.Unchanged))
-        {
-            Console.WriteLine($"State: {entry.State}, Entity: {entry.Entity.GetType().Name}");
-        }
-
         await _db.SaveChangesAsync();
         return true;
     }
 
     public async Task<bool> MarkNeedsRecheckAsync(Guid sessionId)
     {
-        var session = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
-            .FirstOrDefaultAsync(s => s.Id == sessionId);
+            .Include(s => s.Profile)
+            .Where(s => s.Id == sessionId);
 
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
         if (session == null) return false;
 
         SetOrAddAnswer(session, "resolution_status", "needs_recheck");
@@ -183,23 +227,28 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<object> GetDashboardSummaryAsync()
     {
-        var total = await _db.DiagnosticSessions.CountAsync();
-
-        var resolved = await _db.DiagnosticSessions
-            .Where(s => s.Answers.Any(a =>
-                a.QuestionKey == "resolution_status" && a.AnswerValue == "resolved"))
-            .CountAsync();
-
-        var needsRecheck = await _db.DiagnosticSessions
-            .Where(s => s.Answers.Any(a =>
-                a.QuestionKey == "resolution_status" && a.AnswerValue == "needs_recheck"))
-            .CountAsync();
-
-        var open = total - resolved - needsRecheck;
-
-        var recentSessions = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
             .Include(s => s.Output)
+            .Include(s => s.Profile)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var total = await query.CountAsync();
+        var resolved = await query.CountAsync(s =>
+            s.Answers.Any(a => a.QuestionKey == "resolution_status" && a.AnswerValue == "resolved"));
+        var needsRecheck = await query.CountAsync(s =>
+            s.Answers.Any(a => a.QuestionKey == "resolution_status" && a.AnswerValue == "needs_recheck"));
+        var open = total - resolved - needsRecheck;
+
+        var recentSessions = await query
             .OrderByDescending(s => s.CreatedAt)
             .Take(5)
             .Select(s => new
@@ -227,11 +276,21 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<object> GetRecurringPatternsAsync()
     {
-        var sessions = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Output)
             .Include(s => s.Answers)
-            .OrderByDescending(s => s.CreatedAt)
-            .ToListAsync();
+            .Include(s => s.Profile)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
 
         var grouped = sessions
             .Where(s => s.Output != null)
@@ -258,11 +317,21 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<object> GetWarningSignsAsync()
     {
-        var sessions = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
             .Include(s => s.Output)
-            .OrderByDescending(s => s.CreatedAt)
-            .ToListAsync();
+            .Include(s => s.Profile)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
 
         var warnings = sessions.Select(s => new
         {
@@ -282,7 +351,15 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<object> GetProfilesAsync()
     {
-        var profiles = await _db.SystemProfiles
+        var clientId = GetCurrentClientId();
+        var query = _db.SystemProfiles.AsQueryable();
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(p => p.ClientId == clientId);
+        }
+
+        var profiles = await query
             .OrderByDescending(p => p.CreatedAt)
             .Select(p => new
             {
@@ -304,7 +381,9 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<object> SaveProfileAsync(SaveProfilePayload payload)
     {
+        var clientId = GetCurrentClientId();
         var profile = await _db.SystemProfiles.FirstOrDefaultAsync(p =>
+            (string.IsNullOrEmpty(clientId) || p.ClientId == clientId) &&
             p.CpuModel == payload.CpuModel &&
             p.OsVersion == payload.OsVersion);
 
@@ -312,6 +391,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         {
             profile = new SystemProfile
             {
+                ClientId = clientId,
                 CpuModel = payload.CpuModel,
                 RamCapacity = payload.RamCapacity,
                 StorageType = payload.StorageType,
@@ -329,7 +409,6 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         }
         else
         {
-            // Optionally update existing profile
             profile.RamCapacity = payload.RamCapacity;
             profile.StorageType = payload.StorageType;
             profile.StorageCapacity = payload.StorageCapacity;
@@ -425,15 +504,27 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                 AnswerValue = value
             };
             session.Answers.Add(newAnswer);
-            _db.SessionAnswers.Add(newAnswer); // Explicitly mark as Added to bypass Guid key heuristics
+            _db.SessionAnswers.Add(newAnswer);
         }
     }
 
     public async Task<IReadOnlyList<RecurringSessionDto>> GetRecurringSessionsAsync()
     {
-        var sessions = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
             .Include(s => s.Output)
+            .Include(s => s.Profile)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s => 
+                s.Profile.ClientId == clientId || 
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var sessions = await query
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
@@ -454,8 +545,20 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<IEnumerable<string>> GetObservedWarningTextsAsync()
     {
-        return await _db.SessionAnswers
-            .Where(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue))
+        var clientId = GetCurrentClientId();
+        var query = _db.SessionAnswers
+            .Include(a => a.Session)
+            .ThenInclude(s => s.Profile)
+            .Where(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue));
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(a => 
+                a.Session.Profile.ClientId == clientId || 
+                a.Session.Answers.Any(ans => ans.QuestionKey == "client_id" && ans.AnswerValue == clientId));
+        }
+
+        return await query
             .Select(a => a.AnswerValue)
             .Distinct()
             .ToListAsync();

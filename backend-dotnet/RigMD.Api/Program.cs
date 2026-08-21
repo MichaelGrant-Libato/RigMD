@@ -35,6 +35,9 @@ Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 builder.Services.AddDbContext<RigMdDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
+// Client identification & isolation
+builder.Services.AddScoped<RigMD.Application.Contracts.Common.ICurrentClientProvider, RigMD.Api.Services.HttpCurrentClientProvider>();
+
 // Repository abstractions
 builder.Services.AddScoped<IDiagnosticSessionRepository, DiagnosticSessionRepository>();
 builder.Services.AddScoped<IRemediationRepository, RemediationRepository>();
