@@ -112,4 +112,74 @@ public class DiagnosticSessionRepositoryTests
         Assert.Contains("\"needs_recheck_sessions\":1", json);
         Assert.Contains("\"open_sessions\":1", json);
     }
+
+    [Fact]
+    public async Task GetRecurringPatternsAsync_WhenMultipleSessionsWithSameCategory_FlagsAsRecurring()
+    {
+        // Arrange
+        var db = GetMemoryContext();
+        var repo = new DiagnosticSessionRepository(db);
+        var hardware = new HardwareProfileDto { Cpu = new CpuStatsDto { Name = "Intel i9" }, OsVersion = "Windows 11", Ram = new MemoryStatsDto { TotalGb = 32 } };
+
+        await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), hardware, "Thermal condition", "Maintain", "High", "Exp", "client");
+        db.ChangeTracker.Clear();
+        await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), hardware, "Thermal condition", "Maintain", "High", "Exp", "client");
+        db.ChangeTracker.Clear();
+        await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), hardware, "Boot and startup failure", "Escalate", "High", "Exp", "client");
+        db.ChangeTracker.Clear();
+
+        // Act
+        var patterns = await repo.GetRecurringPatternsAsync();
+
+        // Assert
+        var json = System.Text.Json.JsonSerializer.Serialize(patterns);
+        Assert.Contains("\"category\":\"Thermal condition\",\"count\":2,\"is_recurring\":true", json);
+        Assert.Contains("\"category\":\"Boot and startup failure\",\"count\":1,\"is_recurring\":false", json);
+    }
+
+    [Fact]
+    public async Task MarkNeedsRecheckAsync_TransitionsStateToNeedsRecheck()
+    {
+        // Arrange
+        var db = GetMemoryContext();
+        var repo = new DiagnosticSessionRepository(db);
+        var hardware = new HardwareProfileDto { Cpu = new CpuStatsDto { Name = "Intel" }, OsVersion = "Win11", Ram = new MemoryStatsDto { TotalGb = 16 } };
+        var sessionId = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), hardware, "Cat", "Act", "High", "Exp", "client");
+        db.ChangeTracker.Clear();
+
+        // Act
+        var result = await repo.MarkNeedsRecheckAsync(sessionId);
+        db.ChangeTracker.Clear();
+
+        // Assert
+        Assert.True(result);
+        var session = await db.DiagnosticSessions.Include(s => s.Answers).FirstOrDefaultAsync(s => s.Id == sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("needs_recheck", session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_status")?.AnswerValue);
+        Assert.Equal("completed", session.Answers.FirstOrDefault(a => a.QuestionKey == "last_action_status")?.AnswerValue);
+    }
+
+    [Fact]
+    public async Task UpdateResolutionAsync_TransitionsStateToResolvedAndSavesProof()
+    {
+        // Arrange
+        var db = GetMemoryContext();
+        var repo = new DiagnosticSessionRepository(db);
+        var hardware = new HardwareProfileDto { Cpu = new CpuStatsDto { Name = "Intel" }, OsVersion = "Win11", Ram = new MemoryStatsDto { TotalGb = 16 } };
+        var sessionId = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), hardware, "Cat", "Act", "High", "Exp", "client");
+        db.ChangeTracker.Clear();
+        var proof = new[] { new { Name = "Process", Value = "Stopped" } };
+
+        // Act
+        var result = await repo.UpdateResolutionAsync(sessionId, "resolved", "2026-08-21T00:00:00Z", "Fixed issue", proof);
+        db.ChangeTracker.Clear();
+
+        // Assert
+        Assert.True(result);
+        var session = await db.DiagnosticSessions.Include(s => s.Answers).FirstOrDefaultAsync(s => s.Id == sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("resolved", session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_status")?.AnswerValue);
+        Assert.Equal("Fixed issue", session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_summary")?.AnswerValue);
+        Assert.Contains("Process", session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_proof")?.AnswerValue ?? "");
+    }
 }
