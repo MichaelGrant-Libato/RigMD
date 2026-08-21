@@ -178,7 +178,7 @@ function getObservedLabelClass(action: string) {
 
 function getRowSeverityClass(row: WarningSignRow) {
   if (!row.observed) {
-    return 'border-l-transparent bg-[var(--rigmd-card)] hover:border-l-cyan-400/25 hover:bg-[var(--rigmd-card-hover)]/45';
+    return 'border-l-transparent bg-[var(--rigmd-card)] hover:border-l-cyan-400/25 hover:bg-[var(--rigmd-card-hover)]';
   }
 
   const severity = getActionSeverity(row.action);
@@ -345,8 +345,8 @@ function CategoryButton({
       whileTap={buttonTap}
       className={`shrink-0 rounded-full border px-3.5 py-2 text-[11px] font-bold uppercase transition ${
         active
-          ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-400'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-500 hover:border-cyan-500/40 hover:text-cyan-400'
+          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
+          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
       }`}
     >
       {label}
@@ -368,8 +368,8 @@ function ObservedToggle({
       whileTap={buttonTap}
       className={`flex shrink-0 items-center gap-3 rounded-xl border px-4 py-2 text-sm font-semibold transition ${
         checked
-          ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] text-slate-400 hover:border-cyan-500/40 hover:text-cyan-400'
+          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
+          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-400 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
       }`}
     >
       <span
@@ -532,7 +532,7 @@ export default function WarningSignsView() {
             />
           )}
 
-          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
+          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 {categories.map((category) => (
@@ -557,7 +557,7 @@ export default function WarningSignsView() {
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]">
+          <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[#101821]">
             <div className="flex items-center justify-between gap-4 border-b border-[var(--rigmd-border)] px-5 py-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle size={15} className="text-slate-400" />
@@ -580,7 +580,7 @@ export default function WarningSignsView() {
               </div>
             </div>
 
-            <div className="grid grid-cols-[minmax(240px,1fr)_minmax(300px,1.4fr)_minmax(220px,1fr)_170px_170px] border-b border-[var(--rigmd-border)] bg-[var(--rigmd-sidebar)] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+            <div className="grid grid-cols-[minmax(240px,1fr)_minmax(300px,1.4fr)_minmax(220px,1fr)_170px_170px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
               <div>Warning Sign</div>
               <div>Meaning</div>
               <div>Threshold</div>

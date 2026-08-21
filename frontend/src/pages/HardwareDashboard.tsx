@@ -36,7 +36,7 @@ import {
   pageFade,
 } from '../lib/motion';
 import { apiGet, apiPost } from '../lib/api';
-import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
+import type { DashboardSessionSummary, DashboardSummary, HardwareStats, PageKey, SessionSummary } from '../types/rigmd';
 
 interface DashboardMetricCardProps {
   icon: LucideIcon;
@@ -56,6 +56,20 @@ interface QuickActionProps {
   description: string;
   primary?: boolean;
   onClick: () => void;
+}
+
+interface LegacyDashboardSummary {
+  total_sessions?: number;
+  resolved_sessions?: number;
+  needs_recheck_sessions?: number;
+  open_sessions?: number;
+  recent_sessions?: Array<{
+    session_id: string;
+    diagnosed_category?: string;
+    confidence_label?: string;
+    resolution_status?: string;
+    created_at?: string;
+  }>;
 }
 
 const emptyDashboard: DashboardSummary = {
@@ -133,6 +147,170 @@ function normalizeAction(action: string | undefined | null) {
   if (value.includes('escalate')) return 'Escalate';
 
   return '';
+}
+
+function hasDashboardContract(value: unknown): value is DashboardSummary {
+  return Boolean(value && typeof value === 'object' && 'totals' in value);
+}
+
+function extractSessions(value: unknown): SessionSummary[] {
+  if (Array.isArray(value)) return value as SessionSummary[];
+
+  if (value && typeof value === 'object') {
+    const response = value as { sessions?: unknown; value?: unknown };
+
+    if (Array.isArray(response.sessions)) return response.sessions as SessionSummary[];
+    if (Array.isArray(response.value)) return response.value as SessionSummary[];
+  }
+
+  return [];
+}
+
+function parseDate(value: string | null | undefined) {
+  if (!value) return null;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDashboardDate(value: string | null | undefined) {
+  const date = parseDate(value);
+  return date ? date.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' }) : null;
+}
+
+function getDaysAgo(value: string | null | undefined) {
+  const date = parseDate(value);
+  if (!date) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const sessionDate = new Date(date);
+  sessionDate.setHours(0, 0, 0, 0);
+
+  return Math.max(Math.floor((today.getTime() - sessionDate.getTime()) / 86400000), 0);
+}
+
+function sessionToDashboardSummary(session: SessionSummary | null | undefined): DashboardSessionSummary | null {
+  if (!session) return null;
+
+  return {
+    session_id: session.session_id,
+    symptom_type: session.symptom_type || 'Saved diagnosis',
+    diagnosed_category: session.diagnosed_category || 'Unknown',
+    action_category: normalizeAction(session.action_category) || 'Monitor',
+    confidence_label: session.confidence_label || 'Not available',
+    created_at: session.created_at,
+    display_date: session.display_date || formatDashboardDate(session.created_at),
+    days_ago: session.days_ago ?? getDaysAgo(session.created_at),
+    is_recurring: Boolean(session.is_recurring),
+    resolution_status: session.resolution_status,
+    resolution_checked_at: session.resolution_checked_at,
+    resolution_summary: session.resolution_summary,
+  };
+}
+
+function legacySessionToDashboardSummary(
+  session: LegacyDashboardSummary['recent_sessions'] extends Array<infer T> ? T : never
+): DashboardSessionSummary {
+  return {
+    session_id: session.session_id,
+    symptom_type: 'Saved diagnosis',
+    diagnosed_category: session.diagnosed_category || 'Unknown',
+    action_category: 'Monitor',
+    confidence_label: session.confidence_label || 'Not available',
+    created_at: session.created_at ?? null,
+    display_date: formatDashboardDate(session.created_at),
+    days_ago: getDaysAgo(session.created_at),
+    is_recurring: false,
+    resolution_status: session.resolution_status,
+  };
+}
+
+function normalizeDashboardSummary(rawSummary: unknown, sessions: SessionSummary[] = []): DashboardSummary {
+  if (hasDashboardContract(rawSummary)) {
+    return {
+      ...emptyDashboard,
+      ...rawSummary,
+      totals: {
+        ...emptyDashboard.totals,
+        ...(rawSummary.totals || {}),
+      },
+      action_distribution: rawSummary.action_distribution?.length
+        ? rawSummary.action_distribution
+        : emptyDashboard.action_distribution,
+      session_frequency: rawSummary.session_frequency || [],
+      recent_warning_signs: rawSummary.recent_warning_signs || [],
+    };
+  }
+
+  const legacy = (rawSummary || {}) as LegacyDashboardSummary;
+  const sortedSessions = [...sessions].sort(
+    (a, b) => (parseDate(b.created_at)?.getTime() ?? 0) - (parseDate(a.created_at)?.getTime() ?? 0)
+  );
+  const latestSession = sessionToDashboardSummary(sortedSessions[0]);
+  const legacyLatestSession = legacy.recent_sessions?.[0]
+    ? legacySessionToDashboardSummary(legacy.recent_sessions[0])
+    : null;
+  const sourceSessions = sortedSessions.length > 0
+    ? sortedSessions
+    : (legacy.recent_sessions || []).map((session) => ({
+        session_id: session.session_id,
+        symptom_type: 'Saved diagnosis',
+        diagnosed_category: session.diagnosed_category || 'Unknown',
+        action_category: 'Monitor',
+        confidence_label: session.confidence_label || 'Not available',
+        created_at: session.created_at ?? null,
+        display_date: formatDashboardDate(session.created_at),
+        days_ago: getDaysAgo(session.created_at),
+        is_recurring: false,
+      }));
+
+  const actionCounts = emptyDashboard.action_distribution.map((item) => ({
+    ...item,
+    count: sourceSessions.filter((session) => normalizeAction(session.action_category) === item.label).length,
+  }));
+
+  const now = new Date();
+  const thisMonthCount = sourceSessions.filter((session) => {
+    const date = parseDate(session.created_at);
+    return date && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  }).length;
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+  const frequencyCounts = new Map<string, number>();
+
+  sourceSessions.forEach((session) => {
+    const date = parseDate(session.created_at);
+    if (!date || date < thirtyDaysAgo) return;
+
+    const key = date.toISOString().slice(0, 10);
+    frequencyCounts.set(key, (frequencyCounts.get(key) || 0) + 1);
+  });
+
+  return {
+    ...emptyDashboard,
+    server_time: new Date().toISOString(),
+    totals: {
+      total_sessions: legacy.total_sessions ?? sourceSessions.length,
+      this_month_count: thisMonthCount,
+      escalated_count: sourceSessions.filter((session) => normalizeAction(session.action_category) === 'Escalate').length,
+    },
+    last_diagnosis: latestSession ?? legacyLatestSession,
+    current_action_status: latestSession ?? legacyLatestSession,
+    recurring_issues_count: new Set(
+      sourceSessions
+        .map((session) => session.symptom_type)
+        .filter((symptom) => sourceSessions.filter((session) => session.symptom_type === symptom).length >= 2)
+    ).size,
+    warning_signs_active_count: sourceSessions.filter((session) => {
+      const warning = 'warning_signs' in session ? String(session.warning_signs || '').toLowerCase() : '';
+      return warning.length > 0 && warning !== 'none';
+    }).length,
+    action_distribution: actionCounts,
+    session_frequency: Array.from(frequencyCounts.entries()).map(([date, count]) => ({ date, count })),
+    recent_warning_signs: [],
+    last_saved_session: latestSession ?? legacyLatestSession,
+  };
 }
 
 function getActionColor(action: string | undefined | null) {
@@ -1015,11 +1193,21 @@ export default function HardwareDashboard() {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const response = await apiGet<DashboardSummary>('/api/dashboard/summary');
-        setDashboard({
-          ...emptyDashboard,
-          ...(response.data || {}),
-        });
+        const response = await apiGet<DashboardSummary | LegacyDashboardSummary>('/api/dashboard/summary');
+        let sessions: SessionSummary[] = [];
+
+        if (!hasDashboardContract(response.data)) {
+          try {
+            const sessionsResponse = await apiGet<SessionSummary[] | { sessions?: SessionSummary[]; value?: SessionSummary[] }>(
+              '/api/diagnosis/sessions'
+            );
+            sessions = extractSessions(sessionsResponse.data);
+          } catch {
+            sessions = [];
+          }
+        }
+
+        setDashboard(normalizeDashboardSummary(response.data, sessions));
       } catch {
         setDashboard(emptyDashboard);
       }

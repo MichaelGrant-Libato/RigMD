@@ -148,7 +148,7 @@ function ScopeCard({
       variants={cardFadeUp}
       whileHover={hoverLift}
       transition={{ duration: 0.18 }}
-      className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-3.5"
+      className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-4 py-3.5 transition-colors hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)]"
     >
       <div className="flex items-start gap-3">
         <Icon size={15} className={`mt-0.5 shrink-0 ${iconClass}`} />
@@ -181,7 +181,7 @@ export default function HelpScopeView() {
         className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6"
       >
         <div className="mx-auto w-full max-w-[1280px] space-y-8">
-          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-4">
+          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] px-5 py-4">
             <div className="flex gap-3">
               <Info size={18} className="mt-0.5 shrink-0 text-cyan-400" />
               <p className="text-sm leading-relaxed text-slate-400">
@@ -228,7 +228,7 @@ export default function HelpScopeView() {
 
             <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {actionCategories.map((category) => (
-                <motion.article key={category.label} variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                <motion.article key={category.label} variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
                   <h3 className={`font-bold ${category.tone}`}>{category.label}</h3>
                   <p className="mt-3 text-sm leading-relaxed text-slate-500">{category.description}</p>
                 </motion.article>
@@ -236,7 +236,7 @@ export default function HelpScopeView() {
             </motion.div>
           </section>
 
-          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-5 py-4">
+          <motion.section variants={cardFadeUp} transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] px-5 py-4">
             <div className="flex gap-3">
               <AlertTriangle size={18} className="mt-0.5 shrink-0 text-orange-400" />
               <p className="text-sm leading-relaxed text-slate-400">
@@ -255,7 +255,7 @@ export default function HelpScopeView() {
 
             <div className="space-y-2">
               {faqs.map((faq) => (
-                <motion.div key={faq.question} variants={cardFadeUp} transition={cardTransition} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] px-4 py-3">
+                <motion.div key={faq.question} variants={cardFadeUp} transition={cardTransition} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-4 py-3">
                   <motion.button
                     type="button"
                     onClick={() => setOpenFaq(openFaq === faq.question ? null : faq.question)}
