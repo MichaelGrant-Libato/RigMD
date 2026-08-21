@@ -92,6 +92,38 @@ public class SafetyPolicyTests
         Assert.True(result.IsApproved);
     }
 
+    [Fact]
+    public void Evaluate_WhenActionIsIrreversible_ApprovesButRequiresConfirmationAndAddsWarning()
+    {
+        var policy = new SafetyPolicy();
+
+        var plan = new RemediationPlan
+        {
+            PlannedActions = new List<RemediationActionDef>
+            {
+                new()
+                {
+                    Id = "irreversible_action",
+                    Name = "Irreversible Action",
+                    Category = "Test",
+                    RiskLevel = "Low",
+                    IsReversible = false
+                }
+            }
+        };
+
+        var hardware = new HardwareProfileDto
+        {
+            OsVersion = "Windows 11"
+        };
+
+        var result = policy.Evaluate(plan, hardware);
+
+        Assert.True(result.IsApproved);
+        Assert.True(result.RequiresUserConfirmation);
+        Assert.Contains(result.Warnings, w => w.Contains("irreversible"));
+    }
+
     private static RemediationPlan CreateLowRiskPlan()
     {
         return new RemediationPlan

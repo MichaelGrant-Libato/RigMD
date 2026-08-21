@@ -137,7 +137,7 @@ Use `System.Management` (WMI), CIM, and `System.Diagnostics` to query the Window
 
 ---
 
-## Phase 5 — SQLite + EF Core Persistence 🔲 PENDING
+## Phase 5 — SQLite + EF Core Persistence ✅ COMPLETE
 
 ### Purpose
 Move RigMD toward full offline operation by using SQLite as the local source of truth.
@@ -551,15 +551,15 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 - AI explanation result ≤ 10 seconds
 
 **Autonomous Evaluation Checklist:**
-- [ ] Diagnostic accuracy: given known hardware states, correct category is diagnosed
-- [ ] Diagnosis confidence mapping: ensure rule weighting accurately reflects confidence levels
-- [ ] Recurring patterns: engine correctly identifies and flags historical problem repetition
-- [ ] Warning signs: edge cases and anomalies are correctly flagged during telemetry gathering
-- [ ] Resolutions: verify that actions are correctly mapped to their respective diagnostic resolutions
-- [ ] Safety rejection: high-risk actions are rejected on server OS
-- [ ] Verification accuracy: resolved sessions are correctly detected as resolved
-- [ ] Rollback correctness: failed actions are cleanly undone
-- [ ] Pivot behavior: engine correctly moves to next action when current fails
+- [x] Diagnostic accuracy: given known hardware states, correct category is diagnosed
+- [x] Diagnosis confidence mapping: ensure rule weighting accurately reflects confidence levels
+- [x] Recurring patterns: engine correctly identifies and flags historical problem repetition
+- [x] Warning signs: edge cases and anomalies are correctly flagged during telemetry gathering
+- [x] Resolutions: verify that actions are correctly mapped to their respective diagnostic resolutions
+- [x] Safety rejection: high-risk actions are rejected on server OS
+- [x] Verification accuracy: resolved sessions are correctly detected as resolved
+- [x] Rollback correctness: failed actions are cleanly undone
+- [x] Pivot behavior: engine correctly moves to next action when current fails
 
 **Key Files to Create:**
 - `RigMD.Tests/Domain.Tests/DiagnosticEngineTests.cs`
@@ -578,7 +578,7 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 2 | Build the C#/.NET Foundation | ✅ Complete |
 | 3 | Final Domain Model & ERD | ✅ Complete |
 | 4 | Windows Observation Layer | ✅ Complete |
-| 5 | SQLite + EF Core Persistence | 🔲 Pending |
+| 5 | SQLite + EF Core Persistence | ✅ Complete |
 | 6 | ASP.NET Core API | ✅ Complete |
 | 7 | Connect the React Frontend | ✅ Complete |
 | 8 | Migrate the Diagnostic Engine | ✅ Complete |
@@ -599,8 +599,8 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 As of the latest autonomy safety validation:
 
 dotnet test
-Total: 24
-Passed: 24
+Total: 41
+Passed: 41
 Failed: 0
 Skipped: 0
 
