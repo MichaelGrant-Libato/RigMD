@@ -52,13 +52,25 @@ public class DiagnosticSessionDto
     public bool IsRecurring { get; set; }
 
     [JsonPropertyName("created_at")]
-    public DateTime? CreatedAt { get; set; }
+    public string? CreatedAt { get; set; }
+
+    [JsonPropertyName("display_date")]
+    public string? DisplayDate { get; set; }
+
+    [JsonPropertyName("display_time")]
+    public string? DisplayTime { get; set; }
+
+    [JsonPropertyName("session_code")]
+    public string? SessionCode { get; set; }
+
+    [JsonPropertyName("recommended_next_step")]
+    public string? RecommendedNextStep { get; set; }
 
     [JsonPropertyName("resolution_status")]
     public string ResolutionStatus { get; set; } = string.Empty;
 
     [JsonPropertyName("resolution_checked_at")]
-    public DateTime? ResolutionCheckedAt { get; set; }
+    public string? ResolutionCheckedAt { get; set; }
 
     [JsonPropertyName("resolution_summary")]
     public string ResolutionSummary { get; set; } = string.Empty;

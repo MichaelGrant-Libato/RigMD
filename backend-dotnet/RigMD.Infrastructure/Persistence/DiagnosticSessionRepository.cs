@@ -368,6 +368,17 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         string Answer(string key) =>
             s.Answers.FirstOrDefault(a => a.QuestionKey == key)?.AnswerValue ?? string.Empty;
 
+        var action = s.Output?.ActionCategory ?? string.Empty;
+        var nextStep = action.Contains("escalate", StringComparison.OrdinalIgnoreCase)
+            ? "Back up critical files immediately and prepare the system for technician inspection."
+            : action.Contains("troubleshoot", StringComparison.OrdinalIgnoreCase)
+            ? "Run guided safe actions and verify whether the issue persists before changing hardware."
+            : action.Contains("maintain", StringComparison.OrdinalIgnoreCase)
+            ? "Perform safe maintenance steps and keep an eye on thermals and storage health."
+            : "No urgent intervention required. Continue monitoring system telemetry under normal use.";
+
+        var localTime = s.CreatedAt.ToLocalTime();
+
         return new DiagnosticSessionDto
         {
             SessionId = s.Id.ToString(),
@@ -384,12 +395,17 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             ActionCategory = s.Output?.ActionCategory ?? string.Empty,
             ConfidenceLabel = s.Output?.ConfidenceLabel ?? string.Empty,
             AiExplanation = s.Output?.AiExplanation ?? string.Empty,
+            IsRecurring = s.Answers.Any(a => a.QuestionKey == "is_recurring" && a.AnswerValue == "true"),
             ResolutionStatus = Answer("resolution_status"),
             ResolutionSummary = Answer("resolution_summary"),
+            ResolutionCheckedAt = Answer("resolution_checked_at"),
             LastActionStatus = Answer("last_action_status"),
             LastActionSummary = Answer("last_action_summary"),
             ClientId = Answer("client_id"),
-            CreatedAt = s.CreatedAt.UtcDateTime
+            CreatedAt = s.CreatedAt.ToString("o"),
+            DisplayDate = localTime.ToString("MMM dd, yyyy"),
+            DisplayTime = localTime.ToString("hh:mm tt"),
+            RecommendedNextStep = nextStep
         };
     }
 
