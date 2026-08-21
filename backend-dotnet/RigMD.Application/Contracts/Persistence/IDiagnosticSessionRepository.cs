@@ -48,6 +48,9 @@ public interface IDiagnosticSessionRepository
     /// <summary>Returns saved system profiles.</summary>
     Task<object> GetProfilesAsync();
 
+    /// <summary>Saves a system hardware profile manually.</summary>
+    Task<object> SaveProfileAsync(RigMD.Application.Models.SaveProfilePayload payload);
+
     /// <summary>Returns all sessions mapped to RecurringSessionDto for pattern analysis.</summary>
     Task<IReadOnlyList<RecurringSessionDto>> GetRecurringSessionsAsync();
 

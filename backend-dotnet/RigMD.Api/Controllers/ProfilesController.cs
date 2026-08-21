@@ -29,4 +29,20 @@ public class ProfilesController : ControllerBase
                 new { detail = "Failed to load hardware profiles." });
         }
     }
+
+    [HttpPost("save")]
+    public async Task<IActionResult> SaveProfile([FromBody] RigMD.Application.Models.SaveProfilePayload payload)
+    {
+        try
+        {
+            var profile = await _sessionRepository.SaveProfileAsync(payload);
+            return Ok(profile);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to save profile: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { detail = "Failed to save hardware profile." });
+        }
+    }
 }

@@ -89,3 +89,16 @@ public class HardwareProfileDto
     
     public ProcessInsightsDto ProcessInsights { get; set; } = new();
 }
+
+public class SaveProfilePayload
+{
+    public string CpuModel { get; set; } = string.Empty;
+    public string RamCapacity { get; set; } = string.Empty;
+    public string StorageType { get; set; } = string.Empty;
+    public string StorageCapacity { get; set; } = string.Empty;
+    public object? StorageDetails { get; set; }
+    public string OsVersion { get; set; } = string.Empty;
+    public string? GpuDriver { get; set; }
+    public string? ChipsetDriver { get; set; }
+    public string? SystemAge { get; set; }
+}
