@@ -72,15 +72,22 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         var trace = new StringBuilder();
         var mode = isDryRun ? "Dry Run" : "Real Execution";
 
-        trace.AppendLine($"[ORCHESTRATOR] Starting {mode} for Diagnosis: {diagnostic.DiagnosedCategory}");
-        trace.AppendLine("[PLANNER] Formulating plan...");
+        trace.AppendLine(
+            $"[ORCHESTRATOR] Starting {mode} for Diagnosis: {diagnostic.DiagnosedCategory}");
+
+        trace.AppendLine(
+            "[PLANNER] Formulating plan...");
 
         var plan = _planner.CreatePlan(diagnostic);
 
-        trace.AppendLine($"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
-        trace.AppendLine($"[PLANNER] Reasoning: {plan.StrategyReasoning}");
+        trace.AppendLine(
+            $"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");
+
+        trace.AppendLine(
+            $"[PLANNER] Reasoning: {plan.StrategyReasoning}");
 
         var attempts = new List<RemediationAttempt>();
+
         var result = new OrchestrationResult
         {
             Plan = plan,
@@ -90,14 +97,18 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
 
         if (plan.PlannedActions.Count == 0)
         {
-            trace.AppendLine("[ORCHESTRATOR] Cycle stopped. No actions to execute.");
+            trace.AppendLine(
+                "[ORCHESTRATOR] Cycle stopped. No actions to execute.");
+
             result.Trace = trace.ToString();
+
             return result;
         }
 
         while (plan.PlannedActions.Count > 0)
         {
-            var actionToExecute = plan.PlannedActions.First();
+            var actionToExecute =
+                plan.PlannedActions.First();
 
             var attempt = new RemediationAttempt
             {
@@ -105,156 +116,331 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                 State = RemediationAttemptState.Planned,
                 Notes = "Action selected by remediation planner."
             };
+
             attempts.Add(attempt);
 
-            trace.AppendLine($"\n[SAFETY] Evaluating plan for action {actionToExecute.Name}...");
+            trace.AppendLine();
 
-            var safety = _safetyPolicy.Evaluate(plan, hardware);
+            trace.AppendLine(
+                $"[SAFETY] Evaluating plan for action {actionToExecute.Name}...");
+
+            var safety =
+                _safetyPolicy.Evaluate(
+                    plan,
+                    hardware);
+
             result.Safety = safety;
 
-            if (safety.RequiresUserConfirmation && !userConsentProvided)
+            if (safety.RequiresUserConfirmation &&
+                !userConsentProvided)
             {
                 safety.IsApproved = false;
-                safety.RejectionReason = "This action requires explicit user consent.";
 
-                attempt.State = RemediationAttemptState.AwaitingConsent;
-                attempt.Notes = safety.RejectionReason;
+                safety.RejectionReason =
+                    "This action requires explicit user consent.";
 
-                trace.AppendLine("[SAFETY] Execution paused. Explicit user consent is required.");
+                attempt.State =
+                    RemediationAttemptState.AwaitingConsent;
+
+                attempt.Notes =
+                    safety.RejectionReason;
+
+                trace.AppendLine(
+                    "[SAFETY] Execution paused. Explicit user consent is required.");
+
                 break;
             }
 
             if (!safety.IsApproved)
             {
-                attempt.State = RemediationAttemptState.SafetyRejected;
-                attempt.Notes = safety.RejectionReason;
+                attempt.State =
+                    RemediationAttemptState.SafetyRejected;
 
-                trace.AppendLine($"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
+                attempt.Notes =
+                    safety.RejectionReason;
+
+                trace.AppendLine(
+                    $"[SAFETY] Plan REJECTED. Reason: {safety.RejectionReason}");
+
                 break;
             }
 
-            trace.AppendLine("[SAFETY] Plan APPROVED.");
+            trace.AppendLine(
+                "[SAFETY] Plan APPROVED.");
 
-            attempt.State = RemediationAttemptState.Executing;
-            trace.AppendLine($"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
+            attempt.State =
+                RemediationAttemptState.Executing;
 
-            var executionResult = await executeAction(actionToExecute);
-            attempt.Execution = executionResult;
-            result.Execution = executionResult;
+            trace.AppendLine(
+                $"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
 
-            trace.AppendLine($"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
-            trace.AppendLine($"[EXECUTOR] Output: {executionResult.Summary}");
+            var executionResult =
+                await executeAction(actionToExecute);
+
+            attempt.Execution =
+                executionResult;
+
+            result.Execution =
+                executionResult;
+
+            trace.AppendLine(
+                $"[EXECUTOR] Result: {(executionResult.Success ? "SUCCESS" : "FAILED")}");
+
+            trace.AppendLine(
+                $"[EXECUTOR] Output: {executionResult.Summary}");
 
             if (!executionResult.Success)
             {
-                attempt.State = RemediationAttemptState.ExecutionFailed;
-                attempt.Notes = executionResult.Summary;
+                attempt.State =
+                    RemediationAttemptState.ExecutionFailed;
 
-                trace.AppendLine("[ORCHESTRATOR] Execution failed. Verification skipped.");
-                
-                // Pivot
-                plan = _pivotEngine.Pivot(diagnostic, plan, actionToExecute, hardware);
+                attempt.Notes =
+                    executionResult.Summary;
+
+                trace.AppendLine(
+                    "[ORCHESTRATOR] Execution failed. Verification skipped.");
+
+                plan =
+                    _pivotEngine.Pivot(
+                        diagnostic,
+                        plan,
+                        actionToExecute,
+                        hardware);
+
                 result.Plan = plan;
-                trace.AppendLine($"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
+
+                attempt.Notes +=
+                    " Pivoted to next action.";
+
+                trace.AppendLine(
+                    $"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
+
                 continue;
             }
 
             if (isDryRun)
             {
-                attempt.State = RemediationAttemptState.Completed;
-                attempt.Notes = "Dry-run simulation completed successfully. No real system changes were made.";
+                attempt.State =
+                    RemediationAttemptState.Completed;
 
-                trace.AppendLine("[ORCHESTRATOR] Dry-run completed. Real-state verification skipped.");
-                break; // Stop after first successful dry run
+                attempt.Notes =
+                    "Dry-run simulation completed successfully. No real system changes were made.";
+
+                trace.AppendLine(
+                    "[ORCHESTRATOR] Dry-run completed. Real-state verification skipped.");
+
+                break;
             }
 
-            attempt.State = RemediationAttemptState.VerificationPending;
-            trace.AppendLine("[VERIFICATION] Verifying remediation outcome...");
+            attempt.State =
+                RemediationAttemptState.VerificationPending;
 
-            var verificationStatus = await _verificationService.VerifyAsync(actionToExecute, executionResult, hardware);
-            attempt.Verification = verificationStatus;
-            result.Verification = verificationStatus;
+            trace.AppendLine(
+                "[VERIFICATION] Verifying remediation outcome...");
 
-            trace.AppendLine($"[VERIFICATION] Result: {verificationStatus}");
+            var verificationStatus =
+                await _verificationService.VerifyAsync(
+                    actionToExecute,
+                    executionResult,
+                    hardware);
+
+            attempt.Verification =
+                verificationStatus;
+
+            result.Verification =
+                verificationStatus;
+
+            trace.AppendLine(
+                $"[VERIFICATION] Result: {verificationStatus}");
 
             switch (verificationStatus)
             {
                 case VerificationStatus.Resolved:
-                    attempt.State = RemediationAttemptState.Resolved;
-                    attempt.Notes = "Verification confirmed that the remediation resolved the targeted condition.";
+                    attempt.State =
+                        RemediationAttemptState.Resolved;
+
+                    attempt.Notes =
+                        "Verification confirmed that the remediation resolved the targeted condition.";
+
                     break;
+
                 case VerificationStatus.Unresolved:
-                    attempt.State = RemediationAttemptState.Unresolved;
-                    attempt.Notes = "Execution succeeded, but verification did not confirm resolution.";
+                    attempt.State =
+                        RemediationAttemptState.Unresolved;
+
+                    attempt.Notes =
+                        "Execution succeeded, but verification did not confirm resolution.";
+
                     break;
+
                 case VerificationStatus.Worse:
-                    attempt.State = RemediationAttemptState.Worse;
-                    attempt.Notes = "Verification indicates that the targeted condition became worse.";
+                    attempt.State =
+                        RemediationAttemptState.Worse;
+
+                    attempt.Notes =
+                        "Verification indicates that the targeted condition became worse.";
+
                     break;
+
                 case VerificationStatus.Unknown:
                 default:
-                    attempt.State = RemediationAttemptState.VerificationUnknown;
-                    attempt.Notes = "The remediation executed successfully, but the result could not be verified.";
+                    attempt.State =
+                        RemediationAttemptState.VerificationUnknown;
+
+                    attempt.Notes =
+                        "The remediation executed successfully, but the result could not be verified.";
+
                     break;
             }
 
-            if (verificationStatus == VerificationStatus.Resolved)
+            if (verificationStatus ==
+                VerificationStatus.Resolved)
             {
-                trace.AppendLine("[ORCHESTRATOR] Issue resolved. Cycle complete.");
+                trace.AppendLine(
+                    "[ORCHESTRATOR] Issue resolved. Cycle complete.");
+
                 break;
             }
 
-            var shouldAttemptRollback = verificationStatus == VerificationStatus.Unresolved || verificationStatus == VerificationStatus.Worse;
+            if (verificationStatus ==
+                VerificationStatus.Unknown)
+            {
+                trace.AppendLine(
+                    "[ORCHESTRATOR] Verification result is unknown. Further autonomous remediation is unsafe.");
+
+                trace.AppendLine(
+                    "[ORCHESTRATOR] Escalating for human intervention.");
+
+                attempt.State =
+                    RemediationAttemptState.VerificationUnknown;
+
+                attempt.Notes +=
+                    " Further autonomous remediation was stopped because the result could not be verified.";
+
+                result.Escalated = true;
+
+                break;
+            }
+
+            var shouldAttemptRollback =
+                verificationStatus ==
+                    VerificationStatus.Unresolved ||
+                verificationStatus ==
+                    VerificationStatus.Worse;
 
             if (shouldAttemptRollback)
             {
                 if (!actionToExecute.IsReversible)
                 {
-                    trace.AppendLine("[ROLLBACK] Action is irreversible. Rollback skipped.");
-                    attempt.Notes += " Rollback was not attempted because the action is irreversible.";
+                    trace.AppendLine(
+                        "[ROLLBACK] Action is irreversible. Rollback is unavailable.");
+
+                    trace.AppendLine(
+                        "[ORCHESTRATOR] Further autonomous remediation stopped because the previous action cannot be safely reversed.");
+
+                    attempt.Notes +=
+                        " Rollback was not attempted because the action is irreversible. Further autonomous remediation was stopped.";
+
+                    result.Escalated = true;
+
+                    break;
                 }
-                else if (!_rollbackManager.CanRollback(actionToExecute))
+
+                if (!_rollbackManager.CanRollback(
+                        actionToExecute))
                 {
-                    trace.AppendLine("[ROLLBACK] No verified rollback handler is available.");
-                    attempt.Notes += " Rollback was not attempted because no verified rollback handler is available.";
+                    trace.AppendLine(
+                        "[ROLLBACK] No verified rollback handler is available.");
+
+                    trace.AppendLine(
+                        "[ORCHESTRATOR] Further autonomous remediation stopped because a safe rollback path is unavailable.");
+
+                    attempt.Notes +=
+                        " Rollback was not attempted because no verified rollback handler is available. Further autonomous remediation was stopped.";
+
+                    result.Escalated = true;
+
+                    break;
+                }
+
+                attempt.State =
+                    RemediationAttemptState.RollbackPending;
+
+                trace.AppendLine(
+                    $"[ROLLBACK] Attempting rollback for {actionToExecute.Name}...");
+
+                var rollbackResult =
+                    await _rollbackManager.RollbackAsync(
+                        actionToExecute,
+                        executionResult);
+
+                attempt.RollbackResult =
+                    rollbackResult;
+
+                if (rollbackResult.Success)
+                {
+                    attempt.State =
+                        RemediationAttemptState.RolledBack;
+
+                    attempt.Notes =
+                        "Verification did not confirm a safe outcome. The remediation was rolled back successfully.";
+
+                    trace.AppendLine(
+                        "[ROLLBACK] Rollback completed successfully.");
                 }
                 else
                 {
-                    attempt.State = RemediationAttemptState.RollbackPending;
-                    trace.AppendLine($"[ROLLBACK] Attempting rollback for {actionToExecute.Name}...");
+                    attempt.State =
+                        RemediationAttemptState.RollbackFailed;
 
-                    var rollbackResult = await _rollbackManager.RollbackAsync(actionToExecute, executionResult);
-                    attempt.RollbackResult = rollbackResult;
+                    attempt.Notes =
+                        $"Rollback failed: {rollbackResult.Summary}";
 
-                    if (rollbackResult.Success)
-                    {
-                        attempt.State = RemediationAttemptState.RolledBack;
-                        attempt.Notes = "Verification did not confirm a safe outcome. The remediation was rolled back successfully.";
-                        trace.AppendLine("[ROLLBACK] Rollback completed successfully.");
-                    }
-                    else
-                    {
-                        attempt.State = RemediationAttemptState.RollbackFailed;
-                        attempt.Notes = $"Rollback failed: {rollbackResult.Summary}";
-                        trace.AppendLine($"[ROLLBACK] Rollback failed: {rollbackResult.Summary}");
-                    }
+                    trace.AppendLine(
+                        $"[ROLLBACK] Rollback failed: {rollbackResult.Summary}");
+
+                    trace.AppendLine(
+                        "[ORCHESTRATOR] Further autonomous remediation stopped because rollback failed.");
+
+                    trace.AppendLine(
+                        "[ORCHESTRATOR] Escalating for human intervention.");
+
+                    result.Escalated = true;
+
+                    break;
                 }
             }
-            
-            // Pivot to next action
-            plan = _pivotEngine.Pivot(diagnostic, plan, actionToExecute, hardware);
+
+            plan =
+                _pivotEngine.Pivot(
+                    diagnostic,
+                    plan,
+                    actionToExecute,
+                    hardware);
+
             result.Plan = plan;
-            attempt.Notes += " Pivoted to next action.";
-            trace.AppendLine($"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
+
+            attempt.Notes +=
+                " Pivoted to next action.";
+
+            trace.AppendLine(
+                $"[PIVOT] Pivoted to next action. {plan.PlannedActions.Count} actions remaining.");
         }
 
-        if (plan.PlannedActions.Count == 0 && result.Verification != VerificationStatus.Resolved && !isDryRun)
+        if (plan.PlannedActions.Count == 0 &&
+            result.Verification !=
+                VerificationStatus.Resolved &&
+            !isDryRun)
         {
-            trace.AppendLine("[ORCHESTRATOR] All planned actions exhausted. Escalating for human intervention.");
+            trace.AppendLine(
+                "[ORCHESTRATOR] All planned actions exhausted. Escalating for human intervention.");
+
             result.Escalated = true;
         }
 
-        result.Trace = trace.ToString();
+        result.Trace =
+            trace.ToString();
+
         return result;
     }
 }
