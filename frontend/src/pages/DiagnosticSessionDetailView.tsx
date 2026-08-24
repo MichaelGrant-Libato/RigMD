@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 import AutonomyRemediationPanel from '../components/AutonomyRemediationPanel';
 import { buttonTap, cardFadeUp, cardTransition, drawerSlideRight, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiFetch } from '../lib/api';
 import type { AutonomyResult } from '../services/autonomyService';
+
+interface ActionAttemptDetail {
+  action_code: string;
+  verification_status?: string | null;
+  created_at: string;
+}
+
+interface RemediationRunDetail {
+  run_id: string;
+  status: string;
+  created_at: string;
+  completed_at?: string | null;
+  attempts: ActionAttemptDetail[];
+}
 
 interface SessionDetail {
   session_id: string;
@@ -24,6 +38,7 @@ interface SessionDetail {
   resolution_checked_at?: string | null;
   resolution_summary?: string;
   resolution_proof?: Array<{ label: string; value: string; status: string; meaning: string }>;
+  remediation_history?: RemediationRunDetail[];
 }
 
 interface RemediationAction {
@@ -262,6 +277,64 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                   </div>
                 )}
               </motion.section>
+
+              {session.remediation_history && session.remediation_history.length > 0 && (
+                <motion.section variants={cardFadeUp} initial="hidden" animate="visible" transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
+                  <div className="flex items-start gap-3">
+                    <Clock3 size={20} className="mt-0.5 text-amber-400" />
+                    <div>
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-white">Remediation History</h3>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                        Past autonomous remediation attempts for this diagnosis.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 space-y-3">
+                    {session.remediation_history.map((run) => (
+                      <div key={run.run_id} className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                              run.status === 'Resolved'
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                                : run.status === 'Failed'
+                                ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                                : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                            }`}>
+                              {run.status}
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              {new Date(run.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                            </span>
+                          </div>
+                        </div>
+
+                        {run.attempts.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {run.attempts.map((attempt, idx) => (
+                              <div key={idx} className="flex items-center justify-between rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3 py-2">
+                                <span className="text-xs font-semibold text-slate-300">
+                                  {attempt.action_code.replace(/_/g, ' ')}
+                                </span>
+                                <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                  attempt.verification_status === 'Resolved'
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                                    : attempt.verification_status
+                                    ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                                    : 'border-slate-500/30 bg-slate-500/10 text-slate-400'
+                                }`}>
+                                  {attempt.verification_status || 'Pending'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </motion.section>
+              )}
 
               <motion.section variants={cardFadeUp} initial="hidden" animate="visible" transition={cardTransition} className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6">
                 <div className="flex items-start gap-3">

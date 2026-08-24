@@ -5,5 +5,5 @@ namespace RigMD.Application.Contracts.Autonomy;
 
 public interface IRemediationPlanner
 {
-    RemediationPlan CreatePlan(DiagnosticOutput diagnosticOutput);
+    Task<RemediationPlan> CreatePlanAsync(DiagnosticOutput diagnosticOutput);
 }

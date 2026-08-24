@@ -34,4 +34,15 @@ public class RemediationRepository : IRemediationRepository
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();
     }
+
+    public async Task<IReadOnlyList<string>> GetFailedActionCodesAsync()
+    {
+        return await _db.ActionAttempts
+            .Include(a => a.Verification)
+            .Where(a => a.Verification != null && !a.Verification.IsSuccessful)
+            .Select(a => a.ActionCode)
+            .Distinct()
+            .ToListAsync();
+    }
 }
+

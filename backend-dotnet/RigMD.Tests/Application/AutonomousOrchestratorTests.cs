@@ -771,17 +771,17 @@ public class AutonomousOrchestratorTests
             _action = action;
         }
 
-        public RemediationPlan CreatePlan(
+        public Task<RemediationPlan> CreatePlanAsync(
             DiagnosticOutput diagnosticOutput)
         {
-            return new RemediationPlan
+            return Task.FromResult(new RemediationPlan
             {
                 PlannedActions = new List<RemediationActionDef>
                 {
                     _action
                 },
                 StrategyReasoning = "Test plan"
-            };
+            });
         }
     }
 

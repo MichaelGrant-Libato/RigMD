@@ -519,6 +519,131 @@ public class DiagnosticSessionRepositoryTests
                 ?.AnswerValue ?? "");
     }
 
+    [Fact]
+    public async Task GetSessionsAsync_AfterSaveAndNewContext_ReturnsSavedSessions()
+    {
+        // Use a shared SQLite file-like connection to simulate restart
+        var connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
+        connection.Open();
+
+        // Save session using first context
+        Guid savedSessionId;
+        {
+            var options = new DbContextOptionsBuilder<RigMdDbContext>()
+                .UseSqlite(connection)
+                .Options;
+
+            await using var db1 = new RigMdDbContext(options);
+            db1.Database.EnsureCreated();
+
+            var repo1 = CreateRepository(db1, "restart-client");
+
+            var hardware = new HardwareProfileDto
+            {
+                Cpu = new CpuStatsDto { Name = "Intel i9" },
+                OsVersion = "Windows 11",
+                Ram = new MemoryStatsDto { TotalGb = 32 }
+            };
+
+            savedSessionId = await repo1.SaveDiagnosisAsync(
+                new DiagnosticSymptomPayload { SymptomType = "Thermal condition" },
+                hardware,
+                "Thermal condition",
+                "Maintain",
+                "High",
+                "Clean fans",
+                "restart-client");
+        }
+
+        // Read back using a fresh context (simulated restart)
+        {
+            var options = new DbContextOptionsBuilder<RigMdDbContext>()
+                .UseSqlite(connection)
+                .Options;
+
+            await using var db2 = new RigMdDbContext(options);
+
+            var repo2 = CreateRepository(db2, "restart-client");
+
+            var sessions = await repo2.GetSessionsAsync();
+
+            Assert.NotEmpty(sessions);
+            Assert.Contains(sessions, s => s.SessionId == savedSessionId.ToString());
+
+            var loaded = sessions.First(s => s.SessionId == savedSessionId.ToString());
+            Assert.Equal("Thermal condition", loaded.DiagnosedCategory);
+            Assert.Equal("Maintain", loaded.ActionCategory);
+            Assert.Equal("Thermal condition", loaded.SymptomType);
+        }
+
+        connection.Dispose();
+    }
+
+    [Fact]
+    public async Task GetRemediationHistoryAsync_ReturnsRunsAndAttempts()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db, "client");
+
+        var hardware = new HardwareProfileDto
+        {
+            Cpu = new CpuStatsDto { Name = "Intel i9" },
+            OsVersion = "Windows 11",
+            Ram = new MemoryStatsDto { TotalGb = 32 }
+        };
+
+        var sessionId = await repo.SaveDiagnosisAsync(
+            new DiagnosticSymptomPayload(),
+            hardware,
+            "OS performance degradation",
+            "Troubleshoot",
+            "High",
+            "Explanation",
+            "client");
+
+        db.ChangeTracker.Clear();
+
+        // Get the session's output to link the remediation run
+        var session = await db.DiagnosticSessions
+            .Include(s => s.Output)
+            .FirstAsync(s => s.Id == sessionId);
+
+        var run = new RigMD.Domain.Entities.RemediationRun
+        {
+            DiagnosticOutputId = session.Output!.Id,
+            Status = "Resolved"
+        };
+        db.RemediationRuns.Add(run);
+        await db.SaveChangesAsync();
+
+        var attempt = new RigMD.Domain.Entities.ActionAttempt
+        {
+            RemediationRunId = run.Id,
+            ActionCode = "clear_user_temp_files"
+        };
+        db.ActionAttempts.Add(attempt);
+        await db.SaveChangesAsync();
+
+        var verification = new RigMD.Domain.Entities.VerificationResult
+        {
+            ActionAttemptId = attempt.Id,
+            IsSuccessful = true,
+            ObservedState = "Temp files cleared"
+        };
+        db.VerificationResults.Add(verification);
+        await db.SaveChangesAsync();
+
+        db.ChangeTracker.Clear();
+
+        var history = await repo.GetRemediationHistoryAsync(sessionId);
+
+        Assert.Single(history);
+        Assert.Equal("Resolved", history[0].Status);
+        Assert.Single(history[0].Attempts);
+        Assert.Equal("clear_user_temp_files", history[0].Attempts[0].ActionCode);
+        Assert.Equal("Resolved", history[0].Attempts[0].VerificationStatus);
+    }
+
     private sealed class TestCurrentClientProvider
         : ICurrentClientProvider
     {

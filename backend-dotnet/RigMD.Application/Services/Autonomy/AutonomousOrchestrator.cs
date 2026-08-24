@@ -78,7 +78,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         trace.AppendLine(
             "[PLANNER] Formulating plan...");
 
-        var plan = _planner.CreatePlan(diagnostic);
+        var plan = await _planner.CreatePlanAsync(diagnostic);
 
         trace.AppendLine(
             $"[PLANNER] Plan formulated: {plan.PlannedActions.Count} actions found.");

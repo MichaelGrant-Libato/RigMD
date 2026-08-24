@@ -12,4 +12,7 @@ public interface IRemediationRepository
 
     /// <summary>Returns all remediation runs linked to a given diagnostic session ID.</summary>
     Task<IReadOnlyList<RemediationRun>> GetRunsBySessionAsync(Guid diagnosticOutputId);
+
+    /// <summary>Returns distinct action codes that have historically failed verification.</summary>
+    Task<IReadOnlyList<string>> GetFailedActionCodesAsync();
 }
