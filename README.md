@@ -700,21 +700,21 @@ Relevant files include:
 ### In Progress / Remaining
 
 - ⏳ expand automated test coverage
-- ⏳ improve Application/Infrastructure separation
+- ✅ improve Application/Infrastructure separation
 - ⏳ replace anonymous/reflection-based internal models
 - ⏳ improve database aggregation queries
-- ⏳ formalize remediation planner
-- ⏳ formalize safety policy
-- ⏳ add dry-run remediation
-- ⏳ formalize verification
-- ⏳ add rollback
-- ⏳ add pivot logic
+- ✅ formalize remediation planner
+- ✅ formalize safety policy
+- ✅ add dry-run remediation
+- ✅ formalize verification
+- ✅ add rollback
+- ✅ add pivot logic
 - ✅ implement SQLite local persistence
+- ✅ remediation history, audit, and failure deprioritization
 - ⏳ implement optional Supabase synchronization
 - ⏳ desktop packaging
 - ⏳ final thesis/SRS/SDD alignment
 - ⏳ retire legacy Python runtime
-
 ---
 
 ## 17. Important Git Checkpoints
