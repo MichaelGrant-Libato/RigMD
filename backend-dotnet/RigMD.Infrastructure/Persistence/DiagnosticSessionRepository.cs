@@ -589,5 +589,39 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             .Distinct()
             .ToListAsync();
     }
+
+    public async Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId)
+    {
+        var session = await _db.DiagnosticSessions
+            .Include(s => s.Output)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+
+        if (session?.Output == null)
+            return Array.Empty<RemediationRunDto>();
+
+        var runs = await _db.RemediationRuns
+            .Include(r => r.ActionAttempts)
+                .ThenInclude(a => a.Verification)
+            .Where(r => r.DiagnosticOutputId == session.Output.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        return runs.Select(r => new RemediationRunDto
+        {
+            RunId = r.Id.ToString(),
+            Status = r.Status,
+            CreatedAt = r.CreatedAt.ToString("o"),
+            CompletedAt = r.CompletedAt?.ToString("o"),
+            Attempts = r.ActionAttempts.Select(a => new ActionAttemptDto
+            {
+                ActionCode = a.ActionCode,
+                VerificationStatus = a.Verification == null ? null
+                    : a.Verification.IsSuccessful ? "Resolved"
+                    : !string.IsNullOrEmpty(a.Verification.FailureReason) ? a.Verification.FailureReason
+                    : "Unresolved",
+                CreatedAt = a.CreatedAt.ToString("o")
+            }).ToList()
+        }).ToList().AsReadOnly();
+    }
 }
 

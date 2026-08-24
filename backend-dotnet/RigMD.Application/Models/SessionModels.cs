@@ -89,4 +89,43 @@ public class DiagnosticSessionDto
 
     [JsonPropertyName("client_id")]
     public string ClientId { get; set; } = string.Empty;
+
+    [JsonPropertyName("remediation_history")]
+    public List<RemediationRunDto> RemediationHistory { get; set; } = new();
+}
+
+/// <summary>
+/// Lightweight projection of a RemediationRun for API responses.
+/// </summary>
+public class RemediationRunDto
+{
+    [JsonPropertyName("run_id")]
+    public string RunId { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; set; } = string.Empty;
+
+    [JsonPropertyName("completed_at")]
+    public string? CompletedAt { get; set; }
+
+    [JsonPropertyName("attempts")]
+    public List<ActionAttemptDto> Attempts { get; set; } = new();
+}
+
+/// <summary>
+/// Lightweight projection of an ActionAttempt for API responses.
+/// </summary>
+public class ActionAttemptDto
+{
+    [JsonPropertyName("action_code")]
+    public string ActionCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("verification_status")]
+    public string? VerificationStatus { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; set; } = string.Empty;
 }

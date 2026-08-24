@@ -56,4 +56,7 @@ public interface IDiagnosticSessionRepository
 
     /// <summary>Returns all observed warning sign text values across sessions.</summary>
     Task<IEnumerable<string>> GetObservedWarningTextsAsync();
+
+    /// <summary>Returns remediation run history for a given session ID.</summary>
+    Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId);
 }

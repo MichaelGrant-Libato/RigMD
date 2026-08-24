@@ -150,6 +150,9 @@ public class DiagnosticController : ControllerBase
             if (session == null)
                 return NotFound(new { detail = "Diagnosis record not found." });
 
+            // Attach remediation history
+            session.RemediationHistory = (await _sessionRepository.GetRemediationHistoryAsync(id)).ToList();
+
             return Ok(session);
         }
         catch (Exception ex)
