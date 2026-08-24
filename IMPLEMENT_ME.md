@@ -450,7 +450,7 @@ Wire `IVerificationService`, `IRollbackManager`, and `IPivotEngine` into the `Au
 
 ---
 
-## Phase 13 — History, Audit, & Recurring Patterns 🟡 PARTIALLY COMPLETE
+## Phase 13 — History, Audit, & Recurring Patterns ✅ COMPLETE
 
 **Purpose:**  
 Make all remediation activity visible and traceable. Past attempts must be persisted to SQLite and surfaced in the frontend History view. The system must also use history to improve future remediation ranking.
@@ -461,6 +461,8 @@ Fully wire the SQLite repositories to the diagnostic and remediation flows. Pers
 **Current Verified State:**
 - The `X-Client-ID` identity tracking requirement is fully implemented in the frontend (`clientId.ts`, `api.ts`).
 - ASP.NET Core middleware (`ClientIdMiddleware.cs`) enforces this header on all `/api` routes, scoping data exclusively to individual installations.
+- The repository natively persists sessions to SQLite, and remediation runs are attached and loaded successfully.
+- Failed actions (`Unresolved`, `Unknown`, `Worse`) are deprioritized by the autonomy engine.
 
 **Key Files to Create/Update:**
 - Robust repository abstractions (`IDiagnosticSessionRepository`, `IRemediationRepository`) to ensure clean dependency inversion for the upcoming full SQLite migration
@@ -471,9 +473,9 @@ Fully wire the SQLite repositories to the diagnostic and remediation flows. Pers
 **Acceptance Criteria:**
 - [x] Frontend generates and persists `X-Client-ID` and sends it with every request
 - [x] Backend enforces `X-Client-ID` on all `/api` endpoints
-- [ ] Sessions survive backend restarts (loaded from SQLite)
-- [ ] History page shows all past sessions with remediation attempts
-- [ ] Actions that failed in past sessions are ranked lower in future plans
+- [x] Sessions survive backend restarts (loaded from SQLite)
+- [x] History page shows all past sessions with remediation attempts
+- [x] Actions that failed in past sessions are ranked lower in future plans
 
 ---
 
@@ -586,7 +588,7 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 10 | Dry-Run Autonomous Engine | ✅ Complete |
 | 11 | First Real Autonomous Remediation | ✅ Complete |
 | 12 | Verification, Rollback, and Pivot | ✅ Complete |
-| 13 | History, Audit, & Recurring Patterns | 🟡 Partially Complete |
+| 13 | History, Audit, & Recurring Patterns | ✅ Complete |
 | 14 | AI Explanation Integration | ✅ Complete |
 | 15 | Optional Cloud Sync | 🔲 Pending |
 | 16 | Desktop Packaging | 🔲 Pending |
