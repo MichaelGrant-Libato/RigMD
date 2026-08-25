@@ -1023,11 +1023,10 @@ export default function DiagnosticResultView({
                   marginBottom: 14,
                 }}
               >
-                <AutonomyRemediationPanel
-                  diagnosedCategory={
-                    result.diagnosed_category
-                  }
-                />
+              <AutonomyRemediationPanel
+                sessionId={result.session_id}
+                diagnosedCategory={result.diagnosed_category}
+              />
               </div>
 
               <div

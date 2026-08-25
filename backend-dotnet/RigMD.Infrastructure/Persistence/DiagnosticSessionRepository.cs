@@ -158,6 +158,30 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return session == null ? null : MapToDto(session);
     }
 
+    public async Task<DiagnosticOutput?> GetDiagnosticOutputAsync(Guid sessionId)
+    {
+        var clientId = GetCurrentClientId();
+
+        var query = _db.DiagnosticSessions
+            .Include(s => s.Answers)
+            .Include(s => s.Output)
+            .Include(s => s.Profile)
+            .Where(s => s.Id == sessionId);
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s =>
+                s.Profile.ClientId == clientId ||
+                s.Answers.Any(a =>
+                    a.QuestionKey == "client_id" &&
+                    a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
+
+        return session?.Output;
+    }
+
     // ---------------------------------------------------------------
     // UPDATE
     // ---------------------------------------------------------------
@@ -590,14 +614,31 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             .ToListAsync();
     }
 
-    public async Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId)
+   public async Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId)
     {
-        var session = await _db.DiagnosticSessions
+        var clientId = GetCurrentClientId();
+
+        var query = _db.DiagnosticSessions
+            .Include(s => s.Answers)
             .Include(s => s.Output)
-            .FirstOrDefaultAsync(s => s.Id == sessionId);
+            .Include(s => s.Profile)
+            .Where(s => s.Id == sessionId);
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s =>
+                s.Profile.ClientId == clientId ||
+                s.Answers.Any(a =>
+                    a.QuestionKey == "client_id" &&
+                    a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
 
         if (session?.Output == null)
+        {
             return Array.Empty<RemediationRunDto>();
+        }
 
         var runs = await _db.RemediationRuns
             .Include(r => r.ActionAttempts)
@@ -615,10 +656,13 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             Attempts = r.ActionAttempts.Select(a => new ActionAttemptDto
             {
                 ActionCode = a.ActionCode,
-                VerificationStatus = a.Verification == null ? null
-                    : a.Verification.IsSuccessful ? "Resolved"
-                    : !string.IsNullOrEmpty(a.Verification.FailureReason) ? a.Verification.FailureReason
-                    : "Unresolved",
+                VerificationStatus = a.Verification == null
+                    ? null
+                    : a.Verification.IsSuccessful
+                        ? "Resolved"
+                        : !string.IsNullOrEmpty(a.Verification.FailureReason)
+                            ? a.Verification.FailureReason
+                            : "Unresolved",
                 CreatedAt = a.CreatedAt.ToString("o")
             }).ToList()
         }).ToList().AsReadOnly();

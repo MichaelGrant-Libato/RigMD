@@ -1880,13 +1880,14 @@ export default function NewDiagnosisView() {
                           })}
                         </motion.section>
                       )}
-
-                      {!isNoActiveIssue(report) && (
-                        <AutonomyRemediationPanel
-                          diagnosedCategory={report.diagnosed_category}
-                          onExecutionComplete={handleAutonomyExecutionComplete}
-                        />
-                      )}
+                      {!isNoActiveIssue(report) &&
+                        report.session_id && (
+                          <AutonomyRemediationPanel
+                            sessionId={report.session_id}
+                            diagnosedCategory={report.diagnosed_category}
+                            onExecutionComplete={handleAutonomyExecutionComplete}
+                          />
+                        )}
 
                       {!isNoActiveIssue(report) && remediationActions.length === 0 && (
                         <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 text-xs text-gray-500">

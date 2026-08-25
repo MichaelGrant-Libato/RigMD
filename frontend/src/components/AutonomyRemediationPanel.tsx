@@ -24,9 +24,44 @@ import {
 } from '../services/autonomyService';
 
 interface AutonomyRemediationPanelProps {
+  sessionId: string;
   diagnosedCategory: string;
-  onExecutionComplete?: (result: AutonomyResult) => void;
+  onExecutionComplete?: (
+    result: AutonomyResult,
+  ) => void;
 }
+
+const ATTEMPT_STATE_LABELS: Record<
+  number,
+  string
+> = {
+  0: 'Planned',
+  1: 'SafetyRejected',
+  2: 'AwaitingConsent',
+  3: 'Executing',
+  4: 'ExecutionFailed',
+  5: 'VerificationPending',
+  6: 'Resolved',
+  7: 'Unresolved',
+  8: 'Worse',
+  9: 'VerificationUnknown',
+  10: 'RollbackPending',
+  11: 'RolledBack',
+  12: 'RollbackFailed',
+  13: 'PivotPending',
+  14: 'Pivoted',
+  15: 'Completed',
+};
+
+const VERIFICATION_STATUS_LABELS: Record<
+  number,
+  string
+> = {
+  0: 'Resolved',
+  1: 'Unresolved',
+  2: 'Worse',
+  3: 'Unknown',
+};
 
 function getLatestAttempt(
   result?: AutonomyResult | null,
@@ -38,6 +73,33 @@ function getLatestAttempt(
   );
 }
 
+function getAttemptStateLabel(
+  state?: string | number,
+) {
+  if (typeof state === 'number') {
+    return (
+      ATTEMPT_STATE_LABELS[state] ??
+      String(state)
+    );
+  }
+
+  return state ?? '';
+}
+
+function getVerificationLabel(
+  verification?: string | number,
+) {
+  if (typeof verification === 'number') {
+    return (
+      VERIFICATION_STATUS_LABELS[
+        verification
+      ] ?? String(verification)
+    );
+  }
+
+  return verification ?? '';
+}
+
 function getState(
   result?: AutonomyResult | null,
 ) {
@@ -47,29 +109,25 @@ function getState(
 
   const attempt = getLatestAttempt(result);
 
+  const attemptState =
+    getAttemptStateLabel(attempt?.state);
+
+  const verificationState =
+    getVerificationLabel(
+      result.verification,
+    );
+
   const state = (
-    attempt?.state ||
-    result.verification ||
-    ''
+    attemptState || verificationState
   ).toLowerCase();
 
   const safety = result.safety;
 
-  /*
-   * Important:
-   *
-   * requiresUserConfirmation may remain true even after
-   * the user has provided consent.
-   *
-   * Therefore it must NOT, by itself, mean that the
-   * current result is waiting for consent.
-   */
   const awaitingConsent =
     state.includes('consent') ||
-    (
-      safety?.requiresUserConfirmation === true &&
-      safety?.isApproved === false
-    );
+    (safety?.requiresUserConfirmation ===
+      true &&
+      safety?.isApproved === false);
 
   if (awaitingConsent) {
     return 'consent';
@@ -119,18 +177,9 @@ function getState(
     return 'success';
   }
 
-  /*
-   * Execution success alone means the executor completed.
-   *
-   * Verification may still determine that the issue is
-   * unresolved, worse, unknown, or rolled back.
-   *
-   * We only fall back to execution success when no more
-   * specific backend state is available.
-   */
   if (
     result.execution?.success === true &&
-    !result.verification
+    result.verification === undefined
   ) {
     return 'success';
   }
@@ -207,7 +256,9 @@ function getSummary(
   result: AutonomyResult,
   mode: 'dry-run' | 'execute',
 ) {
-  const attempt = getLatestAttempt(result);
+  const attempt =
+    getLatestAttempt(result);
+
   const state = getState(result);
 
   if (state === 'consent') {
@@ -318,7 +369,9 @@ function ResultCard({
   mode: 'dry-run' | 'execute';
 }) {
   const state = getState(result);
-  const attempt = getLatestAttempt(result);
+
+  const attempt =
+    getLatestAttempt(result);
 
   const plannedActions =
     result.plan?.plannedActions ?? [];
@@ -341,8 +394,12 @@ function ResultCard({
         </div>
 
         <span className="rounded-full border border-current/30 px-2.5 py-1 text-[10px] font-bold uppercase">
-          {attempt?.state ||
-            result.verification ||
+          {getAttemptStateLabel(
+            attempt?.state,
+          ) ||
+            getVerificationLabel(
+              result.verification,
+            ) ||
             (mode === 'dry-run'
               ? 'Preview'
               : 'Completed')}
@@ -356,8 +413,9 @@ function ResultCard({
           </p>
 
           <p className="mt-1 text-xs text-red-100/90">
-            RigMD stopped autonomous remediation.
-            Further review or manual intervention is
+            RigMD stopped autonomous
+            remediation. Further review or
+            manual intervention is
             recommended.
           </p>
         </div>
@@ -372,23 +430,29 @@ function ResultCard({
           <p className="mt-1 text-xs">
             {result.safety.isApproved
               ? 'Allowed by backend safety policy.'
-              : 'Not approved by backend safety policy.'}
-
+              : 'Not approved by backend safety policy.'}{' '}
             {result.safety
               .requiresUserConfirmation
-              ? result.safety.isApproved
-                ? ' Required user consent was acknowledged.'
-                : ' User consent is required.'
+              ? mode === 'dry-run'
+                ? 'Dry-run approved. Explicit user consent is required before real execution.'
+                : result.safety.isApproved
+                  ? 'Required user consent was acknowledged.'
+                  : 'User consent is required.'
               : ''}
           </p>
 
-          {result.safety.rejectionReason && (
+          {result.safety
+            .rejectionReason && (
             <p className="mt-1 text-xs opacity-85">
-              {result.safety.rejectionReason}
+              {
+                result.safety
+                  .rejectionReason
+              }
             </p>
           )}
 
-          {result.safety.warnings?.length ? (
+          {result.safety.warnings
+            ?.length ? (
             <ul className="mt-2 space-y-1 text-xs opacity-85">
               {result.safety.warnings.map(
                 (warning) => (
@@ -410,17 +474,19 @@ function ResultCard({
 
           <div className="mt-2 space-y-2">
             {plannedActions.map(
-              (action) => (
+              (action, index) => (
                 <div
                   key={
                     action.id ||
-                    action.name
+                    action.name ||
+                    index
                   }
                   className="text-xs"
                 >
                   <p className="font-bold text-white">
                     {action.name ||
-                      action.id}
+                      action.id ||
+                      'Remediation Action'}
                   </p>
 
                   {action.description && (
@@ -463,7 +529,8 @@ function ResultCard({
           </div>
 
           <p className="mt-1 text-xs">
-            {attempt.rollbackResult.success
+            {attempt.rollbackResult
+              .success
               ? 'Rollback completed.'
               : 'Rollback failed.'}
           </p>
@@ -503,6 +570,7 @@ function ResultCard({
 }
 
 export default function AutonomyRemediationPanel({
+  sessionId,
   diagnosedCategory,
   onExecutionComplete,
 }: AutonomyRemediationPanelProps) {
@@ -549,22 +617,24 @@ export default function AutonomyRemediationPanel({
     setUserConsentProvided,
   ] = useState(false);
 
-  /*
-   * Prefer the latest real execution result.
-   *
-   * This prevents an older dry-run result that required
-   * consent from keeping the UI stuck in the consent state
-   * after real execution has already been approved.
-   */
-  const currentResult =
-    executionResult ?? dryRunResult;
+  const consentRequired =
+    useMemo(() => {
+      if (executionResult) {
+        return (
+          getState(executionResult) ===
+          'consent'
+        );
+      }
 
-  const consentRequired = useMemo(
-    () =>
-      getState(currentResult) ===
-      'consent',
-    [currentResult],
-  );
+      return (
+        dryRunResult?.safety
+          ?.requiresUserConfirmation ===
+        true
+      );
+    }, [
+      dryRunResult,
+      executionResult,
+    ]);
 
   const requestActive =
     isDryRunLoading ||
@@ -572,15 +642,15 @@ export default function AutonomyRemediationPanel({
 
   const executeDisabled =
     requestActive ||
+    !sessionId ||
     !diagnosedCategory ||
-    (
-      consentRequired &&
-      !userConsentProvided
-    );
+    (consentRequired &&
+      !userConsentProvided);
 
   const runDryRun = async () => {
     if (
       requestActive ||
+      !sessionId ||
       !diagnosedCategory
     ) {
       return;
@@ -588,23 +658,22 @@ export default function AutonomyRemediationPanel({
 
     setIsDryRunLoading(true);
     setDryRunError(null);
-
-    /*
-     * A new dry run starts a fresh preview cycle.
-     */
     setExecutionResult(null);
     setUserConsentProvided(false);
 
     try {
       const result =
         await runAutonomyDryRun({
+          sessionId,
           diagnosedCategory,
         });
 
       setDryRunResult(result);
     } catch (error) {
       setDryRunError(
-        getBackendErrorMessage(error),
+        getBackendErrorMessage(
+          error,
+        ),
       );
     } finally {
       setIsDryRunLoading(false);
@@ -612,7 +681,11 @@ export default function AutonomyRemediationPanel({
   };
 
   const runExecution = async () => {
-    if (executeDisabled) {
+    if (
+      executeDisabled ||
+      !sessionId ||
+      !diagnosedCategory
+    ) {
       return;
     }
 
@@ -622,17 +695,13 @@ export default function AutonomyRemediationPanel({
     try {
       const result =
         await runAutonomyExecution({
+          sessionId,
           diagnosedCategory,
           userConsentProvided,
         });
 
       setExecutionResult(result);
 
-      /*
-       * Once backend execution has finished and the
-       * result is no longer waiting for consent, remove
-       * the local consent selection.
-       */
       if (
         getState(result) !==
         'consent'
@@ -647,7 +716,9 @@ export default function AutonomyRemediationPanel({
       );
     } catch (error) {
       setExecuteError(
-        getBackendErrorMessage(error),
+        getBackendErrorMessage(
+          error,
+        ),
       );
     } finally {
       setIsExecuteLoading(false);
@@ -710,6 +781,7 @@ export default function AutonomyRemediationPanel({
             onClick={runDryRun}
             disabled={
               requestActive ||
+              !sessionId ||
               !diagnosedCategory
             }
             whileTap={buttonTap}
