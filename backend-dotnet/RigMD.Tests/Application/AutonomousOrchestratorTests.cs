@@ -936,4 +936,84 @@ public class AutonomousOrchestratorTests
             };
         }
     }
+    [Fact]
+        public async Task RunDryRunCycleAsync_WhenConsentWouldBeRequired_StillSimulatesWithoutRealExecution()
+        {
+            var action = CreateAction();
+            action.IsReversible = false;
+
+            var planner =
+                new FakePlanner(action);
+
+            var safetyPolicy =
+                new RequiresConsentSafetyPolicy();
+
+            var dryRunExecutor =
+                new FakeDryRunExecutor();
+
+            var realExecutor =
+                new FakeRealExecutor();
+
+            var verificationService =
+                new FakeVerificationService();
+
+            var rollbackManager =
+                new FakeRollbackManager();
+
+            var pivotEngine =
+                new FakePivotEngine();
+
+            var orchestrator =
+                new AutonomousOrchestrator(
+                    planner,
+                    safetyPolicy,
+                    dryRunExecutor,
+                    realExecutor,
+                    verificationService,
+                    rollbackManager,
+                    pivotEngine);
+
+            var result =
+                await orchestrator
+                    .RunDryRunCycleAsync(
+                        CreateDiagnostic(),
+                        CreateHardware());
+
+            Assert.True(
+                dryRunExecutor.WasCalled);
+
+            Assert.False(
+                realExecutor.WasCalled);
+
+            Assert.NotNull(
+                result.Execution);
+
+            Assert.True(
+                result.Execution.Success);
+
+            Assert.NotNull(
+                result.Safety);
+
+            Assert.True(
+                result.Safety
+                    .RequiresUserConfirmation);
+
+            Assert.True(
+                result.Safety.IsApproved);
+
+            Assert.Single(
+                result.Attempts);
+
+            Assert.Equal(
+                RemediationAttemptState.Completed,
+                result.Attempts[0].State);
+
+            Assert.Contains(
+                "No real system changes were made",
+                result.Attempts[0].Notes);
+
+            Assert.Contains(
+                "Real execution will require explicit user consent",
+                result.Trace);
+        }
 }

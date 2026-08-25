@@ -351,6 +351,7 @@ export default function DiagnosticSessionDetailView({ sessionId, onBack }: Props
                   <AutonomyRemediationPanel
                     diagnosedCategory={session.diagnosed_category}
                     onExecutionComplete={handleAutonomyExecutionComplete}
+                    sessionId={sessionId}
                   />
 
                   {actions.length === 0 ? (

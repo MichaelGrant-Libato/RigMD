@@ -40,9 +40,9 @@ export interface AutonomyExecution {
 
 export interface AutonomyAttempt {
   action?: AutonomyActionDef;
-  state?: string;
+  state?: string | number;
   execution?: AutonomyExecution;
-  verification?: string;
+  verification?: string | number;
   rollbackResult?: AutonomyExecution;
   notes?: string;
 }
@@ -51,36 +51,59 @@ export interface AutonomyResult {
   plan?: AutonomyPlan;
   safety?: AutonomySafety;
   execution?: AutonomyExecution;
-  verification?: string;
+  verification?: string | number;
   attempts?: AutonomyAttempt[];
   escalated?: boolean;
   trace?: string;
 }
 
 export interface AutonomyRequest {
+  sessionId: string;
   diagnosedCategory: string;
   userConsentProvided?: boolean;
 }
 
-export async function runAutonomyDryRun({ diagnosedCategory }: AutonomyRequest) {
-  const response = await apiPost<AutonomyResult>('/api/autonomy/dry-run', {
-    diagnosedCategory,
-  });
+export async function runAutonomyDryRun({
+  sessionId,
+  diagnosedCategory,
+}: AutonomyRequest) {
+  const response = await apiPost<AutonomyResult>(
+    '/api/autonomy/dry-run',
+    {
+      sessionId,
+      diagnosedCategory,
+    },
+  );
 
   return response.data;
 }
 
-export async function runAutonomyExecution({ diagnosedCategory, userConsentProvided = false }: AutonomyRequest) {
-  const response = await apiPost<AutonomyResult>('/api/autonomy/execute', {
-    diagnosedCategory,
-    userConsentProvided,
-  });
+export async function runAutonomyExecution({
+  sessionId,
+  diagnosedCategory,
+  userConsentProvided = false,
+}: AutonomyRequest) {
+  const response = await apiPost<AutonomyResult>(
+    '/api/autonomy/execute',
+    {
+      sessionId,
+      diagnosedCategory,
+      userConsentProvided,
+    },
+  );
 
   return response.data;
 }
 
 export function getBackendErrorMessage(error: unknown) {
-  const data = (error as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  const data = (
+    error as {
+      response?: {
+        data?: Record<string, unknown>;
+      };
+    }
+  )?.response?.data;
+
   const fields = [
     data?.message,
     data?.detail,
@@ -93,8 +116,15 @@ export function getBackendErrorMessage(error: unknown) {
     data?.rollbackMessage,
   ];
 
-  const first = fields.find((value) => typeof value === 'string' && value.trim().length > 0);
-  if (typeof first === 'string') return first;
+  const first = fields.find(
+    (value) =>
+      typeof value === 'string' &&
+      value.trim().length > 0,
+  );
+
+  if (typeof first === 'string') {
+    return first;
+  }
 
   return 'Remediation request failed. Please check the backend connection and try again.';
 }

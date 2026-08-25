@@ -1,5 +1,6 @@
 using RigMD.Application.Models;
 using RigMD.Domain.Rules;
+using RigMD.Domain.Entities;
 
 namespace RigMD.Application.Contracts.Persistence;
 
@@ -24,6 +25,12 @@ public interface IDiagnosticSessionRepository
 
     /// <summary>Returns a single session by ID, or null if not found.</summary>
     Task<DiagnosticSessionDto?> GetSessionAsync(Guid sessionId);
+
+    /// <summary>
+    /// Returns the persisted diagnostic output for a session owned by the current client,
+    /// or null when the session does not exist or is not accessible.
+    /// </summary>
+    Task<DiagnosticOutput?> GetDiagnosticOutputAsync(Guid sessionId);
 
     /// <summary>Updates the resolution outcome fields on an existing session.</summary>
     Task<bool> UpdateResolutionAsync(

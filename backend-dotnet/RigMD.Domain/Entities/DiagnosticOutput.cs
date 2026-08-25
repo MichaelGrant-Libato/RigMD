@@ -13,5 +13,5 @@ public class DiagnosticOutput : BaseEntity
     public ICollection<ReasoningFactor> ReasoningFactors { get; set; } = new List<ReasoningFactor>();
     public ICollection<OutputWarningSign> WarningSigns { get; set; } = new List<OutputWarningSign>();
     
-    public RemediationRun? RemediationRun { get; set; }
+    public ICollection<RemediationRun> RemediationRuns { get; set; } = new List<RemediationRun>();
 }

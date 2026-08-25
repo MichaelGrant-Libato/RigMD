@@ -78,6 +78,7 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediati
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRollbackManager,        RigMD.Infrastructure.Remediation.RollbackManager>();
 
 builder.Services.AddScoped<DatabaseSyncService>();
+builder.Services.AddScoped<LocalDatabaseSchemaUpgradeService>();
 
 var app = builder.Build();
 
@@ -87,7 +88,12 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<RigMdDbContext>();
     db.Database.EnsureCreated();
 
-    var syncService = scope.ServiceProvider.GetRequiredService<DatabaseSyncService>();
+    var schemaUpgradeService =
+        scope.ServiceProvider.GetRequiredService<LocalDatabaseSchemaUpgradeService>();
+    await schemaUpgradeService.ApplyAsync();
+
+    var syncService =
+        scope.ServiceProvider.GetRequiredService<DatabaseSyncService>();
     await syncService.SyncFromPostgresAsync();
 }
 

@@ -85,10 +85,10 @@ public class RigMdDbContext : DbContext
             }
         }
 
-        modelBuilder.Entity<DiagnosticOutput>()
-            .HasOne(o => o.RemediationRun)
-            .WithOne(r => r.Output)
-            .HasForeignKey<RemediationRun>(r => r.DiagnosticOutputId)
+        modelBuilder.Entity<RemediationRun>()
+            .HasOne(r => r.Output)
+            .WithMany(o => o.RemediationRuns)
+            .HasForeignKey(r => r.DiagnosticOutputId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<ActionAttempt>()

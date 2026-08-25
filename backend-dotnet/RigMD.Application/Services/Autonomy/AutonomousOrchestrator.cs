@@ -131,7 +131,8 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
 
             result.Safety = safety;
 
-            if (safety.RequiresUserConfirmation &&
+            if (!isDryRun &&
+                safety.RequiresUserConfirmation &&
                 !userConsentProvided)
             {
                 safety.IsApproved = false;
@@ -149,6 +150,14 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                     "[SAFETY] Execution paused. Explicit user consent is required.");
 
                 break;
+            }
+
+            if (isDryRun &&
+                safety.IsApproved &&
+                safety.RequiresUserConfirmation)
+            {
+                trace.AppendLine(
+                    "[SAFETY] Dry-run preview allowed. Real execution will require explicit user consent.");
             }
 
             if (!safety.IsApproved)
