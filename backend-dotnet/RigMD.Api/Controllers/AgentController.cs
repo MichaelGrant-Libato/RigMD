@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using RigMD.Api.Models;
+using RigMD.Application.Contracts.Persistence;
 
 namespace RigMD.Api.Controllers;
 
@@ -7,12 +9,18 @@ namespace RigMD.Api.Controllers;
 [Route("api/agent")]
 public class AgentController : ControllerBase
 {
-    private static readonly Dictionary<string, AgentStatus> Agents = new();
-    private static readonly Dictionary<string, AgentSnapshotRequest> Snapshots = new();
+    private readonly IAgentRepository _agentRepository;
+
+    public AgentController(
+        IAgentRepository agentRepository)
+    {
+        _agentRepository = agentRepository;
+    }
 
     [HttpPost("register")]
-    public IActionResult Register(
-        [FromBody] AgentRegisterRequest request)
+    public async Task<IActionResult> Register(
+        [FromBody] AgentRegisterRequest request,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.AgentId))
         {
@@ -22,23 +30,33 @@ public class AgentController : ControllerBase
             });
         }
 
-        var status = new AgentStatus
+        var clientId =
+            HttpContext.Items["ClientId"]?
+                .ToString();
+
+        if (string.IsNullOrWhiteSpace(clientId))
         {
-            AgentId = request.AgentId,
-            DeviceName = request.DeviceName,
-            AgentVersion = request.AgentVersion,
-            LastSeen = DateTimeOffset.UtcNow,
-            IsOnline = true
-        };
+            return BadRequest(new
+            {
+                message = "Client ID is required."
+            });
+        }
 
-        Agents[request.AgentId] = status;
+        var agent =
+            await _agentRepository.RegisterAsync(
+                request.AgentId,
+                clientId,
+                request.DeviceName,
+                request.AgentVersion,
+                cancellationToken);
 
-        return Ok(status);
+        return Ok(ToStatus(agent));
     }
 
     [HttpPost("heartbeat")]
-    public IActionResult Heartbeat(
-        [FromBody] AgentHeartbeatRequest request)
+    public async Task<IActionResult> Heartbeat(
+        [FromBody] AgentHeartbeatRequest request,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.AgentId))
         {
@@ -48,27 +66,29 @@ public class AgentController : ControllerBase
             });
         }
 
-        if (!Agents.TryGetValue(
+        var agent =
+            await _agentRepository.HeartbeatAsync(
                 request.AgentId,
-                out var status))
+                request.DeviceName,
+                request.AgentVersion,
+                cancellationToken);
+
+        if (agent == null)
         {
             return NotFound(new
             {
-                message = "Agent is not registered."
+                message =
+                    "Agent is not registered."
             });
         }
 
-        status.DeviceName = request.DeviceName;
-        status.AgentVersion = request.AgentVersion;
-        status.LastSeen = DateTimeOffset.UtcNow;
-        status.IsOnline = true;
-
-        return Ok(status);
+        return Ok(ToStatus(agent));
     }
 
     [HttpPost("snapshot")]
-    public IActionResult Snapshot(
-        [FromBody] AgentSnapshotRequest request)
+    public async Task<IActionResult> Snapshot(
+        [FromBody] AgentSnapshotRequest request,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.AgentId))
         {
@@ -78,15 +98,29 @@ public class AgentController : ControllerBase
             });
         }
 
-        if (!Agents.ContainsKey(request.AgentId))
+        var agent =
+            await _agentRepository.GetAgentAsync(
+                request.AgentId,
+                cancellationToken);
+
+        if (agent == null)
         {
             return NotFound(new
             {
-                message = "Agent is not registered."
+                message =
+                    "Agent is not registered."
             });
         }
 
-        Snapshots[request.AgentId] = request;
+        var hardwareJson =
+            JsonSerializer.Serialize(
+                request.Hardware);
+
+        await _agentRepository.SaveSnapshotAsync(
+            request.AgentId,
+            request.CapturedAt,
+            hardwareJson,
+            cancellationToken);
 
         return Ok(new
         {
@@ -97,12 +131,16 @@ public class AgentController : ControllerBase
     }
 
     [HttpGet("{agentId}")]
-    public IActionResult GetAgent(
-        string agentId)
+    public async Task<IActionResult> GetAgent(
+        string agentId,
+        CancellationToken cancellationToken)
     {
-        if (!Agents.TryGetValue(
+        var agent =
+            await _agentRepository.GetAgentAsync(
                 agentId,
-                out var status))
+                cancellationToken);
+
+        if (agent == null)
         {
             return NotFound(new
             {
@@ -110,46 +148,59 @@ public class AgentController : ControllerBase
             });
         }
 
-        var online =
-            DateTimeOffset.UtcNow -
-            status.LastSeen <
-            TimeSpan.FromMinutes(2);
-
-        status.IsOnline = online;
-
-        return Ok(status);
+        return Ok(ToStatus(agent));
     }
 
     [HttpGet("{agentId}/snapshot")]
-    public IActionResult GetSnapshot(
-        string agentId)
+    public async Task<IActionResult> GetSnapshot(
+        string agentId,
+        CancellationToken cancellationToken)
     {
-        if (!Snapshots.TryGetValue(
-                agentId,
-                out var snapshot))
+        var snapshot =
+            await _agentRepository
+                .GetLatestSnapshotAsync(
+                    agentId,
+                    cancellationToken);
+
+        if (snapshot == null)
         {
             return NotFound(new
             {
-                message = "No snapshot found for this agent."
+                message =
+                    "No snapshot found for this agent."
             });
         }
 
-        return Ok(snapshot);
+        using var hardware =
+            JsonDocument.Parse(
+                snapshot.HardwareJson);
+
+        return Ok(new
+        {
+            snapshot.AgentId,
+            snapshot.CapturedAt,
+            Hardware =
+                hardware.RootElement.Clone()
+        });
     }
 
-    public class AgentStatus
+    private static object ToStatus(
+        AgentDeviceRecord agent)
     {
-        public string AgentId { get; set; } =
-            string.Empty;
+        var isOnline =
+            DateTimeOffset.UtcNow -
+            agent.LastSeen <
+            TimeSpan.FromMinutes(2);
 
-        public string DeviceName { get; set; } =
-            string.Empty;
-
-        public string AgentVersion { get; set; } =
-            string.Empty;
-
-        public DateTimeOffset LastSeen { get; set; }
-
-        public bool IsOnline { get; set; }
+        return new
+        {
+            agent.AgentId,
+            agent.ClientId,
+            agent.DeviceName,
+            agent.AgentVersion,
+            agent.RegisteredAt,
+            agent.LastSeen,
+            IsOnline = isOnline
+        };
     }
 }
