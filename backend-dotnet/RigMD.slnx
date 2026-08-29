@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="RigMD.Agent/RigMD.Agent.csproj" />
   <Project Path="RigMD.Api/RigMD.Api.csproj" />
   <Project Path="RigMD.Application/RigMD.Application.csproj" />
   <Project Path="RigMD.Domain/RigMD.Domain.csproj" />

@@ -39,8 +39,17 @@ builder.Services.AddDbContext<RigMdDbContext>(options =>
 builder.Services.AddScoped<RigMD.Application.Contracts.Common.ICurrentClientProvider, RigMD.Api.Services.HttpCurrentClientProvider>();
 
 // Repository abstractions
-builder.Services.AddScoped<IDiagnosticSessionRepository, DiagnosticSessionRepository>();
-builder.Services.AddScoped<IRemediationRepository, RemediationRepository>();
+builder.Services.AddScoped<
+    IDiagnosticSessionRepository,
+    DiagnosticSessionRepository>();
+
+builder.Services.AddScoped<
+    IRemediationRepository,
+    RemediationRepository>();
+
+builder.Services.AddScoped<
+    IAgentRepository,
+    AgentRepository>();
 
 // ---------------------------------------------------------------
 // Windows Observation Layer
@@ -76,6 +85,7 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IVerificationSer
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRollbackManager,        RigMD.Infrastructure.Remediation.RollbackManager>();
+
 
 builder.Services.AddScoped<DatabaseSyncService>();
 builder.Services.AddScoped<LocalDatabaseSchemaUpgradeService>();

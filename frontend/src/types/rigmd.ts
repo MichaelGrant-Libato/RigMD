@@ -1,5 +1,106 @@
 //rigmd.ts
 
+export interface AgentStatus {
+  agentId: string;
+  clientId: string;
+  deviceName: string;
+  agentVersion: string;
+  registeredAt: string;
+  lastSeen: string;
+  isOnline: boolean;
+}
+
+export interface AgentHardwareSnapshot {
+  deviceName: string;
+  osVersion: string;
+  systemAge: string;
+  chipsetDriver: string;
+  primaryStorageType: string;
+
+  cpu: {
+    name: string;
+    cores: number;
+    threads: number;
+    frequencyMhz: number;
+    usagePercent: number;
+  };
+
+  gpu: {
+    name: string;
+    type: string;
+    driver: string;
+    vramGb: number;
+  };
+
+  ram: {
+    usedGb: number;
+    totalGb: number;
+    usagePercent: number;
+  };
+
+  storageDrives: Array<{
+    model: string;
+    type: string;
+    sizeGb: number;
+    interface: string;
+    mediaType?: string | null;
+    busType?: string | null;
+    detectionSource?: string | null;
+    diskIndex?: number | null;
+    usedGb?: number | null;
+    usagePercent?: number | null;
+  }>;
+
+  allDisks: Array<{
+    drive: string;
+    mountpoint: string;
+    fsType: string;
+    diskIndex?: number | null;
+    totalGb: number;
+    usedGb: number;
+    usagePercent: number;
+  }>;
+
+  processInsights?: {
+    browserDetected: boolean;
+    browserProcessCount: number;
+    browserMemoryMb: number;
+    browserHeavy: boolean;
+    gameDetected: boolean;
+    gameProcesses: string[];
+    topMemoryApps: Array<{
+      name: string;
+      processCount: number;
+      memoryMb: number;
+    }>;
+  };
+}
+
+export interface AgentSnapshotResponse {
+  agentId: string;
+  capturedAt: string;
+  hardware: AgentHardwareSnapshot;
+}
+
+export interface AgentCommandResponse {
+  id: string;
+  agentId: string;
+  commandType: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  requestedAt: string;
+  claimedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export type AutomaticScanStage =
+  | 'idle'
+  | 'requesting'
+  | 'scanning'
+  | 'loading-evidence'
+  | 'completed'
+  | 'failed';
+
 export interface HardwareStats {
   device_name: string;
   os_version: string;
