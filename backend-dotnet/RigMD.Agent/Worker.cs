@@ -10,15 +10,18 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AgentIdentityService _identityService;
+    private readonly AgentApiClient _apiClient;
 
     public Worker(
         ILogger<Worker> logger,
         IServiceScopeFactory scopeFactory,
-        AgentIdentityService identityService)
+        AgentIdentityService identityService,
+        AgentApiClient apiClient)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
         _identityService = identityService;
+        _apiClient = apiClient;
     }
 
     protected override async Task ExecuteAsync(
@@ -46,6 +49,10 @@ public class Worker : BackgroundService
             "Identity file: {IdentityPath}",
             _identityService.GetIdentityPath());
 
+        await TryRegisterAsync(
+            identity,
+            stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -67,13 +74,15 @@ public class Worker : BackgroundService
                     profileService
                         .GetLiveSystemProfile();
 
+                var capturedAt =
+                    DateTimeOffset.UtcNow;
+
                 var snapshot = new
                 {
                     identity.AgentId,
                     identity.DeviceName,
                     identity.AgentVersion,
-                    CapturedAt =
-                        DateTimeOffset.UtcNow,
+                    CapturedAt = capturedAt,
                     Hardware = profile
                 };
 
@@ -112,13 +121,10 @@ public class Worker : BackgroundService
                 Console.WriteLine(
                     "Available Agent Tools:");
 
-                foreach (
-                    var tool in
-                    toolRegistry.GetTools())
+                foreach (var tool in toolRegistry.GetTools())
                 {
                     Console.WriteLine(
-                        $"- {tool.Id}: " +
-                        tool.Description);
+                        $"- {tool.Id}: {tool.Description}");
                 }
 
                 Console.WriteLine();
@@ -153,6 +159,31 @@ public class Worker : BackgroundService
                     "======================================");
 
                 Console.WriteLine();
+
+                var connected =
+                    await EnsureRegisteredAsync(
+                        identity,
+                        stoppingToken);
+
+                if (connected)
+                {
+                    try
+                    {
+                        await _apiClient.SendSnapshotAsync(
+                            identity,
+                            profile,
+                            stoppingToken);
+
+                        _logger.LogInformation(
+                            "Agent hardware snapshot sent.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Agent snapshot upload failed. Local scanning will continue.");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -161,9 +192,72 @@ public class Worker : BackgroundService
                     "RigMD system scan failed.");
             }
 
-            await Task.Delay(
-                TimeSpan.FromSeconds(30),
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(30),
+                    stoppingToken);
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        _logger.LogInformation(
+            "RigMD Windows Agent stopped.");
+    }
+
+    private async Task<bool> EnsureRegisteredAsync(
+        Models.AgentIdentity identity,
+        CancellationToken stoppingToken)
+    {
+        try
+        {
+            await _apiClient.SendHeartbeatAsync(
+                identity,
                 stoppingToken);
+
+            _logger.LogInformation(
+                "Agent heartbeat sent.");
+
+            return true;
+        }
+        catch (Exception heartbeatException)
+        {
+            _logger.LogWarning(
+                heartbeatException,
+                "Agent heartbeat failed. Attempting re-registration.");
+
+            return await TryRegisterAsync(
+                identity,
+                stoppingToken);
+        }
+    }
+
+    private async Task<bool> TryRegisterAsync(
+        Models.AgentIdentity identity,
+        CancellationToken stoppingToken)
+    {
+        try
+        {
+            await _apiClient.RegisterAsync(
+                identity,
+                stoppingToken);
+
+            _logger.LogInformation(
+                "Agent registered with RigMD API.");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Agent could not register with RigMD API. Local scanning will continue.");
+
+            return false;
         }
     }
 }

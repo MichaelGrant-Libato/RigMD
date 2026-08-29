@@ -72,6 +72,13 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<
     Worker>();
 
+builder.Services.AddHttpClient<
+    AgentApiClient>(client =>
+{
+    client.BaseAddress =
+        new Uri("http://localhost:5273");
+});
+
 var host = builder.Build();
 
 host.Run();
