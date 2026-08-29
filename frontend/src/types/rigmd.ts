@@ -82,6 +82,25 @@ export interface AgentSnapshotResponse {
   hardware: AgentHardwareSnapshot;
 }
 
+export interface AgentCommandResponse {
+  id: string;
+  agentId: string;
+  commandType: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  requestedAt: string;
+  claimedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export type AutomaticScanStage =
+  | 'idle'
+  | 'requesting'
+  | 'scanning'
+  | 'loading-evidence'
+  | 'completed'
+  | 'failed';
+
 export interface HardwareStats {
   device_name: string;
   os_version: string;
