@@ -77,8 +77,7 @@ public class AgentController : ControllerBase
         {
             return NotFound(new
             {
-                message =
-                    "Agent is not registered."
+                message = "Agent is not registered."
             });
         }
 
@@ -107,8 +106,7 @@ public class AgentController : ControllerBase
         {
             return NotFound(new
             {
-                message =
-                    "Agent is not registered."
+                message = "Agent is not registered."
             });
         }
 
@@ -128,6 +126,135 @@ public class AgentController : ControllerBase
             request.AgentId,
             request.CapturedAt
         });
+    }
+
+    [HttpPost("{agentId}/scan-request")]
+    public async Task<IActionResult> CreateScanRequest(
+        string agentId,
+        CancellationToken cancellationToken)
+    {
+        var agent =
+            await _agentRepository.GetAgentAsync(
+                agentId,
+                cancellationToken);
+
+        if (agent == null)
+        {
+            return NotFound(new
+            {
+                message = "Agent was not found."
+            });
+        }
+
+        var command =
+            await _agentRepository.CreateCommandAsync(
+                agentId,
+                "scan_system_profile",
+                cancellationToken);
+
+        return Ok(ToCommand(command));
+    }
+
+    [HttpGet("{agentId}/commands/next")]
+    public async Task<IActionResult> ClaimNextCommand(
+        string agentId,
+        CancellationToken cancellationToken)
+    {
+        var command =
+            await _agentRepository.ClaimNextCommandAsync(
+                agentId,
+                cancellationToken);
+
+        if (command == null)
+        {
+            return NoContent();
+        }
+
+        return Ok(ToCommand(command));
+    }
+
+    [HttpGet("{agentId}/commands/{commandId:guid}")]
+    public async Task<IActionResult> GetCommand(
+        string agentId,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        var command =
+            await _agentRepository.GetCommandAsync(
+                agentId,
+                commandId,
+                cancellationToken);
+
+        if (command == null)
+        {
+            return NotFound(new
+            {
+                message = "Agent command was not found."
+            });
+        }
+
+        return Ok(ToCommand(command));
+    }
+
+    [HttpPost("{agentId}/commands/{commandId:guid}/complete")]
+    public async Task<IActionResult> CompleteCommand(
+        string agentId,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        var command =
+            await _agentRepository.CompleteCommandAsync(
+                agentId,
+                commandId,
+                cancellationToken);
+
+        if (command == null)
+        {
+            return NotFound(new
+            {
+                message =
+                    "Running Agent command was not found."
+            });
+        }
+
+        return Ok(ToCommand(command));
+    }
+
+    [HttpPost("{agentId}/commands/{commandId:guid}/fail")]
+    public async Task<IActionResult> FailCommand(
+        string agentId,
+        Guid commandId,
+        [FromBody] AgentCommandFailureRequest request,
+        CancellationToken cancellationToken)
+    {
+        var errorMessage =
+            string.IsNullOrWhiteSpace(request.ErrorMessage)
+                ? "Agent command failed."
+                : request.ErrorMessage.Trim();
+
+        if (errorMessage.Length > 1000)
+        {
+            errorMessage =
+                errorMessage[..1000];
+        }
+
+        var command =
+            await _agentRepository.FailCommandAsync(
+                agentId,
+                commandId,
+                errorMessage,
+                cancellationToken);
+
+        if (command == null)
+        {
+            return NotFound(new
+            {
+                message =
+                    "Running Agent command was not found."
+            });
+        }
+
+        return Ok(ToCommand(command));
     }
 
     [HttpGet("{agentId}")]
@@ -201,6 +328,22 @@ public class AgentController : ControllerBase
             agent.RegisteredAt,
             agent.LastSeen,
             IsOnline = isOnline
+        };
+    }
+
+    private static object ToCommand(
+        AgentCommandRecord command)
+    {
+        return new
+        {
+            command.Id,
+            command.AgentId,
+            command.CommandType,
+            command.Status,
+            command.RequestedAt,
+            command.ClaimedAt,
+            command.CompletedAt,
+            command.ErrorMessage
         };
     }
 }

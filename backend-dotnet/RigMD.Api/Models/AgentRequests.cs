@@ -21,3 +21,7 @@ public class AgentSnapshotRequest
     public DateTimeOffset CapturedAt { get; set; }
     public object Hardware { get; set; } = new();
 }
+public class AgentCommandFailureRequest
+{
+    public string ErrorMessage { get; set; } = string.Empty;
+}
