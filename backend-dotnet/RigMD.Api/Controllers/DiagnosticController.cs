@@ -242,7 +242,7 @@ public class DiagnosticController : ControllerBase
 
             if (
                 snapshotAge >
-                TimeSpan.FromHours(24))
+                TimeSpan.FromMinutes(2))
             {
                 return Conflict(
                     new
