@@ -25,3 +25,19 @@ public class AgentCommandFailureRequest
 {
     public string ErrorMessage { get; set; } = string.Empty;
 }
+
+public sealed class AutomaticDiagnosisRequest
+{
+    public string AgentId { get; set; } =
+        string.Empty;
+
+    public Guid CommandId { get; set; }
+
+    public string Mode { get; set; } =
+        "full";
+
+    public List<string> ComponentIds { get; set; } =
+        new();
+
+    public string? ScenarioId { get; set; }
+}

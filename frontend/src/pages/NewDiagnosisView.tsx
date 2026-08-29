@@ -1258,39 +1258,61 @@ export default function NewDiagnosisView() {
           freshSnapshot,
         );
 
-        /*
-         * IMPORTANT:
-         *
-         * The Agent scan path is working here:
-         *
-         * frontend
-         * -> API scan request
-         * -> installed Agent
-         * -> fresh scan
-         * -> snapshot upload
-         * -> frontend snapshot retrieval
-         *
-         * We do NOT fabricate a DiagnosticReport here.
-         *
-         * The next backend phase should expose an automatic
-         * diagnosis endpoint that accepts the fresh snapshot
-         * plus the selected diagnosis mode/scope and returns
-         * the normal DiagnosticReport contract.
-         */
+      setDiagnosisStage(
+        'analyzing',
+      );
 
-        setDiagnosisStage(
-          'analyzing',
+      const automaticResponse =
+        await apiPost<DiagnosticReport>(
+          '/api/diagnosis/automatic',
+          {
+            agentId:
+              AGENT_ID,
+
+            commandId:
+              newCommandId,
+
+            mode:
+              diagnosisMode,
+
+            componentIds:
+              diagnosisMode === 'component'
+                ? selectedComponents
+                : [],
+
+            scenarioId:
+              diagnosisMode === 'scenario'
+                ? selectedScenarioId
+                : null,
+          },
+          {
+            headers: {
+              'X-Client-ID':
+                AGENT_ID,
+            },
+          },
         );
 
-        /*
-         * Until the automatic diagnosis backend endpoint exists,
-         * we finish at fresh evidence rather than sending fake
-         * symptom answers to /api/diagnosis/submit.
-         */
+      const automaticReport =
+        automaticResponse.data;
 
-        setDiagnosisStage(
-          'completed',
+      if (
+        !automaticReport ||
+        !automaticReport.diagnosed_category
+      ) {
+        throw new Error(
+          'RigMD completed the scan, but no diagnostic interpretation was returned.',
         );
+      }
+
+      setReport(
+        automaticReport,
+      );
+
+      setDiagnosisStage(
+        'completed',
+      );
+
       } catch (err: any) {
         console.error(
           'One-click diagnosis error:',
@@ -2265,9 +2287,9 @@ export default function NewDiagnosisView() {
                           Scan complete
                         </p>
 
-                        <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                          The installed RigMD Agent successfully returned fresh system evidence. Automatic diagnostic interpretation will be connected to this snapshot through the backend instead of fabricating symptom answers on the frontend.
-                        </p>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                            The installed RigMD Agent returned fresh system evidence and the backend analyzed the snapshot using evidence-based diagnostic rules.
+                          </p>
 
                         {commandId && (
                           <p className="mt-2 break-all font-mono text-[10px] text-slate-600">
@@ -2997,30 +3019,6 @@ export default function NewDiagnosisView() {
                   </div>
                 </div>
               )}
-
-              {!report &&
-                snapshot &&
-                diagnosisStage ===
-                  'completed' && (
-                  <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.045] p-3.5">
-                    <div className="flex items-start gap-2">
-                      <Info
-                        size={15}
-                        className="mt-0.5 shrink-0 text-amber-300"
-                      />
-
-                      <div>
-                        <p className="text-xs font-bold text-amber-200">
-                          Interpretation not connected yet
-                        </p>
-
-                        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                          Fresh Agent evidence is available. The next backend phase will convert this snapshot into a diagnostic report.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
               <motion.button
                 type="button"

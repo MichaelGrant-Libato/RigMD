@@ -20,6 +20,19 @@ public interface IDiagnosticSessionRepository
         string aiExplanation,
         string clientId = "");
 
+    Task<Guid> SaveAutomaticDiagnosisAsync(
+        HardwareProfileDto hardware,
+        string diagnosisMode,
+        IReadOnlyList<string> componentIds,
+        string? scenarioId,
+        Guid commandId,
+        string agentId,
+        string diagnosedCategory,
+        string actionCategory,
+        string confidenceLabel,
+        string explanation,
+        string clientId = "");
+
     /// <summary>Returns all sessions for the current client, newest first.</summary>
     Task<IReadOnlyList<DiagnosticSessionDto>> GetSessionsAsync();
 

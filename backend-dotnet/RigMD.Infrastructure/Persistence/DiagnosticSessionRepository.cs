@@ -114,6 +114,188 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return session.Id;
     }
 
+    public async Task<Guid> SaveAutomaticDiagnosisAsync(
+    HardwareProfileDto hardware,
+    string diagnosisMode,
+    IReadOnlyList<string> componentIds,
+    string? scenarioId,
+    Guid commandId,
+    string agentId,
+    string diagnosedCategory,
+    string actionCategory,
+    string confidenceLabel,
+    string explanation,
+    string clientId = "")
+    {
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            clientId =
+                GetCurrentClientId();
+        }
+
+        var cpuName =
+            hardware.Cpu.Name;
+
+        var osVersion =
+            hardware.OsVersion;
+
+        var profile =
+            await _db.SystemProfiles
+                .FirstOrDefaultAsync(
+                    p =>
+                        (string.IsNullOrEmpty(clientId) ||
+                        p.ClientId == clientId) &&
+                        p.CpuModel == cpuName &&
+                        p.OsVersion == osVersion);
+
+        if (profile == null)
+        {
+            var primaryDrive =
+                hardware.StorageDrives
+                    .FirstOrDefault();
+
+            profile =
+                new SystemProfile
+                {
+                    ClientId =
+                        clientId,
+
+                    CpuModel =
+                        cpuName,
+
+                    RamCapacity =
+                        $"{hardware.Ram.TotalGb:0.#} GB",
+
+                    StorageType =
+                        hardware.PrimaryStorageType,
+
+                    StorageCapacity =
+                        primaryDrive != null
+                            ? $"{primaryDrive.SizeGb:0.#} GB"
+                            : string.Empty,
+
+                    StorageDetails =
+                        hardware.StorageDrives.Count > 0
+                            ? JsonSerializer.Serialize(
+                                hardware.StorageDrives)
+                            : null,
+
+                    OsVersion =
+                        osVersion,
+
+                    GpuDriver =
+                        hardware.Gpu.Driver,
+
+                    ChipsetDriver =
+                        hardware.ChipsetDriver,
+
+                    SystemAge =
+                        hardware.SystemAge
+                };
+
+            _db.SystemProfiles.Add(profile);
+        }
+
+        var session =
+            new DiagnosticSession
+            {
+                SystemProfileId =
+                    profile.Id,
+
+                Profile =
+                    profile
+            };
+
+        var answers =
+            new List<SessionAnswer>
+            {
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "diagnosis_mode",
+                    AnswerValue = diagnosisMode
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "component_ids",
+                    AnswerValue = JsonSerializer.Serialize(componentIds)
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "scenario_id",
+                    AnswerValue = scenarioId ?? string.Empty
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "agent_id",
+                    AnswerValue = agentId
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "agent_command_id",
+                    AnswerValue = commandId.ToString()
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "client_id",
+                    AnswerValue = clientId
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "resolution_status",
+                    AnswerValue = "open"
+                }
+            };
+
+        session.Answers =
+            answers;
+
+        var output =
+            new DiagnosticOutput
+            {
+                DiagnosticSessionId =
+                    session.Id,
+
+                Session =
+                    session,
+
+                DiagnosedCategory =
+                    diagnosedCategory,
+
+                ActionCategory =
+                    actionCategory,
+
+                ConfidenceLabel =
+                    confidenceLabel,
+
+                AiExplanation =
+                    explanation
+            };
+
+        session.Output =
+            output;
+
+        _db.DiagnosticSessions.Add(
+            session);
+
+        await _db.SaveChangesAsync();
+
+        return session.Id;
+    }
+
     // ---------------------------------------------------------------
     // READ
     // ---------------------------------------------------------------
