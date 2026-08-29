@@ -280,6 +280,287 @@ public class AgentRepository : IAgentRepository
         };
     }
 
+    public async Task<AgentCommandRecord> CreateCommandAsync(
+    string agentId,
+    string commandType,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection =
+        new NpgsqlConnection(GetConnectionString());
+
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        INSERT INTO agent_commands
+        (
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at
+        )
+        VALUES
+        (
+            @id,
+            @agentId,
+            @commandType,
+            'pending',
+            NOW()
+        )
+        RETURNING
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at,
+            claimed_at,
+            completed_at,
+            error_message;
+        """;
+
+    await using var command =
+        new NpgsqlCommand(sql, connection);
+
+    command.Parameters.AddWithValue(
+        "id",
+        Guid.NewGuid());
+
+    command.Parameters.AddWithValue(
+        "agentId",
+        agentId);
+
+    command.Parameters.AddWithValue(
+        "commandType",
+        commandType);
+
+    await using var reader =
+        await command.ExecuteReaderAsync(
+            cancellationToken);
+
+    await reader.ReadAsync(cancellationToken);
+
+    return ReadCommand(reader);
+}
+
+public async Task<AgentCommandRecord?> ClaimNextCommandAsync(
+    string agentId,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection =
+        new NpgsqlConnection(GetConnectionString());
+
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        WITH next_command AS
+        (
+            SELECT id
+            FROM agent_commands
+            WHERE agent_id = @agentId
+              AND status = 'pending'
+            ORDER BY requested_at
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE agent_commands
+        SET
+            status = 'running',
+            claimed_at = NOW()
+        WHERE id IN
+        (
+            SELECT id
+            FROM next_command
+        )
+        RETURNING
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at,
+            claimed_at,
+            completed_at,
+            error_message;
+        """;
+
+    await using var command =
+        new NpgsqlCommand(sql, connection);
+
+    command.Parameters.AddWithValue(
+        "agentId",
+        agentId);
+
+    await using var reader =
+        await command.ExecuteReaderAsync(
+            cancellationToken);
+
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        return null;
+    }
+
+    return ReadCommand(reader);
+}
+
+public async Task<AgentCommandRecord?> CompleteCommandAsync(
+    string agentId,
+    Guid commandId,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection =
+        new NpgsqlConnection(GetConnectionString());
+
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        UPDATE agent_commands
+        SET
+            status = 'completed',
+            completed_at = NOW(),
+            error_message = NULL
+        WHERE id = @commandId
+          AND agent_id = @agentId
+          AND status = 'running'
+        RETURNING
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at,
+            claimed_at,
+            completed_at,
+            error_message;
+        """;
+
+    await using var command =
+        new NpgsqlCommand(sql, connection);
+
+    command.Parameters.AddWithValue(
+        "commandId",
+        commandId);
+
+    command.Parameters.AddWithValue(
+        "agentId",
+        agentId);
+
+    await using var reader =
+        await command.ExecuteReaderAsync(
+            cancellationToken);
+
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        return null;
+    }
+
+    return ReadCommand(reader);
+}
+
+public async Task<AgentCommandRecord?> FailCommandAsync(
+    string agentId,
+    Guid commandId,
+    string errorMessage,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection =
+        new NpgsqlConnection(GetConnectionString());
+
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        UPDATE agent_commands
+        SET
+            status = 'failed',
+            completed_at = NOW(),
+            error_message = @errorMessage
+        WHERE id = @commandId
+          AND agent_id = @agentId
+          AND status = 'running'
+        RETURNING
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at,
+            claimed_at,
+            completed_at,
+            error_message;
+        """;
+
+    await using var command =
+        new NpgsqlCommand(sql, connection);
+
+    command.Parameters.AddWithValue(
+        "commandId",
+        commandId);
+
+    command.Parameters.AddWithValue(
+        "agentId",
+        agentId);
+
+    command.Parameters.AddWithValue(
+        "errorMessage",
+        errorMessage);
+
+    await using var reader =
+        await command.ExecuteReaderAsync(
+            cancellationToken);
+
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        return null;
+    }
+
+    return ReadCommand(reader);
+}
+
+    public async Task<AgentCommandRecord?> GetCommandAsync(
+        string agentId,
+        Guid commandId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection =
+            new NpgsqlConnection(GetConnectionString());
+
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = """
+            SELECT
+                id,
+                agent_id,
+                command_type,
+                status,
+                requested_at,
+                claimed_at,
+                completed_at,
+                error_message
+            FROM agent_commands
+            WHERE id = @commandId
+            AND agent_id = @agentId
+            LIMIT 1;
+            """;
+
+        await using var command =
+            new NpgsqlCommand(sql, connection);
+
+        command.Parameters.AddWithValue(
+            "commandId",
+            commandId);
+
+        command.Parameters.AddWithValue(
+            "agentId",
+            agentId);
+
+        await using var reader =
+            await command.ExecuteReaderAsync(
+                cancellationToken);
+
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadCommand(reader);
+    }
+
     private string GetConnectionString()
     {
         var databaseUrl =
@@ -342,6 +623,31 @@ public class AgentRepository : IAgentRepository
                 reader.GetFieldValue<DateTimeOffset>(4),
             LastSeen =
                 reader.GetFieldValue<DateTimeOffset>(5)
+        };
+    }
+        private static AgentCommandRecord ReadCommand(
+        NpgsqlDataReader reader)
+    {
+        return new AgentCommandRecord
+        {
+            Id = reader.GetGuid(0),
+            AgentId = reader.GetString(1),
+            CommandType = reader.GetString(2),
+            Status = reader.GetString(3),
+            RequestedAt =
+                reader.GetFieldValue<DateTimeOffset>(4),
+            ClaimedAt =
+                reader.IsDBNull(5)
+                    ? null
+                    : reader.GetFieldValue<DateTimeOffset>(5),
+            CompletedAt =
+                reader.IsDBNull(6)
+                    ? null
+                    : reader.GetFieldValue<DateTimeOffset>(6),
+            ErrorMessage =
+                reader.IsDBNull(7)
+                    ? null
+                    : reader.GetString(7)
         };
     }
 }

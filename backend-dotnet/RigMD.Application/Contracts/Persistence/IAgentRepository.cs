@@ -28,6 +28,31 @@ public interface IAgentRepository
     Task<AgentSnapshotRecord?> GetLatestSnapshotAsync(
         string agentId,
         CancellationToken cancellationToken = default);
+
+    Task<AgentCommandRecord> CreateCommandAsync(
+        string agentId,
+        string commandType,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentCommandRecord?> ClaimNextCommandAsync(
+        string agentId,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentCommandRecord?> CompleteCommandAsync(
+        string agentId,
+        Guid commandId,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentCommandRecord?> FailCommandAsync(
+        string agentId,
+        Guid commandId,
+        string errorMessage,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentCommandRecord?> GetCommandAsync(
+        string agentId,
+        Guid commandId,
+        CancellationToken cancellationToken = default);
 }
 
 public class AgentDeviceRecord
@@ -46,4 +71,16 @@ public class AgentSnapshotRecord
     public string AgentId { get; set; } = string.Empty;
     public DateTimeOffset CapturedAt { get; set; }
     public string HardwareJson { get; set; } = "{}";
+}
+
+public class AgentCommandRecord
+{
+    public Guid Id { get; set; }
+    public string AgentId { get; set; } = string.Empty;
+    public string CommandType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTimeOffset RequestedAt { get; set; }
+    public DateTimeOffset? ClaimedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string? ErrorMessage { get; set; }
 }
