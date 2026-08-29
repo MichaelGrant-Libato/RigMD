@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-RigMD.Agent-0fe27352-6d33-44b4-9dd5-da3f49ca8108</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RigMD.Application\RigMD.Application.csproj" />
+    <ProjectReference Include="..\RigMD.Infrastructure\RigMD.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
