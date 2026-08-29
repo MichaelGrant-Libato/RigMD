@@ -17,7 +17,7 @@ import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { getClientId } from './clientId';
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 // ---------------------------------------------------------------------------
 // fetch() wrapper

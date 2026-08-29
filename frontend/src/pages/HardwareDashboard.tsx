@@ -35,8 +35,16 @@ import {
   hoverLift,
   pageFade,
 } from '../lib/motion';
-import { apiGet, apiPost } from '../lib/api';
-import type { DashboardSessionSummary, DashboardSummary, HardwareStats, PageKey, SessionSummary } from '../types/rigmd';
+import { apiGet } from '../lib/api';
+import type {
+  AgentSnapshotResponse,
+  AgentStatus,
+  DashboardSessionSummary,
+  DashboardSummary,
+  HardwareStats,
+  PageKey,
+  SessionSummary,
+} from '../types/rigmd';
 
 interface DashboardMetricCardProps {
   icon: LucideIcon;
@@ -93,6 +101,95 @@ const emptyDashboard: DashboardSummary = {
   recent_warning_signs: [],
   last_saved_session: null,
 };
+
+const AGENT_ID = import.meta.env.VITE_AGENT_ID;
+
+function agentSnapshotToHardwareStats(
+  snapshot: AgentSnapshotResponse
+): HardwareStats {
+  const hardware = snapshot.hardware;
+  const primaryDisk = hardware.allDisks?.[0];
+
+  return {
+    device_name: hardware.deviceName,
+    os_version: hardware.osVersion,
+    system_age: hardware.systemAge,
+    chipset_driver: hardware.chipsetDriver,
+    storage_type: hardware.primaryStorageType,
+
+    cpu: {
+      name: hardware.cpu.name,
+      usage_percent: hardware.cpu.usagePercent,
+      cores: hardware.cpu.cores,
+      threads: hardware.cpu.threads,
+      frequency_mhz: hardware.cpu.frequencyMhz,
+    },
+
+    gpu: {
+      name: hardware.gpu.name,
+      driver: hardware.gpu.driver,
+      type: hardware.gpu.type,
+      vram_gb: hardware.gpu.vramGb,
+    },
+
+    ram: {
+      total_gb: hardware.ram.totalGb,
+      used_gb: hardware.ram.usedGb,
+      usage_percent: hardware.ram.usagePercent,
+    },
+
+    disk: {
+      total_gb: primaryDisk?.totalGb ?? 0,
+      used_gb: primaryDisk?.usedGb ?? 0,
+      usage_percent: primaryDisk?.usagePercent ?? 0,
+    },
+
+    storage_drives: (hardware.storageDrives ?? []).map((drive) => ({
+      model: drive.model,
+      type: drive.type,
+      size_gb: drive.sizeGb,
+      interface: drive.interface,
+      media_type: drive.mediaType,
+      bus_type: drive.busType,
+      detection_source: drive.detectionSource,
+      disk_index: drive.diskIndex,
+      used_gb: drive.usedGb,
+      usage_percent: drive.usagePercent,
+      volumes: [],
+    })),
+
+    process_insights: hardware.processInsights
+      ? {
+          browser_detected:
+            hardware.processInsights.browserDetected,
+
+          browser_process_count:
+            hardware.processInsights.browserProcessCount,
+
+          browser_memory_mb:
+            hardware.processInsights.browserMemoryMb,
+
+          browser_heavy:
+            hardware.processInsights.browserHeavy,
+
+          game_detected:
+            hardware.processInsights.gameDetected,
+
+          game_processes:
+            hardware.processInsights.gameProcesses,
+
+          top_memory_apps:
+            hardware.processInsights.topMemoryApps.map(
+              (app) => ({
+                name: app.name,
+                process_count: app.processCount,
+                memory_mb: app.memoryMb,
+              })
+            ),
+        }
+      : undefined,
+  };
+}
 
 function formatTodayLabel() {
   return new Intl.DateTimeFormat('en-US', {
@@ -210,22 +307,26 @@ function sessionToDashboardSummary(session: SessionSummary | null | undefined): 
   };
 }
 
-function legacySessionToDashboardSummary(
-  session: LegacyDashboardSummary['recent_sessions'] extends Array<infer T> ? T : never
-): DashboardSessionSummary {
-  return {
-    session_id: session.session_id,
-    symptom_type: 'Saved diagnosis',
-    diagnosed_category: session.diagnosed_category || 'Unknown',
-    action_category: 'Monitor',
-    confidence_label: session.confidence_label || 'Not available',
-    created_at: session.created_at ?? null,
-    display_date: formatDashboardDate(session.created_at),
-    days_ago: getDaysAgo(session.created_at),
-    is_recurring: false,
-    resolution_status: session.resolution_status,
-  };
-}
+  type LegacyRecentSession = NonNullable<
+    LegacyDashboardSummary['recent_sessions']
+  >[number];
+
+  function legacySessionToDashboardSummary(
+    session: LegacyRecentSession
+  ): DashboardSessionSummary {
+    return {
+      session_id: session.session_id,
+      symptom_type: 'Saved diagnosis',
+      diagnosed_category: session.diagnosed_category || 'Unknown',
+      action_category: 'Monitor',
+      confidence_label: session.confidence_label || 'Not available',
+      created_at: session.created_at ?? null,
+      display_date: formatDashboardDate(session.created_at),
+      days_ago: getDaysAgo(session.created_at),
+      is_recurring: false,
+      resolution_status: session.resolution_status,
+    };
+  }
 
 function normalizeDashboardSummary(rawSummary: unknown, sessions: SessionSummary[] = []): DashboardSummary {
   if (hasDashboardContract(rawSummary)) {
@@ -1131,6 +1232,7 @@ function PlaceholderView({ title, subtitle }: { title: string; subtitle: string 
 
 export default function HardwareDashboard() {
   const [stats, setStats] = useState<HardwareStats | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
@@ -1140,32 +1242,84 @@ export default function HardwareDashboard() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const liveStatus: LiveDataStatus = useMemo(() => {
-    if (isRefreshingHardware || (!stats && !error)) {
+    if (
+      isRefreshingHardware ||
+      (!stats && !error)
+    ) {
       return 'syncing';
     }
 
-    if (error) {
+    if (error || agentStatus?.isOnline === false) {
       return 'offline';
     }
 
-    if (!hardwareUpdatedAt || Date.now() - hardwareUpdatedAt.getTime() > 30000) {
+    if (
+      !hardwareUpdatedAt ||
+      Date.now() -
+        hardwareUpdatedAt.getTime() >
+        120000
+    ) {
       return 'stale';
     }
 
     return 'live';
-  }, [error, hardwareUpdatedAt, isRefreshingHardware, stats]);
+  }, [
+    agentStatus,
+    error,
+    hardwareUpdatedAt,
+    isRefreshingHardware,
+    stats,
+  ]);
 
   const deviceName = stats?.device_name?.trim() || 'Detecting PC';
 
   const fetchHardware = useCallback(async () => {
-    try {
-      const response = await apiGet<HardwareStats>('/api/hardware/live');
+    if (!AGENT_ID) {
+      setError('VITE_AGENT_ID is not configured.');
+      return;
+    }
 
-      setStats(response.data);
-      setHardwareUpdatedAt(new Date());
+    try {
+      const [statusResponse, snapshotResponse] =
+        await Promise.all([
+          apiGet<AgentStatus>(
+            `/api/agent/${AGENT_ID}`,
+            {
+              headers: {
+                'X-Client-ID': AGENT_ID,
+              },
+            }
+          ),
+
+          apiGet<AgentSnapshotResponse>(
+            `/api/agent/${AGENT_ID}/snapshot`,
+            {
+              headers: {
+                'X-Client-ID': AGENT_ID,
+              },
+            }
+          ),
+        ]);
+
+      setAgentStatus(statusResponse.data);
+
+      setStats(
+        agentSnapshotToHardwareStats(
+          snapshotResponse.data
+        )
+      );
+
+      setHardwareUpdatedAt(
+        new Date(snapshotResponse.data.capturedAt)
+      );
+
       setError(null);
     } catch {
-      setError('Connection lost. Ensure the C# backend (dotnet run) is running on port 5273.');
+      setAgentStatus(null);
+
+      setError(
+        'Unable to retrieve Windows Agent telemetry.'
+      );
     }
   }, []);
 
@@ -1173,19 +1327,16 @@ export default function HardwareDashboard() {
     setIsRefreshingHardware(true);
 
     try {
-      await apiPost('/api/hardware/refresh');
-    } catch {
-      // Still fetch live hardware data even if cache refresh fails.
+      await fetchHardware();
+    } finally {
+      setIsRefreshingHardware(false);
     }
-
-    await fetchHardware();
-    setIsRefreshingHardware(false);
   }, [fetchHardware]);
 
   useEffect(() => {
     fetchHardware();
 
-    const interval = window.setInterval(fetchHardware, 1500);
+    const interval = window.setInterval(fetchHardware, 10000);
 
     return () => window.clearInterval(interval);
   }, [fetchHardware]);
