@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using RigMD.Agent.Models;
 
@@ -22,8 +23,8 @@ public class AgentApiClient
                 HttpMethod.Post,
                 "/api/agent/register");
 
-        request.Headers.Add(
-            "X-Client-ID",
+        AddClientHeader(
+            request,
             identity.AgentId);
 
         request.Content =
@@ -53,8 +54,8 @@ public class AgentApiClient
                 HttpMethod.Post,
                 "/api/agent/heartbeat");
 
-        request.Headers.Add(
-            "X-Client-ID",
+        AddClientHeader(
+            request,
             identity.AgentId);
 
         request.Content =
@@ -86,8 +87,8 @@ public class AgentApiClient
                 HttpMethod.Post,
                 "/api/agent/snapshot");
 
-        request.Headers.Add(
-            "X-Client-ID",
+        AddClientHeader(
+            request,
             identity.AgentId);
 
         request.Content =
@@ -108,6 +109,105 @@ public class AgentApiClient
             "Agent snapshot");
     }
 
+    public async Task<AgentCommand?> ClaimNextCommandAsync(
+        AgentIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        using var request =
+            new HttpRequestMessage(
+                HttpMethod.Get,
+                $"/api/agent/{identity.AgentId}/commands/next");
+
+        AddClientHeader(
+            request,
+            identity.AgentId);
+
+        using var response =
+            await _httpClient.SendAsync(
+                request,
+                cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NoContent)
+        {
+            return null;
+        }
+
+        await EnsureSuccessAsync(
+            response,
+            "Claim Agent command");
+
+        return await response.Content
+            .ReadFromJsonAsync<AgentCommand>(
+                cancellationToken: cancellationToken);
+    }
+
+    public async Task CompleteCommandAsync(
+        AgentIdentity identity,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        using var request =
+            new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/api/agent/{identity.AgentId}/commands/{commandId}/complete");
+
+        AddClientHeader(
+            request,
+            identity.AgentId);
+
+        request.Content =
+            JsonContent.Create(new { });
+
+        using var response =
+            await _httpClient.SendAsync(
+                request,
+                cancellationToken);
+
+        await EnsureSuccessAsync(
+            response,
+            "Complete Agent command");
+    }
+
+    public async Task FailCommandAsync(
+        AgentIdentity identity,
+        Guid commandId,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        using var request =
+            new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/api/agent/{identity.AgentId}/commands/{commandId}/fail");
+
+        AddClientHeader(
+            request,
+            identity.AgentId);
+
+        request.Content =
+            JsonContent.Create(new
+            {
+                ErrorMessage = errorMessage
+            });
+
+        using var response =
+            await _httpClient.SendAsync(
+                request,
+                cancellationToken);
+
+        await EnsureSuccessAsync(
+            response,
+            "Fail Agent command");
+    }
+
+    private static void AddClientHeader(
+        HttpRequestMessage request,
+        string agentId)
+    {
+        request.Headers.Add(
+            "X-Client-ID",
+            agentId);
+    }
+
     private static async Task EnsureSuccessAsync(
         HttpResponseMessage response,
         string operation)
@@ -126,4 +226,16 @@ public class AgentApiClient
             $"{response.StatusCode}. " +
             $"Response: {body}");
     }
+}
+
+public class AgentCommand
+{
+    public Guid Id { get; set; }
+    public string AgentId { get; set; } = string.Empty;
+    public string CommandType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTimeOffset RequestedAt { get; set; }
+    public DateTimeOffset? ClaimedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string? ErrorMessage { get; set; }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using RigMD.Agent.Models;
 using RigMD.Agent.Services;
 using RigMD.Agent.Tools;
 using RigMD.Application.Contracts.Providers;
@@ -7,10 +8,19 @@ namespace RigMD.Agent;
 
 public class Worker : BackgroundService
 {
+    private static readonly TimeSpan PollInterval =
+        TimeSpan.FromSeconds(5);
+
+    private static readonly TimeSpan HeartbeatInterval =
+        TimeSpan.FromSeconds(30);
+
     private readonly ILogger<Worker> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AgentIdentityService _identityService;
     private readonly AgentApiClient _apiClient;
+
+    private DateTimeOffset _lastHeartbeatAt =
+        DateTimeOffset.MinValue;
 
     public Worker(
         ILogger<Worker> logger,
@@ -49,153 +59,49 @@ public class Worker : BackgroundService
             "Identity file: {IdentityPath}",
             _identityService.GetIdentityPath());
 
-        await TryRegisterAsync(
-            identity,
-            stoppingToken);
+        var registered =
+            await TryRegisterAsync(
+                identity,
+                stoppingToken);
+
+        if (registered)
+        {
+            _lastHeartbeatAt =
+                DateTimeOffset.UtcNow;
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                using var scope =
-                    _scopeFactory.CreateScope();
-
-                var profileService =
-                    scope.ServiceProvider
-                        .GetRequiredService<
-                            IWindowsSystemProfileService>();
-
-                var toolRegistry =
-                    scope.ServiceProvider
-                        .GetRequiredService<
-                            AgentToolRegistry>();
-
-                var profile =
-                    profileService
-                        .GetLiveSystemProfile();
-
-                var capturedAt =
-                    DateTimeOffset.UtcNow;
-
-                var snapshot = new
-                {
-                    identity.AgentId,
-                    identity.DeviceName,
-                    identity.AgentVersion,
-                    CapturedAt = capturedAt,
-                    Hardware = profile
-                };
-
-                var json =
-                    JsonSerializer.Serialize(
-                        snapshot,
-                        new JsonSerializerOptions
-                        {
-                            WriteIndented = true
-                        });
-
-                _logger.LogInformation(
-                    "RigMD system scan completed.");
-
-                Console.WriteLine();
-                Console.WriteLine(
-                    "======================================");
-
-                Console.WriteLine(
-                    "        RigMD Agent System Scan");
-
-                Console.WriteLine(
-                    "======================================");
-
-                Console.WriteLine(
-                    $"Agent ID: {identity.AgentId}");
-
-                Console.WriteLine(
-                    $"Device: {identity.DeviceName}");
-
-                Console.WriteLine(
-                    $"Version: {identity.AgentVersion}");
-
-                Console.WriteLine();
-
-                Console.WriteLine(
-                    "Available Agent Tools:");
-
-                foreach (var tool in toolRegistry.GetTools())
-                {
-                    Console.WriteLine(
-                        $"- {tool.Id}: {tool.Description}");
-                }
-
-                Console.WriteLine();
-
-                if (toolRegistry.TryExecute(
-                        "scan_memory",
-                        out var memoryResult))
-                {
-                    var memoryJson =
-                        JsonSerializer.Serialize(
-                            memoryResult,
-                            new JsonSerializerOptions
-                            {
-                                WriteIndented = true
-                            });
-
-                    Console.WriteLine(
-                        "Tool Test: scan_memory");
-
-                    Console.WriteLine(
-                        memoryJson);
-
-                    Console.WriteLine();
-                }
-
-                Console.WriteLine(
-                    "Full System Snapshot:");
-
-                Console.WriteLine(json);
-
-                Console.WriteLine(
-                    "======================================");
-
-                Console.WriteLine();
-
                 var connected =
-                    await EnsureRegisteredAsync(
+                    await EnsureHeartbeatAsync(
                         identity,
                         stoppingToken);
 
                 if (connected)
                 {
-                    try
-                    {
-                        await _apiClient.SendSnapshotAsync(
-                            identity,
-                            profile,
-                            stoppingToken);
-
-                        _logger.LogInformation(
-                            "Agent hardware snapshot sent.");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(
-                            ex,
-                            "Agent snapshot upload failed. Local scanning will continue.");
-                    }
+                    await ProcessNextCommandAsync(
+                        identity,
+                        stoppingToken);
                 }
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(
+                _logger.LogWarning(
                     ex,
-                    "RigMD system scan failed.");
+                    "Agent command polling failed.");
             }
 
             try
             {
                 await Task.Delay(
-                    TimeSpan.FromSeconds(30),
+                    PollInterval,
                     stoppingToken);
             }
             catch (OperationCanceledException)
@@ -209,15 +115,197 @@ public class Worker : BackgroundService
             "RigMD Windows Agent stopped.");
     }
 
-    private async Task<bool> EnsureRegisteredAsync(
-        Models.AgentIdentity identity,
+    private async Task ProcessNextCommandAsync(
+        AgentIdentity identity,
         CancellationToken stoppingToken)
     {
+        AgentCommand? command;
+
+        try
+        {
+            command =
+                await _apiClient.ClaimNextCommandAsync(
+                    identity,
+                    stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not check for pending Agent commands.");
+
+            return;
+        }
+
+        if (command == null)
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            "Agent command claimed. Command ID: {CommandId}, Type: {CommandType}",
+            command.Id,
+            command.CommandType);
+
+        try
+        {
+            switch (command.CommandType)
+            {
+                case "scan_system_profile":
+                    await ExecuteSystemProfileScanAsync(
+                        identity,
+                        command,
+                        stoppingToken);
+                    break;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Unsupported Agent command type: {command.CommandType}");
+            }
+        }
+        catch (OperationCanceledException)
+            when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Agent command failed. Command ID: {CommandId}",
+                command.Id);
+
+            try
+            {
+                await _apiClient.FailCommandAsync(
+                    identity,
+                    command.Id,
+                    GetSafeErrorMessage(ex),
+                    stoppingToken);
+            }
+            catch (Exception failException)
+            {
+                _logger.LogWarning(
+                    failException,
+                    "Could not report Agent command failure.");
+            }
+        }
+    }
+
+    private async Task ExecuteSystemProfileScanAsync(
+        AgentIdentity identity,
+        AgentCommand command,
+        CancellationToken stoppingToken)
+    {
+        using var scope =
+            _scopeFactory.CreateScope();
+
+        var toolRegistry =
+            scope.ServiceProvider
+                .GetRequiredService<AgentToolRegistry>();
+
+        if (!toolRegistry.TryExecute(
+                "scan_system_profile",
+                out var scanResult))
+        {
+            throw new InvalidOperationException(
+                "scan_system_profile could not be executed.");
+        }
+
+        if (scanResult == null)
+        {
+            throw new InvalidOperationException(
+                "scan_system_profile returned no result.");
+        }
+
+        var capturedAt =
+            DateTimeOffset.UtcNow;
+
+        var json =
+            JsonSerializer.Serialize(
+                new
+                {
+                    identity.AgentId,
+                    identity.DeviceName,
+                    identity.AgentVersion,
+                    CapturedAt = capturedAt,
+                    Hardware = scanResult
+                },
+                new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+
+        _logger.LogInformation(
+            "On-demand system scan completed. Command ID: {CommandId}",
+            command.Id);
+
+        Console.WriteLine();
+        Console.WriteLine(
+            "======================================");
+
+        Console.WriteLine(
+            "      RigMD On-Demand System Scan");
+
+        Console.WriteLine(
+            "======================================");
+
+        Console.WriteLine(
+            $"Command ID: {command.Id}");
+
+        Console.WriteLine(
+            $"Agent ID: {identity.AgentId}");
+
+        Console.WriteLine(
+            $"Captured: {capturedAt:O}");
+
+        Console.WriteLine();
+
+        Console.WriteLine(json);
+
+        Console.WriteLine(
+            "======================================");
+
+        Console.WriteLine();
+
+        await _apiClient.SendSnapshotAsync(
+            identity,
+            scanResult,
+            stoppingToken);
+
+        _logger.LogInformation(
+            "Fresh Agent hardware snapshot uploaded. Command ID: {CommandId}",
+            command.Id);
+
+        await _apiClient.CompleteCommandAsync(
+            identity,
+            command.Id,
+            stoppingToken);
+
+        _logger.LogInformation(
+            "Agent command completed. Command ID: {CommandId}",
+            command.Id);
+    }
+
+    private async Task<bool> EnsureHeartbeatAsync(
+        AgentIdentity identity,
+        CancellationToken stoppingToken)
+    {
+        if (DateTimeOffset.UtcNow -
+            _lastHeartbeatAt <
+            HeartbeatInterval)
+        {
+            return true;
+        }
+
         try
         {
             await _apiClient.SendHeartbeatAsync(
                 identity,
                 stoppingToken);
+
+            _lastHeartbeatAt =
+                DateTimeOffset.UtcNow;
 
             _logger.LogInformation(
                 "Agent heartbeat sent.");
@@ -230,14 +318,23 @@ public class Worker : BackgroundService
                 heartbeatException,
                 "Agent heartbeat failed. Attempting re-registration.");
 
-            return await TryRegisterAsync(
-                identity,
-                stoppingToken);
+            var registered =
+                await TryRegisterAsync(
+                    identity,
+                    stoppingToken);
+
+            if (registered)
+            {
+                _lastHeartbeatAt =
+                    DateTimeOffset.UtcNow;
+            }
+
+            return registered;
         }
     }
 
     private async Task<bool> TryRegisterAsync(
-        Models.AgentIdentity identity,
+        AgentIdentity identity,
         CancellationToken stoppingToken)
     {
         try
@@ -255,9 +352,22 @@ public class Worker : BackgroundService
         {
             _logger.LogWarning(
                 ex,
-                "Agent could not register with RigMD API. Local scanning will continue.");
+                "Agent could not register with RigMD API. Local Agent will continue.");
 
             return false;
         }
+    }
+
+    private static string GetSafeErrorMessage(
+        Exception exception)
+    {
+        var message =
+            string.IsNullOrWhiteSpace(exception.Message)
+                ? "Agent command failed."
+                : exception.Message.Trim();
+
+        return message.Length > 1000
+            ? message[..1000]
+            : message;
     }
 }
