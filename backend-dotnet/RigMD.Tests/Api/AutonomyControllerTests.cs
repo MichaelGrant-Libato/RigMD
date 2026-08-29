@@ -416,6 +416,22 @@ public class AutonomyControllerTests
             throw new NotSupportedException();
         }
 
+        public Task<Guid> SaveAutomaticDiagnosisAsync(
+            HardwareProfileDto hardware,
+            string diagnosisMode,
+            IReadOnlyList<string> componentIds,
+            string? scenarioId,
+            Guid commandId,
+            string agentId,
+            string diagnosedCategory,
+            string actionCategory,
+            string confidenceLabel,
+            string explanation,
+            string clientId = "")
+        {
+            return Task.FromResult(Guid.NewGuid());
+        }
+
         public Task<IReadOnlyList<DiagnosticSessionDto>>
             GetSessionsAsync()
         {

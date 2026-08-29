@@ -3,6 +3,9 @@ using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Services;
 using RigMD.Domain.Rules;
+using RigMD.Application.Models;
+using System.Text.Json;
+using RigMD.Api.Models;
 
 namespace RigMD.Api.Controllers;
 
@@ -14,17 +17,23 @@ public class DiagnosticController : ControllerBase
     private readonly IDiagnosticSessionRepository _sessionRepository;
     private readonly IWindowsSystemProfileService _profileService;
     private readonly ResolutionService _resolutionService;
+    private readonly IAgentRepository _agentRepository;
+    private readonly IAutomaticDiagnosisService _automaticDiagnosisService;
 
     public DiagnosticController(
         IDiagnosticEngineService diagnosticEngine,
         IDiagnosticSessionRepository sessionRepository,
         IWindowsSystemProfileService profileService,
-        ResolutionService resolutionService)
+        ResolutionService resolutionService,
+        IAgentRepository agentRepository,
+        IAutomaticDiagnosisService automaticDiagnosisService)
     {
         _diagnosticEngine = diagnosticEngine;
         _sessionRepository = sessionRepository;
         _profileService = profileService;
         _resolutionService = resolutionService;
+        _agentRepository = agentRepository;
+        _automaticDiagnosisService = automaticDiagnosisService;
     }
 
     // =========================================================
@@ -88,6 +97,297 @@ public class DiagnosticController : ControllerBase
             Console.Error.WriteLine($"Diagnosis submission failed: {ex}");
             return StatusCode(StatusCodes.Status500InternalServerError,
                 new { error = "Diagnosis could not be completed." });
+        }
+    }
+
+        [HttpPost("automatic")]
+    public async Task<IActionResult> AutomaticDiagnosis(
+        [FromBody] AutomaticDiagnosisRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.AgentId))
+            {
+                return BadRequest(
+                    new
+                    {
+                        detail =
+                            "Agent ID is required."
+                    });
+            }
+
+            if (request.CommandId == Guid.Empty)
+            {
+                return BadRequest(
+                    new
+                    {
+                        detail =
+                            "A completed Agent scan command is required."
+                    });
+            }
+
+            if (
+                request.Mode != "full" &&
+                request.Mode != "component" &&
+                request.Mode != "scenario")
+            {
+                return BadRequest(
+                    new
+                    {
+                        detail =
+                            "Diagnosis mode must be full, component, or scenario."
+                    });
+            }
+
+            var agent =
+                await _agentRepository
+                    .GetAgentAsync(
+                        request.AgentId,
+                        cancellationToken);
+
+            if (agent == null)
+            {
+                return NotFound(
+                    new
+                    {
+                        detail =
+                            "RigMD Agent was not found."
+                    });
+            }
+
+            var command =
+                await _agentRepository
+                    .GetCommandAsync(
+                        request.AgentId,
+                        request.CommandId,
+                        cancellationToken);
+
+            if (command == null)
+            {
+                return NotFound(
+                    new
+                    {
+                        detail =
+                            "Agent scan command was not found."
+                    });
+            }
+
+            if (
+                !string.Equals(
+                    command.CommandType,
+                    "scan_system_profile",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    new
+                    {
+                        detail =
+                            "The supplied command is not a system-profile scan."
+                    });
+            }
+
+            if (
+                !string.Equals(
+                    command.Status,
+                    "completed",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(
+                    new
+                    {
+                        detail =
+                            "The Agent scan has not completed yet."
+                    });
+            }
+
+            var snapshot =
+                await _agentRepository
+                    .GetLatestSnapshotAsync(
+                        request.AgentId,
+                        cancellationToken);
+
+            if (snapshot == null)
+            {
+                return NotFound(
+                    new
+                    {
+                        detail =
+                            "No Agent hardware snapshot is available."
+                    });
+            }
+
+            /*
+            * The schema currently stores latest snapshot separately
+            * from the command rather than command_id on the snapshot.
+            *
+            * Require the snapshot to have been captured after this
+            * command was requested so an older snapshot cannot be used.
+            */
+            if (
+                snapshot.CapturedAt <
+                command.RequestedAt)
+            {
+                return Conflict(
+                    new
+                    {
+                        detail =
+                            "The available hardware snapshot is older than the requested scan."
+                    });
+            }
+
+            var snapshotAge =
+                DateTimeOffset.UtcNow -
+                snapshot.CapturedAt;
+
+            if (
+                snapshotAge >
+                TimeSpan.FromMinutes(2))
+            {
+                return Conflict(
+                    new
+                    {
+                        detail =
+                            "The Agent hardware snapshot is stale. Run a fresh diagnosis scan."
+                    });
+            }
+
+            var jsonOptions =
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive =
+                        true
+                };
+
+            var hardware =
+                JsonSerializer.Deserialize<HardwareProfileDto>(
+                    snapshot.HardwareJson,
+                    jsonOptions);
+
+            if (hardware == null)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        detail =
+                            "RigMD could not parse the Agent hardware evidence."
+                    });
+            }
+
+            var input =
+                new AutomaticDiagnosisInput
+                {
+                    AgentId =
+                        request.AgentId,
+
+                    CommandId =
+                        request.CommandId,
+
+                    Mode =
+                        request.Mode,
+
+                    ComponentIds =
+                        request.ComponentIds,
+
+                    ScenarioId =
+                        request.ScenarioId,
+
+                    CapturedAt =
+                        snapshot.CapturedAt,
+
+                    Hardware =
+                        hardware
+                };
+
+            var result =
+                _automaticDiagnosisService
+                    .Diagnose(input);
+
+            var sessionId =
+                await _sessionRepository
+                    .SaveAutomaticDiagnosisAsync(
+                        hardware,
+                        request.Mode,
+                        request.ComponentIds,
+                        request.ScenarioId,
+                        request.CommandId,
+                        request.AgentId,
+                        result.DiagnosedCategory,
+                        result.ActionCategory,
+                        result.ConfidenceLabel,
+                        result.Explanation,
+                        agent.ClientId);
+
+            return Ok(
+                new
+                {
+                    session_id =
+                        sessionId.ToString(),
+
+                    diagnosed_category =
+                        result.DiagnosedCategory,
+
+                    action_category =
+                        result.ActionCategory,
+
+                    confidence_label =
+                        result.ConfidenceLabel,
+
+                    ai_explanation =
+                        result.Explanation,
+
+                    proof =
+                        result.Proof,
+
+                    verification_target =
+                        result.VerificationTarget,
+
+                    recommended_next_step =
+                        result.RecommendedNextStep,
+
+                    resolution_status =
+                        "open",
+
+                    resolution_checked_at =
+                        (string?)null,
+
+                    resolution_summary =
+                        string.Empty,
+
+                    resolution_proof =
+                        Array.Empty<object>(),
+
+                    created_at =
+                        DateTime.UtcNow
+                            .ToString("o")
+                });
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine(
+                $"Automatic diagnosis JSON parsing failed: {ex}");
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    detail =
+                        "RigMD could not read the Agent hardware evidence."
+                });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Automatic diagnosis failed: {ex}");
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    detail =
+                        "Automatic diagnosis could not be completed."
+                });
         }
     }
 

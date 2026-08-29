@@ -51,6 +51,10 @@ builder.Services.AddScoped<
     IAgentRepository,
     AgentRepository>();
 
+builder.Services.AddScoped<
+    IAutomaticDiagnosisService,
+    AutomaticDiagnosisService>();
+
 // ---------------------------------------------------------------
 // Windows Observation Layer
 // ---------------------------------------------------------------
