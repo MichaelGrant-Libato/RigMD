@@ -737,7 +737,10 @@ public class AutonomousOrchestratorTests
         {
             Id = "test_action",
             Name = "Test Action",
-            Category = "OS performance degradation",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "OS performance degradation"
+            },
             RiskLevel = "Low",
             IsReversible = true
         };

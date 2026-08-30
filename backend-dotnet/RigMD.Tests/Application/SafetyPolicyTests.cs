@@ -59,7 +59,10 @@ public class SafetyPolicyTests
                 {
                     Id = "high_risk_test",
                     Name = "High Risk Test",
-                    Category = "Test",
+                    SupportedDiagnosisCategories = new List<string>
+                    {
+                        "Test"
+                    },
                     RiskLevel = "High",
                     IsReversible = true
                 }
@@ -105,7 +108,10 @@ public class SafetyPolicyTests
                 {
                     Id = "irreversible_action",
                     Name = "Irreversible Action",
-                    Category = "Test",
+                    SupportedDiagnosisCategories = new List<string>
+                    {
+                        "Test"
+                    },
                     RiskLevel = "Low",
                     IsReversible = false
                 }
@@ -134,7 +140,10 @@ public class SafetyPolicyTests
                 {
                     Id = "test_action",
                     Name = "Test Action",
-                    Category = "Test",
+                    SupportedDiagnosisCategories = new List<string>
+                    {
+                        "Test"
+                    },
                     RiskLevel = "Low",
                     IsReversible = true
                 }

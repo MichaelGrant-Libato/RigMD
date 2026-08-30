@@ -25,7 +25,10 @@ public class WindowsRemediationExecutorTests
         {
             Id = "unknown_test_action",
             Name = "Unknown Test Action",
-            Category = "Test",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Test"
+            },
             RiskLevel = "Low",
             IsReversible = true
         };

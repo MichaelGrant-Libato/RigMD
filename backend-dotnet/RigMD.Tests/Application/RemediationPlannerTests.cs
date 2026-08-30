@@ -51,6 +51,90 @@ public class RemediationPlannerTests
         Assert.DoesNotContain("deprioritized", plan.StrategyReasoning, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CreatePlanAsync_WhenLowAvailableStorageSpace_SelectsClearTempFiles()
+    {
+        var registry = new RemediationRegistry();
+        var repo = new FakeRemediationRepo(Array.Empty<string>());
+        var planner = new RemediationPlanner(registry, repo);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "Low Available Storage Space",
+            ActionCategory = "Maintain",
+            ConfidenceLabel = "High"
+        };
+
+        var plan = await planner.CreatePlanAsync(diagnostic);
+
+        var action = Assert.Single(plan.PlannedActions);
+
+        Assert.Equal(
+            "clear_user_temp_files",
+            action.Id);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_WhenElevatedStorageUtilization_SelectsClearTempFiles()
+    {
+        var registry = new RemediationRegistry();
+        var repo = new FakeRemediationRepo(Array.Empty<string>());
+        var planner = new RemediationPlanner(registry, repo);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "Elevated Storage Utilization",
+            ActionCategory = "Maintain",
+            ConfidenceLabel = "Medium"
+        };
+
+        var plan = await planner.CreatePlanAsync(diagnostic);
+
+        var action = Assert.Single(plan.PlannedActions);
+
+        Assert.Equal(
+            "clear_user_temp_files",
+            action.Id);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_WhenHighMemoryPressure_DoesNotSelectStorageCleanup()
+    {
+        var registry = new RemediationRegistry();
+        var repo = new FakeRemediationRepo(Array.Empty<string>());
+        var planner = new RemediationPlanner(registry, repo);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "High Memory Pressure",
+            ActionCategory = "Troubleshoot",
+            ConfidenceLabel = "High"
+        };
+
+        var plan = await planner.CreatePlanAsync(diagnostic);
+
+        Assert.Empty(plan.PlannedActions);
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_WhenElevatedCpuUtilization_DoesNotSelectStorageCleanup()
+    {
+        var registry = new RemediationRegistry();
+        var repo = new FakeRemediationRepo(Array.Empty<string>());
+        var planner = new RemediationPlanner(registry, repo);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "Elevated CPU Utilization",
+            ActionCategory = "Troubleshoot",
+            ConfidenceLabel = "Medium"
+        };
+
+        var plan = await planner.CreatePlanAsync(diagnostic);
+
+        Assert.Empty(plan.PlannedActions);
+    }
+
     private sealed class FakeRegistry : IRemediationRegistry
     {
         private readonly List<RemediationActionDef> _actions = new()
@@ -59,14 +143,20 @@ public class RemediationPlannerTests
             {
                 Id = "action_a",
                 Name = "Action A",
-                Category = "TestCategory",
+                SupportedDiagnosisCategories = new List<string>
+                {
+                    "TestCategory"
+                },
                 RiskLevel = "Low"
             },
             new RemediationActionDef
             {
                 Id = "action_b",
                 Name = "Action B",
-                Category = "TestCategory",
+                SupportedDiagnosisCategories = new List<string>
+                {
+                    "TestCategory"
+                },
                 RiskLevel = "Low"
             }
         };
@@ -75,7 +165,12 @@ public class RemediationPlannerTests
         public RemediationActionDef? GetAction(string id) =>
             _actions.FirstOrDefault(a => a.Id == id);
         public IEnumerable<RemediationActionDef> GetActionsByCategory(string category) =>
-            _actions.Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase));
+            _actions.Where(
+                a => a.SupportedDiagnosisCategories.Any(
+                    supportedCategory =>
+                        supportedCategory.Equals(
+                            category,
+                            StringComparison.OrdinalIgnoreCase)));
     }
 
     private sealed class FakeRemediationRepo : IRemediationRepository
@@ -97,3 +192,4 @@ public class RemediationPlannerTests
             Task.FromResult(_failedCodes);
     }
 }
+
