@@ -53,6 +53,11 @@ interface SessionDetail {
   affected_activity?: string;
   frequency?: string;
   severity?: string;
+  diagnosis_mode?: string;
+  component_ids?: string;
+  scenario_id?: string;
+  agent_id?: string;
+  agent_command_id?: string;
   diagnosed_category: string;
   action_category: string;
   confidence_label: string;
@@ -135,6 +140,76 @@ function isNoActiveIssue(
       .toLowerCase() ===
     'no active issue detected'
   );
+}
+
+function isAutomaticDiagnosis(
+  session: SessionDetail,
+) {
+  return Boolean(
+    session.diagnosis_mode?.trim(),
+  );
+}
+
+function formatDiagnosisMode(
+  mode?: string,
+) {
+  if (!mode) {
+    return 'Automatic';
+  }
+
+  return mode
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (char) =>
+      char.toUpperCase(),
+    );
+}
+
+function formatScenario(
+  scenarioId?: string,
+) {
+  if (!scenarioId) {
+    return 'Not specified';
+  }
+
+  return scenarioId
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (char) =>
+      char.toUpperCase(),
+    );
+}
+
+function formatComponentIds(
+  value?: string,
+) {
+  if (!value) {
+    return 'Full system';
+  }
+
+  try {
+    const parsed =
+      JSON.parse(value);
+
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length === 0
+    ) {
+      return 'Full system';
+    }
+
+    return parsed
+      .map((item) =>
+        String(item)
+          .replace(/-/g, ' ')
+          .replace(
+            /\b\w/g,
+            (char) =>
+              char.toUpperCase(),
+          ),
+      )
+      .join(', ');
+  } catch {
+    return value;
+  }
 }
 
 export default function DiagnosticSessionDetailView({
@@ -483,9 +558,53 @@ export default function DiagnosticSessionDetailView({
                   </div>
                 </div>
 
-                {!isNoActiveIssue(
-                  session.diagnosed_category,
-                ) && (
+                {isAutomaticDiagnosis(
+                  session,
+                ) ? (
+                  <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Diagnosis Scope
+                      </p>
+
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {session.diagnosis_mode ===
+                        'scenario'
+                          ? formatScenario(
+                              session.scenario_id,
+                            )
+                          : session.diagnosis_mode ===
+                              'component'
+                            ? formatComponentIds(
+                                session.component_ids,
+                              )
+                            : 'Full System'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Diagnosis Mode
+                      </p>
+
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {formatDiagnosisMode(
+                          session.diagnosis_mode,
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Evidence Source
+                      </p>
+
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        RigMD Windows Agent
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
