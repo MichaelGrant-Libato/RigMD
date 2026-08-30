@@ -11,19 +11,26 @@ public sealed class AutomaticDiagnosisService :
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Hardware);
 
+        var evaluateCpu =
+            ShouldEvaluateCpu(input);
+
+        var evaluateMemory =
+            ShouldEvaluateMemory(input);
+
+        var evaluateStorage =
+            ShouldEvaluateStorage(input);
+
         var evidence =
-            BuildEvidence(input.Hardware);
+            BuildEvidence(
+                input,
+                evaluateCpu,
+                evaluateMemory,
+                evaluateStorage);
 
-        var performanceFocus =
-            IsPerformanceFocus(input);
-
-        var storageFocus =
-            IsStorageFocus(input);
-
-        if (performanceFocus)
+        if (evaluateCpu)
         {
             var result =
-                DiagnosePerformance(
+                DiagnoseCpu(
                     input.Hardware,
                     evidence);
 
@@ -33,7 +40,20 @@ public sealed class AutomaticDiagnosisService :
             }
         }
 
-        if (storageFocus)
+        if (evaluateMemory)
+        {
+            var result =
+                DiagnoseMemory(
+                    input.Hardware,
+                    evidence);
+
+            if (result != null)
+            {
+                return result;
+            }
+        }
+
+        if (evaluateStorage)
         {
             var result =
                 DiagnoseStorage(
@@ -55,7 +75,7 @@ public sealed class AutomaticDiagnosisService :
                 "Monitor",
 
             ConfidenceLabel =
-                evidence.Count >= 4
+                evidence.Count >= 2
                     ? "Medium"
                     : "Low",
 
@@ -63,34 +83,34 @@ public sealed class AutomaticDiagnosisService :
                 "The latest supported Agent evidence does not currently verify an active issue within the selected diagnosis scope.",
 
             RecommendedNextStep =
-                "Continue monitoring the system and run another diagnosis if the problem occurs again.",
+                GetMonitoringRecommendation(
+                    input),
 
             Proof =
                 evidence
         };
     }
 
+    // =======================================================
+    // CPU DIAGNOSIS
+    // =======================================================
+
     private static AutomaticDiagnosisResult?
-        DiagnosePerformance(
+        DiagnoseCpu(
             HardwareProfileDto hardware,
             IReadOnlyList<AutomaticDiagnosisProof> evidence)
     {
         var cpuUsage =
             hardware.Cpu.UsagePercent;
 
-        var ramUsage =
-            hardware.Ram.UsagePercent;
-
-        var processes =
-            hardware.ProcessInsights;
-
         /*
-         * CPU is intentionally handled conservatively.
+         * CPU utilization is intentionally interpreted
+         * conservatively.
          *
-         * The Agent currently supplies a fresh point-in-time
-         * CPU measurement rather than a sustained utilization
-         * window. A single elevated reading therefore should
-         * not produce a high-confidence diagnosis.
+         * The Agent currently captures a fresh point-in-time
+         * processor reading rather than a sustained utilization
+         * window. A single high reading therefore does not
+         * justify a high-confidence diagnosis.
          */
         if (cpuUsage >= 90)
         {
@@ -106,10 +126,10 @@ public sealed class AutomaticDiagnosisService :
                     "Medium",
 
                 Explanation =
-                    "The latest Agent scan captured very high processor utilization. A single CPU snapshot cannot prove sustained processor pressure, but the reading is significant enough to justify checking active workloads.",
+                    "The latest Agent scan captured very high processor utilization. Because this is a point-in-time measurement, RigMD cannot yet confirm that the processor load is sustained.",
 
                 RecommendedNextStep =
-                    "Review CPU usage in Task Manager and identify applications or background processes that remain consistently high before taking further action.",
+                    "Review CPU usage in Task Manager and identify applications or background processes that remain consistently CPU-intensive.",
 
                 Proof =
                     evidence,
@@ -128,6 +148,24 @@ public sealed class AutomaticDiagnosisService :
                     }
             };
         }
+
+        return null;
+    }
+
+    // =======================================================
+    // MEMORY DIAGNOSIS
+    // =======================================================
+
+    private static AutomaticDiagnosisResult?
+        DiagnoseMemory(
+            HardwareProfileDto hardware,
+            IReadOnlyList<AutomaticDiagnosisProof> evidence)
+    {
+        var ramUsage =
+            hardware.Ram.UsagePercent;
+
+        var processes =
+            hardware.ProcessInsights;
 
         if (ramUsage >= 90)
         {
@@ -247,6 +285,10 @@ public sealed class AutomaticDiagnosisService :
         return null;
     }
 
+    // =======================================================
+    // STORAGE DIAGNOSIS
+    // =======================================================
+
     private static AutomaticDiagnosisResult?
         DiagnoseStorage(
             HardwareProfileDto hardware,
@@ -338,19 +380,120 @@ public sealed class AutomaticDiagnosisService :
         return null;
     }
 
+    // =======================================================
+    // EVIDENCE BUILDING
+    // =======================================================
+
     private static List<AutomaticDiagnosisProof>
         BuildEvidence(
-            HardwareProfileDto hardware)
+            AutomaticDiagnosisInput input,
+            bool evaluateCpu,
+            bool evaluateMemory,
+            bool evaluateStorage)
     {
         var proof =
             new List<AutomaticDiagnosisProof>();
 
-        // -------------------------------------------------------
-        // CPU
-        // -------------------------------------------------------
+        var hardware =
+            input.Hardware;
+
+        var isFull =
+            IsFullMode(input);
+
+        var gpuSelected =
+            IsComponentSelected(
+                input,
+                "gpu",
+                "graphics");
+
+        var osSelected =
+            IsComponentSelected(
+                input,
+                "os",
+                "operating-system",
+                "operating_system");
+
+        /*
+         * Full mode contains evidence from all supported
+         * component groups.
+         *
+         * Component mode only contains evidence relevant
+         * to the selected component.
+         */
+
+        if (evaluateCpu)
+        {
+            AddCpuEvidence(
+                proof,
+                hardware);
+        }
+
+        if (evaluateMemory)
+        {
+            AddMemoryEvidence(
+                proof,
+                hardware);
+        }
+
+        if (evaluateStorage)
+        {
+            AddStorageEvidence(
+                proof,
+                hardware);
+        }
+
+        if (gpuSelected || isFull)
+        {
+            AddGpuEvidence(
+                proof,
+                hardware);
+        }
+
+        if (osSelected || isFull)
+        {
+            AddOperatingSystemEvidence(
+                proof,
+                hardware);
+        }
+
+        /*
+         * Scenario mode may involve multiple performance
+         * areas, so CPU and memory evidence are intentionally
+         * combined for supported performance scenarios.
+         */
+
+        return proof;
+    }
+
+    private static void AddCpuEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
+        var cpu =
+            hardware.Cpu;
 
         var cpuUsage =
-            hardware.Cpu.UsagePercent;
+            cpu.UsagePercent;
+
+        if (!string.IsNullOrWhiteSpace(
+                cpu.Name))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Processor",
+
+                    Value =
+                        cpu.Name,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Processor identified by the installed RigMD Agent."
+                });
+        }
 
         proof.Add(
             new AutomaticDiagnosisProof
@@ -376,7 +519,7 @@ public sealed class AutomaticDiagnosisService :
                             : "Processor utilization is within the normal diagnostic range."
             });
 
-        if (hardware.Cpu.FrequencyMhz > 0)
+        if (cpu.FrequencyMhz > 0)
         {
             proof.Add(
                 new AutomaticDiagnosisProof
@@ -385,7 +528,7 @@ public sealed class AutomaticDiagnosisService :
                         "CPU Frequency",
 
                     Value =
-                        $"{hardware.Cpu.FrequencyMhz:0} MHz",
+                        $"{cpu.FrequencyMhz:0} MHz",
 
                     Status =
                         "observed",
@@ -395,10 +538,32 @@ public sealed class AutomaticDiagnosisService :
                 });
         }
 
-        // -------------------------------------------------------
-        // MEMORY
-        // -------------------------------------------------------
+        if (
+            cpu.Cores > 0 ||
+            cpu.Threads > 0)
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "CPU Configuration",
 
+                    Value =
+                        $"{cpu.Cores} cores / {cpu.Threads} threads",
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Processor core and logical thread configuration detected by the Agent."
+                });
+        }
+    }
+
+    private static void AddMemoryEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
         var ramUsage =
             hardware.Ram.UsagePercent;
 
@@ -441,10 +606,6 @@ public sealed class AutomaticDiagnosisService :
                 Meaning =
                     "Live memory capacity and utilization reported by the installed Agent."
             });
-
-        // -------------------------------------------------------
-        // PROCESSES
-        // -------------------------------------------------------
 
         if (hardware.ProcessInsights != null)
         {
@@ -491,11 +652,12 @@ public sealed class AutomaticDiagnosisService :
                         "Combined memory currently used by detected browser processes."
                 });
         }
+    }
 
-        // -------------------------------------------------------
-        // STORAGE
-        // -------------------------------------------------------
-
+    private static void AddStorageEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
         var primaryDisk =
             hardware.AllDisks?
                 .FirstOrDefault();
@@ -525,76 +687,415 @@ public sealed class AutomaticDiagnosisService :
                                 ? "Primary storage utilization is elevated."
                                 : "Primary storage utilization is within the normal diagnostic range."
                 });
+
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Storage Capacity",
+
+                    Value =
+                        $"{primaryDisk.UsedGb:0.0} GB of {primaryDisk.TotalGb:0.0} GB",
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Used and total storage capacity reported by the Agent."
+                });
         }
 
-        return proof;
+        if (!string.IsNullOrWhiteSpace(
+                hardware.PrimaryStorageType))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Storage Type",
+
+                    Value =
+                        hardware.PrimaryStorageType,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Primary storage technology detected by the Agent."
+                });
+        }
+
+        var primaryStorage =
+            hardware.StorageDrives?
+                .FirstOrDefault();
+
+        if (
+            primaryStorage != null &&
+            !string.IsNullOrWhiteSpace(
+                primaryStorage.Model))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Storage Device",
+
+                    Value =
+                        primaryStorage.Model,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Physical storage device identified by the Agent."
+                });
+        }
     }
 
-    private static bool IsPerformanceFocus(
+    private static void AddGpuEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
+        var gpu =
+            hardware.Gpu;
+
+        if (!string.IsNullOrWhiteSpace(
+                gpu.Name))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Graphics Processor",
+
+                    Value =
+                        gpu.Name,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Graphics processor identified by the installed Agent."
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+                gpu.Type))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "GPU Type",
+
+                    Value =
+                        gpu.Type,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Graphics processor type reported by the Agent."
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+                gpu.Driver))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "GPU Driver",
+
+                    Value =
+                        gpu.Driver,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Installed graphics driver version reported by Windows."
+                });
+        }
+
+        if (gpu.VramGb > 0)
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Video Memory",
+
+                    Value =
+                        $"{gpu.VramGb:0.0} GB",
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Graphics memory capacity reported by the Agent."
+                });
+        }
+    }
+
+    private static void AddOperatingSystemEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
+        if (!string.IsNullOrWhiteSpace(
+                hardware.OsVersion))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Operating System",
+
+                    Value =
+                        hardware.OsVersion,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Windows version reported by the installed Agent."
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+                hardware.DeviceName))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Device Name",
+
+                    Value =
+                        hardware.DeviceName,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Windows device identity associated with this Agent."
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+                hardware.ChipsetDriver))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "Chipset / Platform",
+
+                    Value =
+                        hardware.ChipsetDriver,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Platform or chipset information reported by the Agent."
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+                hardware.SystemAge))
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "System Age",
+
+                    Value =
+                        hardware.SystemAge,
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Estimated Windows system age reported by the Agent."
+                });
+        }
+    }
+
+    // =======================================================
+    // SCOPE RULES
+    // =======================================================
+
+    private static bool ShouldEvaluateCpu(
         AutomaticDiagnosisInput input)
     {
-        if (
-            input.Mode.Equals(
-                "full",
-                StringComparison.OrdinalIgnoreCase))
+        if (IsFullMode(input))
         {
             return true;
         }
 
         if (
-            input.ComponentIds.Any(
-                value =>
-                    value.Equals(
-                        "cpu",
-                        StringComparison.OrdinalIgnoreCase) ||
-                    value.Equals(
-                        "processor",
-                        StringComparison.OrdinalIgnoreCase) ||
-                    value.Equals(
-                        "memory",
-                        StringComparison.OrdinalIgnoreCase) ||
-                    value.Equals(
-                        "os",
-                        StringComparison.OrdinalIgnoreCase)))
+            IsComponentSelected(
+                input,
+                "cpu",
+                "processor"))
         {
             return true;
         }
 
         return
-            string.Equals(
-                input.ScenarioId,
-                "slow-system",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(
-                input.ScenarioId,
-                "stuttering-freezing",
-                StringComparison.OrdinalIgnoreCase);
+            IsScenario(
+                input,
+                "slow-system") ||
+            IsScenario(
+                input,
+                "stuttering-freezing");
     }
 
-    private static bool IsStorageFocus(
+    private static bool ShouldEvaluateMemory(
+        AutomaticDiagnosisInput input)
+    {
+        if (IsFullMode(input))
+        {
+            return true;
+        }
+
+        if (
+            IsComponentSelected(
+                input,
+                "memory",
+                "ram"))
+        {
+            return true;
+        }
+
+        return
+            IsScenario(
+                input,
+                "slow-system") ||
+            IsScenario(
+                input,
+                "stuttering-freezing");
+    }
+
+    private static bool ShouldEvaluateStorage(
+        AutomaticDiagnosisInput input)
+    {
+        if (IsFullMode(input))
+        {
+            return true;
+        }
+
+        if (
+            IsComponentSelected(
+                input,
+                "storage",
+                "disk",
+                "drive"))
+        {
+            return true;
+        }
+
+        return IsScenario(
+            input,
+            "storage-problem");
+    }
+
+    private static bool IsFullMode(
+        AutomaticDiagnosisInput input)
+    {
+        return string.Equals(
+            input.Mode,
+            "full",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsComponentSelected(
+        AutomaticDiagnosisInput input,
+        params string[] componentIds)
+    {
+        return input.ComponentIds.Any(
+            selected =>
+                componentIds.Any(
+                    expected =>
+                        string.Equals(
+                            selected,
+                            expected,
+                            StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool IsScenario(
+        AutomaticDiagnosisInput input,
+        string scenarioId)
+    {
+        return string.Equals(
+            input.ScenarioId,
+            scenarioId,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    // =======================================================
+    // USER GUIDANCE
+    // =======================================================
+
+    private static string GetMonitoringRecommendation(
         AutomaticDiagnosisInput input)
     {
         if (
-            input.Mode.Equals(
-                "full",
-                StringComparison.OrdinalIgnoreCase))
+            IsComponentSelected(
+                input,
+                "cpu",
+                "processor"))
         {
-            return true;
+            return
+                "Continue monitoring processor utilization and run another CPU diagnosis if sustained high usage or performance problems occur.";
         }
 
         if (
-            input.ComponentIds.Any(
-                value =>
-                    value.Equals(
-                        "storage",
-                        StringComparison.OrdinalIgnoreCase)))
+            IsComponentSelected(
+                input,
+                "memory",
+                "ram"))
         {
-            return true;
+            return
+                "Continue monitoring memory utilization and run another diagnosis if memory usage becomes consistently elevated.";
         }
 
-        return string.Equals(
-            input.ScenarioId,
-            "storage-problem",
-            StringComparison.OrdinalIgnoreCase);
+        if (
+            IsComponentSelected(
+                input,
+                "storage",
+                "disk",
+                "drive"))
+        {
+            return
+                "Continue monitoring available storage space and run another diagnosis if storage utilization increases significantly.";
+        }
+
+        if (
+            IsComponentSelected(
+                input,
+                "gpu",
+                "graphics"))
+        {
+            return
+                "Continue monitoring graphics behavior and run another diagnosis if display instability, driver problems, crashes, or graphics performance issues occur.";
+        }
+
+        if (
+            IsComponentSelected(
+                input,
+                "os",
+                "operating-system",
+                "operating_system"))
+        {
+            return
+                "Continue monitoring Windows behavior and run another diagnosis if operating system errors or instability occur.";
+        }
+
+        return
+            "Continue monitoring the system and run another diagnosis if the problem occurs again.";
     }
 }
