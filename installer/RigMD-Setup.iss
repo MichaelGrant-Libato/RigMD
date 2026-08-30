@@ -19,13 +19,13 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=RigMD Agent
 SetupLogging=yes
+CloseApplications=no
+RestartApplications=no
 
 [Files]
 Source: "..\backend-dotnet\RigMD.Agent\bin\Release\net10.0-windows\win-x64\publish\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
-Filename: "{sys}\sc.exe"; Parameters: "create RigMDAgent binPath= ""{app}\RigMD.Agent.exe"" start= auto DisplayName= ""RigMD Agent"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering RigMD Agent service..."
-Filename: "{sys}\sc.exe"; Parameters: "description RigMDAgent ""RigMD Windows hardware diagnostic agent"""; Flags: runhidden waituntilterminated; StatusMsg: "Configuring RigMD Agent service..."
 Filename: "{sys}\sc.exe"; Parameters: "start RigMDAgent"; Flags: runhidden waituntilterminated; StatusMsg: "Starting RigMD Agent service..."
 
 [UninstallRun]
@@ -48,6 +48,82 @@ begin
 
   ApiPage.Add('API Base URL:', False);
   ApiPage.Values[0] := 'http://localhost:5273';
+end;
+
+function ServiceExists: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result :=
+    Exec(
+      ExpandConstant('{sys}\sc.exe'),
+      'query RigMDAgent',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    ) and
+    (ResultCode = 0);
+end;
+
+procedure StopExistingService;
+var
+  ResultCode: Integer;
+begin
+  if ServiceExists then
+  begin
+    Exec(
+      ExpandConstant('{sys}\sc.exe'),
+      'stop RigMDAgent',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    );
+
+    Sleep(2000);
+  end;
+end;
+
+procedure ConfigureService;
+var
+  ResultCode: Integer;
+  ServiceExe: string;
+begin
+  ServiceExe :=
+    ExpandConstant('{app}\RigMD.Agent.exe');
+
+  if ServiceExists then
+  begin
+    Exec(
+      ExpandConstant('{sys}\sc.exe'),
+      'config RigMDAgent binPath= "' + ServiceExe + '" start= auto DisplayName= "RigMD Agent"',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    );
+  end
+  else
+  begin
+    Exec(
+      ExpandConstant('{sys}\sc.exe'),
+      'create RigMDAgent binPath= "' + ServiceExe + '" start= auto DisplayName= "RigMD Agent"',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    );
+  end;
+
+  Exec(
+    ExpandConstant('{sys}\sc.exe'),
+    'description RigMDAgent "RigMD Windows hardware diagnostic agent"',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -93,6 +169,11 @@ var
   JsonText: string;
   ApiUrl: string;
 begin
+  if CurStep = ssInstall then
+  begin
+    StopExistingService;
+  end;
+
   if CurStep = ssPostInstall then
   begin
     AppSettingsPath :=
@@ -126,5 +207,7 @@ begin
         MB_OK
       );
     end;
+
+    ConfigureService;
   end;
 end;
