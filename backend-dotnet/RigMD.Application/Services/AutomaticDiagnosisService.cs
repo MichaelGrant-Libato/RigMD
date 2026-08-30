@@ -55,7 +55,7 @@ public sealed class AutomaticDiagnosisService :
                 "Monitor",
 
             ConfidenceLabel =
-                evidence.Count >= 3
+                evidence.Count >= 4
                     ? "Medium"
                     : "Low",
 
@@ -65,7 +65,8 @@ public sealed class AutomaticDiagnosisService :
             RecommendedNextStep =
                 "Continue monitoring the system and run another diagnosis if the problem occurs again.",
 
-            Proof = evidence
+            Proof =
+                evidence
         };
     }
 
@@ -74,11 +75,59 @@ public sealed class AutomaticDiagnosisService :
             HardwareProfileDto hardware,
             IReadOnlyList<AutomaticDiagnosisProof> evidence)
     {
+        var cpuUsage =
+            hardware.Cpu.UsagePercent;
+
         var ramUsage =
             hardware.Ram.UsagePercent;
 
         var processes =
             hardware.ProcessInsights;
+
+        /*
+         * CPU is intentionally handled conservatively.
+         *
+         * The Agent currently supplies a fresh point-in-time
+         * CPU measurement rather than a sustained utilization
+         * window. A single elevated reading therefore should
+         * not produce a high-confidence diagnosis.
+         */
+        if (cpuUsage >= 90)
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory =
+                    "Elevated CPU Utilization",
+
+                ActionCategory =
+                    "Troubleshoot",
+
+                ConfidenceLabel =
+                    "Medium",
+
+                Explanation =
+                    "The latest Agent scan captured very high processor utilization. A single CPU snapshot cannot prove sustained processor pressure, but the reading is significant enough to justify checking active workloads.",
+
+                RecommendedNextStep =
+                    "Review CPU usage in Task Manager and identify applications or background processes that remain consistently high before taking further action.",
+
+                Proof =
+                    evidence,
+
+                VerificationTarget =
+                    new AutomaticVerificationTarget
+                    {
+                        Target =
+                            "task_manager",
+
+                        Label =
+                            "Task Manager - Processes",
+
+                        Description =
+                            "Review current CPU utilization and identify processes that remain consistently CPU-intensive."
+                    }
+            };
+        }
 
         if (ramUsage >= 90)
         {
@@ -99,7 +148,8 @@ public sealed class AutomaticDiagnosisService :
                 RecommendedNextStep =
                     "Open Task Manager and review the applications using the most memory. Close unnecessary workloads before deeper troubleshooting.",
 
-                Proof = evidence,
+                Proof =
+                    evidence,
 
                 VerificationTarget =
                     new AutomaticVerificationTarget
@@ -139,7 +189,8 @@ public sealed class AutomaticDiagnosisService :
                 RecommendedNextStep =
                     "Review high-memory browser tabs and other large applications in Task Manager and reduce unnecessary workloads.",
 
-                Proof = evidence,
+                Proof =
+                    evidence,
 
                 VerificationTarget =
                     new AutomaticVerificationTarget
@@ -175,7 +226,8 @@ public sealed class AutomaticDiagnosisService :
                 RecommendedNextStep =
                     "Monitor memory usage and inspect high-memory applications if the system becomes slow or unresponsive.",
 
-                Proof = evidence,
+                Proof =
+                    evidence,
 
                 VerificationTarget =
                     new AutomaticVerificationTarget
@@ -228,7 +280,8 @@ public sealed class AutomaticDiagnosisService :
                 RecommendedNextStep =
                     "Review storage usage and remove unnecessary temporary files or unused applications.",
 
-                Proof = evidence,
+                Proof =
+                    evidence,
 
                 VerificationTarget =
                     new AutomaticVerificationTarget
@@ -264,7 +317,8 @@ public sealed class AutomaticDiagnosisService :
                 RecommendedNextStep =
                     "Review storage usage and remove unnecessary files before free space becomes critically low.",
 
-                Proof = evidence,
+                Proof =
+                    evidence,
 
                 VerificationTarget =
                     new AutomaticVerificationTarget
@@ -290,6 +344,60 @@ public sealed class AutomaticDiagnosisService :
     {
         var proof =
             new List<AutomaticDiagnosisProof>();
+
+        // -------------------------------------------------------
+        // CPU
+        // -------------------------------------------------------
+
+        var cpuUsage =
+            hardware.Cpu.UsagePercent;
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "CPU Usage",
+
+                Value =
+                    $"{cpuUsage:0.0}%",
+
+                Status =
+                    cpuUsage >= 90
+                        ? "high"
+                        : cpuUsage >= 80
+                            ? "elevated"
+                            : "normal",
+
+                Meaning =
+                    cpuUsage >= 90
+                        ? "The Agent captured very high processor utilization."
+                        : cpuUsage >= 80
+                            ? "Processor utilization is elevated in the current snapshot."
+                            : "Processor utilization is within the normal diagnostic range."
+            });
+
+        if (hardware.Cpu.FrequencyMhz > 0)
+        {
+            proof.Add(
+                new AutomaticDiagnosisProof
+                {
+                    Label =
+                        "CPU Frequency",
+
+                    Value =
+                        $"{hardware.Cpu.FrequencyMhz:0} MHz",
+
+                    Status =
+                        "observed",
+
+                    Meaning =
+                        "Current processor frequency reported by the installed Agent."
+                });
+        }
+
+        // -------------------------------------------------------
+        // MEMORY
+        // -------------------------------------------------------
 
         var ramUsage =
             hardware.Ram.UsagePercent;
@@ -333,6 +441,10 @@ public sealed class AutomaticDiagnosisService :
                 Meaning =
                     "Live memory capacity and utilization reported by the installed Agent."
             });
+
+        // -------------------------------------------------------
+        // PROCESSES
+        // -------------------------------------------------------
 
         if (hardware.ProcessInsights != null)
         {
@@ -380,6 +492,10 @@ public sealed class AutomaticDiagnosisService :
                 });
         }
 
+        // -------------------------------------------------------
+        // STORAGE
+        // -------------------------------------------------------
+
         var primaryDisk =
             hardware.AllDisks?
                 .FirstOrDefault();
@@ -411,12 +527,6 @@ public sealed class AutomaticDiagnosisService :
                 });
         }
 
-        /*
-         * CPU UsagePercent and FrequencyMhz are intentionally
-         * excluded because the current provider has demonstrated
-         * unreliable zero readings.
-         */
-
         return proof;
     }
 
@@ -434,6 +544,12 @@ public sealed class AutomaticDiagnosisService :
         if (
             input.ComponentIds.Any(
                 value =>
+                    value.Equals(
+                        "cpu",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals(
+                        "processor",
+                        StringComparison.OrdinalIgnoreCase) ||
                     value.Equals(
                         "memory",
                         StringComparison.OrdinalIgnoreCase) ||
