@@ -7,6 +7,11 @@ using RigMD.Infrastructure.Windows;
 var builder =
     Host.CreateApplicationBuilder(args);
 
+builder.Services.AddWindowsService(options =>
+{
+    options.ServiceName = "RigMD Agent";
+});
+
 builder.Services.AddSingleton<
     AgentIdentityService>();
 
@@ -72,11 +77,20 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<
     Worker>();
 
+var apiBaseUrl =
+    builder.Configuration["Agent:ApiBaseUrl"];
+
+if (string.IsNullOrWhiteSpace(apiBaseUrl))
+{
+    throw new InvalidOperationException(
+        "Agent:ApiBaseUrl is not configured.");
+}
+
 builder.Services.AddHttpClient<
     AgentApiClient>(client =>
 {
     client.BaseAddress =
-        new Uri("http://localhost:5273");
+        new Uri(apiBaseUrl);
 });
 
 var host = builder.Build();
