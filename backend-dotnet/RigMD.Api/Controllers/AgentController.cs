@@ -116,6 +116,7 @@ public class AgentController : ControllerBase
 
         await _agentRepository.SaveSnapshotAsync(
             request.AgentId,
+            request.CommandId,
             request.CapturedAt,
             hardwareJson,
             cancellationToken);

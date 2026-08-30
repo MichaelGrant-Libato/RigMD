@@ -18,6 +18,7 @@ public class AgentHeartbeatRequest
 public class AgentSnapshotRequest
 {
     public string AgentId { get; set; } = string.Empty;
+    public Guid CommandId { get; set; }
     public DateTimeOffset CapturedAt { get; set; }
     public object Hardware { get; set; } = new();
 }

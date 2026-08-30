@@ -17,9 +17,15 @@ public interface IAgentRepository
 
     Task SaveSnapshotAsync(
         string agentId,
+        Guid commandId,
         DateTimeOffset capturedAt,
         string hardwareJson,
         CancellationToken cancellationToken = default);
+    
+    Task<AgentSnapshotRecord?> GetSnapshotByCommandAsync(
+    string agentId,
+    Guid commandId,
+    CancellationToken cancellationToken = default);
 
     Task<AgentDeviceRecord?> GetAgentAsync(
         string agentId,
@@ -69,6 +75,7 @@ public class AgentSnapshotRecord
 {
     public Guid Id { get; set; }
     public string AgentId { get; set; } = string.Empty;
+    public Guid? CommandId { get; set; }
     public DateTimeOffset CapturedAt { get; set; }
     public string HardwareJson { get; set; } = "{}";
 }

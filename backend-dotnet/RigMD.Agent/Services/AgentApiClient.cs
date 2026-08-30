@@ -79,6 +79,7 @@ public class AgentApiClient
 
     public async Task SendSnapshotAsync(
         AgentIdentity identity,
+        Guid commandId,
         object hardware,
         CancellationToken cancellationToken)
     {
@@ -95,7 +96,9 @@ public class AgentApiClient
             JsonContent.Create(new
             {
                 identity.AgentId,
-                CapturedAt = DateTimeOffset.UtcNow,
+                CommandId = commandId,
+                CapturedAt =
+                    DateTimeOffset.UtcNow,
                 Hardware = hardware
             });
 
