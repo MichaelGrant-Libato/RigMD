@@ -24,9 +24,8 @@ public class RemediationPlanner : IRemediationPlanner
     {
         var category = diagnostic.DiagnosedCategory;
 
-        // Find all actions that match the diagnosed category
-        var potentialActions = _registry.GetAllActions()
-            .Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase))
+        var potentialActions = _registry
+            .GetActionsByCategory(category)
             .ToList();
 
         // Deprioritize actions that have historically failed verification

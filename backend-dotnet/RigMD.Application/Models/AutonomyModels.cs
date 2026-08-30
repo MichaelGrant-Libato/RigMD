@@ -9,8 +9,8 @@ public class RemediationActionDef
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string Category { get; set; } = string.Empty;
-    public string RiskLevel { get; set; } = string.Empty; // e.g. Low, Medium, High
+    public List<string> SupportedDiagnosisCategories { get; set; } = new();
+    public string RiskLevel { get; set; } = string.Empty;
     public bool IsReversible { get; set; }
     public bool RequiresUserConfirmation { get; set; }
 }

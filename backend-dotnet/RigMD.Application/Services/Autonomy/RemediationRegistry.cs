@@ -14,7 +14,11 @@ public class RemediationRegistry : IRemediationRegistry
         {
             Id = "clear_user_temp_files",
             Name = "Clear User Temp Files",
-            Category = "OS performance degradation",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Low Available Storage Space",
+                "Elevated Storage Utilization"
+            },
             RiskLevel = "Low",
             IsReversible = false
         },
@@ -22,7 +26,10 @@ public class RemediationRegistry : IRemediationRegistry
         {
             Id = "restart_explorer",
             Name = "Restart Windows Explorer",
-            Category = "OS performance degradation",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "OS performance degradation"
+            },
             RiskLevel = "Low",
             IsReversible = false
         },
@@ -30,7 +37,10 @@ public class RemediationRegistry : IRemediationRegistry
         {
             Id = "flush_dns",
             Name = "Flush DNS Cache",
-            Category = "Network issue",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Network issue"
+            },
             RiskLevel = "Low",
             IsReversible = false
         }
@@ -39,8 +49,16 @@ public class RemediationRegistry : IRemediationRegistry
     public IEnumerable<RemediationActionDef> GetAllActions() => _actions;
 
     public RemediationActionDef? GetAction(string id) =>
-        _actions.FirstOrDefault(a => a.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        _actions.FirstOrDefault(
+            a => a.Id.Equals(
+                id,
+                StringComparison.OrdinalIgnoreCase));
 
     public IEnumerable<RemediationActionDef> GetActionsByCategory(string category) =>
-        _actions.Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase));
+        _actions.Where(
+            a => a.SupportedDiagnosisCategories.Any(
+                supportedCategory =>
+                    supportedCategory.Equals(
+                        category,
+                        StringComparison.OrdinalIgnoreCase)));
 }
