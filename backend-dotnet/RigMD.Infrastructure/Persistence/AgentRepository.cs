@@ -425,69 +425,103 @@ public class AgentRepository : IAgentRepository
         return ReadCommand(reader);
     }
 
-    public async Task<AgentCommandRecord?> ClaimNextCommandAsync(
-        string agentId,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+  public async Task<AgentCommandRecord?> ClaimNextCommandAsync(
+    string agentId,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection =
+        new NpgsqlConnection(
+            GetConnectionString());
 
-        await connection.OpenAsync(
+    await connection.OpenAsync(
+        cancellationToken);
+
+    /*
+     * A command is claimable when:
+     *
+     * 1. It is waiting in the normal pending state, or
+     *
+     * 2. It was previously claimed but has remained in the
+     *    running state for more than two minutes.
+     *
+     * The second case represents an abandoned command, such as
+     * when the Agent process crashes, the computer shuts down,
+     * or connectivity is lost before completion/failure can be
+     * reported.
+     *
+     * FOR UPDATE SKIP LOCKED ensures that multiple Agent
+     * instances cannot claim the same command concurrently.
+     *
+     * Reclaiming is performed in the same PostgreSQL statement,
+     * so there is no intermediate pending state and therefore no
+     * separate recovery race.
+     */
+    const string sql = """
+        WITH next_command AS
+        (
+            SELECT id
+            FROM agent_commands
+            WHERE agent_id = @agentId
+              AND
+              (
+                  status = 'pending'
+                  OR
+                  (
+                      status = 'running'
+                      AND claimed_at IS NOT NULL
+                      AND claimed_at <
+                          NOW() - INTERVAL '2 minutes'
+                  )
+              )
+            ORDER BY
+                requested_at,
+                id
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE agent_commands
+        SET
+            status = 'running',
+            claimed_at = NOW(),
+            completed_at = NULL,
+            error_message = NULL
+        WHERE id IN
+        (
+            SELECT id
+            FROM next_command
+        )
+        RETURNING
+            id,
+            agent_id,
+            command_type,
+            status,
+            requested_at,
+            claimed_at,
+            completed_at,
+            error_message;
+        """;
+
+    await using var command =
+        new NpgsqlCommand(
+            sql,
+            connection);
+
+    command.Parameters.AddWithValue(
+        "agentId",
+        agentId);
+
+    await using var reader =
+        await command.ExecuteReaderAsync(
             cancellationToken);
 
-        const string sql = """
-            WITH next_command AS
-            (
-                SELECT id
-                FROM agent_commands
-                WHERE agent_id = @agentId
-                  AND status = 'pending'
-                ORDER BY requested_at
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-            )
-            UPDATE agent_commands
-            SET
-                status = 'running',
-                claimed_at = NOW()
-            WHERE id IN
-            (
-                SELECT id
-                FROM next_command
-            )
-            RETURNING
-                id,
-                agent_id,
-                command_type,
-                status,
-                requested_at,
-                claimed_at,
-                completed_at,
-                error_message;
-            """;
-
-        await using var command =
-            new NpgsqlCommand(
-                sql,
-                connection);
-
-        command.Parameters.AddWithValue(
-            "agentId",
-            agentId);
-
-        await using var reader =
-            await command.ExecuteReaderAsync(
-                cancellationToken);
-
-        if (!await reader.ReadAsync(
-                cancellationToken))
-        {
-            return null;
-        }
-
-        return ReadCommand(reader);
+    if (!await reader.ReadAsync(
+            cancellationToken))
+    {
+        return null;
     }
+
+    return ReadCommand(reader);
+}
 
     public async Task<AgentCommandRecord?> CompleteCommandAsync(
         string agentId,
