@@ -87,11 +87,27 @@ public class DiagnosticSessionDto
     [JsonPropertyName("last_action_summary")]
     public string LastActionSummary { get; set; } = string.Empty;
 
+    [JsonPropertyName("diagnosis_mode")]
+    public string DiagnosisMode { get; set; } = string.Empty;
+
+    [JsonPropertyName("component_ids")]
+    public string ComponentIds { get; set; } = string.Empty;
+
+    [JsonPropertyName("scenario_id")]
+    public string ScenarioId { get; set; } = string.Empty;
+
+    [JsonPropertyName("agent_id")]
+    public string AgentId { get; set; } = string.Empty;
+
+    [JsonPropertyName("agent_command_id")]
+    public string AgentCommandId { get; set; } = string.Empty;
+
     [JsonPropertyName("client_id")]
     public string ClientId { get; set; } = string.Empty;
 
     [JsonPropertyName("remediation_history")]
     public List<RemediationRunDto> RemediationHistory { get; set; } = new();
+
 }
 
 /// <summary>
