@@ -203,8 +203,9 @@ public class DiagnosticController : ControllerBase
 
             var snapshot =
                 await _agentRepository
-                    .GetLatestSnapshotAsync(
+                    .GetSnapshotByCommandAsync(
                         request.AgentId,
+                        request.CommandId,
                         cancellationToken);
 
             if (snapshot == null)
@@ -213,26 +214,7 @@ public class DiagnosticController : ControllerBase
                     new
                     {
                         detail =
-                            "No Agent hardware snapshot is available."
-                    });
-            }
-
-            /*
-            * The schema currently stores latest snapshot separately
-            * from the command rather than command_id on the snapshot.
-            *
-            * Require the snapshot to have been captured after this
-            * command was requested so an older snapshot cannot be used.
-            */
-            if (
-                snapshot.CapturedAt <
-                command.RequestedAt)
-            {
-                return Conflict(
-                    new
-                    {
-                        detail =
-                            "The available hardware snapshot is older than the requested scan."
+                            "No Agent hardware snapshot was found for the requested scan command."
                     });
             }
 

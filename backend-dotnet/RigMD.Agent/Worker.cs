@@ -270,6 +270,7 @@ public class Worker : BackgroundService
 
         await _apiClient.SendSnapshotAsync(
             identity,
+            command.Id,
             scanResult,
             stoppingToken);
 
