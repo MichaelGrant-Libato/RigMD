@@ -18,8 +18,9 @@ import {
 import {
   type AutonomyExecution,
   type AutonomyResult,
+  type AgentRemediationActionId,
   getBackendErrorMessage,
-  runAgentClearUserTempFiles,
+  runAgentRemediation,
   runAutonomyDryRun,
   runAutonomyExecution,
 } from '../services/autonomyService';
@@ -649,10 +650,19 @@ export default function AutonomyRemediationPanel({
         typeof id === 'string',
     ) ?? [];
 
-  const shouldExecuteThroughAgent =
+  const agentActionId: AgentRemediationActionId | null =
     plannedActionIds.length === 1 &&
-    plannedActionIds[0] ===
-      'clear_user_temp_files';
+    (
+      plannedActionIds[0] ===
+        'clear_user_temp_files' ||
+      plannedActionIds[0] ===
+        'flush_dns'
+    )
+      ? plannedActionIds[0]
+      : null;
+
+  const shouldExecuteThroughAgent =
+    agentActionId !== null;
 
   const executeDisabled =
     requestActive ||
@@ -708,8 +718,11 @@ export default function AutonomyRemediationPanel({
 
     try {
       const result =
-        shouldExecuteThroughAgent
-          ? await runAgentClearUserTempFiles()
+        shouldExecuteThroughAgent &&
+        agentActionId
+          ? await runAgentRemediation(
+              agentActionId,
+            )
           : await runAutonomyExecution({
               sessionId,
               diagnosedCategory,

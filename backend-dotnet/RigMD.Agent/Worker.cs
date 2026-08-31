@@ -164,7 +164,12 @@ public class Worker : BackgroundService
                         command,
                         stoppingToken);
                     break;
-
+                case "flush_dns":
+                    await ExecuteFlushDnsAsync(
+                        identity,
+                        command,
+                        stoppingToken);
+                    break;
                 default:
                     throw new InvalidOperationException(
                         $"Unsupported Agent command type: {command.CommandType}");
@@ -257,6 +262,53 @@ public class Worker : BackgroundService
 
         _logger.LogInformation(
             "Allowlisted remediation command completed. Command ID: {CommandId}, Success: {Success}",
+            command.Id,
+            result.Success);
+    }
+    private async Task ExecuteFlushDnsAsync(
+        AgentIdentity identity,
+        AgentCommand command,
+        CancellationToken stoppingToken)
+    {
+        using var scope =
+            _scopeFactory.CreateScope();
+
+        var flushDnsAction =
+            scope.ServiceProvider
+                .GetRequiredService<FlushDnsAction>();
+
+        _logger.LogInformation(
+            "Executing allowlisted remediation command. Command ID: {CommandId}, Action: flush_dns",
+            command.Id);
+
+        var result =
+            await flushDnsAction
+                .ExecuteAsync();
+
+        var completionResult =
+            new
+            {
+                ActionId =
+                    "flush_dns",
+
+                ExecutedBy =
+                    "RigMD.Agent",
+
+                result.Success,
+                result.Summary,
+                result.OutputLog,
+                result.Proof
+            };
+
+        await _apiClient
+            .CompleteCommandAsync(
+                identity,
+                command.Id,
+                completionResult,
+                stoppingToken);
+
+        _logger.LogInformation(
+            "Allowlisted remediation command completed. Command ID: {CommandId}, Action: flush_dns, Success: {Success}",
             command.Id,
             result.Success);
     }

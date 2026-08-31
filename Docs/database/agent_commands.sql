@@ -28,7 +28,8 @@ create table if not exists agent_commands
             command_type in
             (
                 'scan_system_profile',
-                'clear_user_temp_files'
+                'clear_user_temp_files',
+                'flush_dns'
             )
         ),
 

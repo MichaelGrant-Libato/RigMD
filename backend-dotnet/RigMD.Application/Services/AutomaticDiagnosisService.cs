@@ -20,12 +20,16 @@ public sealed class AutomaticDiagnosisService :
         var evaluateStorage =
             ShouldEvaluateStorage(input);
 
+        var evaluateNetwork =
+            ShouldEvaluateNetwork(input);
+
         var evidence =
             BuildEvidence(
                 input,
                 evaluateCpu,
                 evaluateMemory,
-                evaluateStorage);
+                evaluateStorage,
+                evaluateNetwork);
 
         if (evaluateCpu)
         {
@@ -57,6 +61,19 @@ public sealed class AutomaticDiagnosisService :
         {
             var result =
                 DiagnoseStorage(
+                    input.Hardware,
+                    evidence);
+
+            if (result != null)
+            {
+                return result;
+            }
+        }
+
+        if (evaluateNetwork)
+        {
+            var result =
+                DiagnoseNetwork(
                     input.Hardware,
                     evidence);
 
@@ -381,6 +398,58 @@ public sealed class AutomaticDiagnosisService :
     }
 
     // =======================================================
+    // NETWORK DIAGNOSIS
+    // =======================================================
+
+    private static AutomaticDiagnosisResult?
+        DiagnoseNetwork(
+            HardwareProfileDto hardware,
+            IReadOnlyList<AutomaticDiagnosisProof> evidence)
+    {
+        var network =
+            hardware.Network;
+
+        /*
+         * Flush DNS is only appropriate when basic network
+         * configuration is present but DNS name resolution fails.
+         *
+         * Missing adapters, IPv4 configuration, gateways, or DNS
+         * servers indicate a different network problem and must not
+         * automatically trigger DNS-cache remediation.
+         */
+        if (
+            network.HasActiveAdapter &&
+            network.HasIpv4Address &&
+            network.HasDefaultGateway &&
+            network.HasDnsServers &&
+            !network.DnsResolutionSucceeded)
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory =
+                    "Network issue",
+
+                ActionCategory =
+                    "Troubleshoot",
+
+                ConfidenceLabel =
+                    "High",
+
+                Explanation =
+                    "The installed RigMD Agent detected an active network connection with IPv4, a default gateway, and configured DNS servers, but the DNS resolution test failed. The available evidence is consistent with a DNS resolution problem.",
+
+                RecommendedNextStep =
+                    "Flush the Windows DNS resolver cache, then repeat the network diagnosis to verify whether name resolution succeeds.",
+
+                Proof =
+                    evidence
+            };
+        }
+
+        return null;
+    }
+
+    // =======================================================
     // EVIDENCE BUILDING
     // =======================================================
 
@@ -389,7 +458,8 @@ public sealed class AutomaticDiagnosisService :
             AutomaticDiagnosisInput input,
             bool evaluateCpu,
             bool evaluateMemory,
-            bool evaluateStorage)
+            bool evaluateStorage,
+            bool evaluateNetwork)
     {
         var proof =
             new List<AutomaticDiagnosisProof>();
@@ -414,11 +484,13 @@ public sealed class AutomaticDiagnosisService :
                 "operating_system");
 
         /*
-         * Full mode contains evidence from all supported
-         * component groups.
+         * Full mode contains evidence from all currently supported
+         * general component groups.
          *
-         * Component mode only contains evidence relevant
-         * to the selected component.
+         * Network evidence is intentionally excluded from Full mode
+         * because DNS resolution depends on an external resource and
+         * should only be collected when the user explicitly selects a
+         * network diagnosis scope.
          */
 
         if (evaluateCpu)
@@ -442,6 +514,13 @@ public sealed class AutomaticDiagnosisService :
                 hardware);
         }
 
+        if (evaluateNetwork)
+        {
+            AddNetworkEvidence(
+                proof,
+                hardware);
+        }
+
         if (gpuSelected || isFull)
         {
             AddGpuEvidence(
@@ -455,12 +534,6 @@ public sealed class AutomaticDiagnosisService :
                 proof,
                 hardware);
         }
-
-        /*
-         * Scenario mode may involve multiple performance
-         * areas, so CPU and memory evidence are intentionally
-         * combined for supported performance scenarios.
-         */
 
         return proof;
     }
@@ -752,6 +825,125 @@ public sealed class AutomaticDiagnosisService :
         }
     }
 
+    private static void AddNetworkEvidence(
+        ICollection<AutomaticDiagnosisProof> proof,
+        HardwareProfileDto hardware)
+    {
+        var network =
+            hardware.Network;
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "Active Network Adapter",
+
+                Value =
+                    network.HasActiveAdapter
+                        ? network.AdapterName
+                        : "Not detected",
+
+                Status =
+                    network.HasActiveAdapter
+                        ? "normal"
+                        : "issue",
+
+                Meaning =
+                    network.HasActiveAdapter
+                        ? "The Agent detected an active Windows network adapter."
+                        : "The Agent did not detect an active network adapter."
+            });
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "IPv4 Configuration",
+
+                Value =
+                    network.HasIpv4Address
+                        ? "Available"
+                        : "Unavailable",
+
+                Status =
+                    network.HasIpv4Address
+                        ? "normal"
+                        : "issue",
+
+                Meaning =
+                    network.HasIpv4Address
+                        ? "The active adapter has an IPv4 address."
+                        : "The active adapter does not currently have an IPv4 address."
+            });
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "Default Gateway",
+
+                Value =
+                    network.HasDefaultGateway
+                        ? "Available"
+                        : "Unavailable",
+
+                Status =
+                    network.HasDefaultGateway
+                        ? "normal"
+                        : "issue",
+
+                Meaning =
+                    network.HasDefaultGateway
+                        ? "A default IPv4 gateway is configured."
+                        : "No default IPv4 gateway was detected."
+            });
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "DNS Servers",
+
+                Value =
+                    network.HasDnsServers
+                        ? "Configured"
+                        : "Not detected",
+
+                Status =
+                    network.HasDnsServers
+                        ? "normal"
+                        : "issue",
+
+                Meaning =
+                    network.HasDnsServers
+                        ? "The active adapter has DNS servers configured."
+                        : "The Agent did not detect DNS servers for the active adapter."
+            });
+
+        proof.Add(
+            new AutomaticDiagnosisProof
+            {
+                Label =
+                    "DNS Resolution",
+
+                Value =
+                    network.DnsResolutionSucceeded
+                        ? "Succeeded"
+                        : "Failed",
+
+                Status =
+                    network.DnsResolutionSucceeded
+                        ? "normal"
+                        : "issue",
+
+                Meaning =
+                    string.IsNullOrWhiteSpace(
+                        network.DnsResolutionMessage)
+                        ? "DNS resolution test completed."
+                        : network.DnsResolutionMessage
+            });
+    }
+
     private static void AddGpuEvidence(
         ICollection<AutomaticDiagnosisProof> proof,
         HardwareProfileDto hardware)
@@ -1003,6 +1195,24 @@ public sealed class AutomaticDiagnosisService :
             "storage-problem");
     }
 
+    private static bool ShouldEvaluateNetwork(
+        AutomaticDiagnosisInput input)
+    {
+        if (
+            IsComponentSelected(
+                input,
+                "network",
+                "network-adapter",
+                "network_adapter"))
+        {
+            return true;
+        }
+
+        return IsScenario(
+            input,
+            "network-problem");
+    }
+
     private static bool IsFullMode(
         AutomaticDiagnosisInput input)
     {
@@ -1093,6 +1303,20 @@ public sealed class AutomaticDiagnosisService :
         {
             return
                 "Continue monitoring Windows behavior and run another diagnosis if operating system errors or instability occur.";
+        }
+
+        if (
+            IsComponentSelected(
+                input,
+                "network",
+                "network-adapter",
+                "network_adapter") ||
+            IsScenario(
+                input,
+                "network-problem"))
+        {
+            return
+                "The current network evidence does not verify a DNS resolution problem. Continue monitoring connectivity and repeat the network diagnosis if websites or network names fail to resolve.";
         }
 
         return
