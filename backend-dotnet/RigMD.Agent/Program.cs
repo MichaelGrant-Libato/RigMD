@@ -3,6 +3,7 @@ using RigMD.Agent.Services;
 using RigMD.Agent.Tools;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Infrastructure.Windows;
+using RigMD.Infrastructure.Remediation.Actions;
 
 var builder =
     Host.CreateApplicationBuilder(args);
@@ -14,6 +15,9 @@ builder.Services.AddWindowsService(options =>
 
 builder.Services.AddSingleton<
     AgentIdentityService>();
+
+builder.Services.AddSingleton<
+    InteractiveUserTempPathResolver>();
 
 builder.Services.AddScoped<
     ICpuProvider,
@@ -73,6 +77,9 @@ builder.Services.AddScoped<
 
 builder.Services.AddScoped<
     AgentToolRegistry>();
+
+builder.Services.AddScoped<
+    ClearTempFilesAction>();
 
 builder.Services.AddHostedService<
     Worker>();

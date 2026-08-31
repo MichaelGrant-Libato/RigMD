@@ -3,6 +3,7 @@ using RigMD.Agent.Models;
 using RigMD.Agent.Services;
 using RigMD.Agent.Tools;
 using RigMD.Application.Contracts.Providers;
+using RigMD.Infrastructure.Remediation.Actions;
 
 namespace RigMD.Agent;
 
@@ -157,6 +158,12 @@ public class Worker : BackgroundService
                         command,
                         stoppingToken);
                     break;
+                case "clear_user_temp_files":
+                    await ExecuteClearUserTempFilesAsync(
+                        identity,
+                        command,
+                        stoppingToken);
+                    break;
 
                 default:
                     throw new InvalidOperationException(
@@ -192,6 +199,67 @@ public class Worker : BackgroundService
         }
     }
 
+    private async Task ExecuteClearUserTempFilesAsync(
+    AgentIdentity identity,
+    AgentCommand command,
+    CancellationToken stoppingToken)
+    {
+        using var scope =
+            _scopeFactory.CreateScope();
+
+        var tempPathResolver =
+            scope.ServiceProvider
+                .GetRequiredService<InteractiveUserTempPathResolver>();
+
+        var clearTempFilesAction =
+            scope.ServiceProvider
+                .GetRequiredService<ClearTempFilesAction>();
+
+        var resolvedUser =
+            tempPathResolver.Resolve();
+
+        var tempPath =
+            resolvedUser.TempPath;
+
+        _logger.LogInformation(
+            "Executing allowlisted remediation command. Command ID: {CommandId}, Action: clear_user_temp_files, Account: {AccountName}, TempPath: {TempPath}",
+            command.Id,
+            resolvedUser.AccountName,
+            tempPath);
+
+        var result =
+            await clearTempFilesAction.ExecuteAsync(
+                tempPath);
+
+        var completionResult =
+            new
+            {
+                ActionId =
+                    "clear_user_temp_files",
+
+                ExecutedBy =
+                    "RigMD.Agent",
+
+                TempPath =
+                    tempPath,
+
+                result.Success,
+                result.Summary,
+                result.OutputLog,
+                result.Proof
+            };
+
+        await _apiClient.CompleteCommandAsync(
+            identity,
+            command.Id,
+            completionResult,
+            stoppingToken);
+
+        _logger.LogInformation(
+            "Allowlisted remediation command completed. Command ID: {CommandId}, Success: {Success}",
+            command.Id,
+            result.Success);
+    }
     private async Task ExecuteSystemProfileScanAsync(
         AgentIdentity identity,
         AgentCommand command,
@@ -281,6 +349,7 @@ public class Worker : BackgroundService
         await _apiClient.CompleteCommandAsync(
             identity,
             command.Id,
+            null,
             stoppingToken);
 
         _logger.LogInformation(

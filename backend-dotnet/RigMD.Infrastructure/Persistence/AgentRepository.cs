@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using NpgsqlTypes;
 using RigMD.Application.Contracts.Persistence;
 
 namespace RigMD.Infrastructure.Persistence;
@@ -395,7 +396,8 @@ public class AgentRepository : IAgentRepository
                 requested_at,
                 claimed_at,
                 completed_at,
-                error_message;
+                error_message,
+                result_json::text;
             """;
 
         await using var command =
@@ -425,107 +427,102 @@ public class AgentRepository : IAgentRepository
         return ReadCommand(reader);
     }
 
-  public async Task<AgentCommandRecord?> ClaimNextCommandAsync(
-    string agentId,
-    CancellationToken cancellationToken = default)
-{
-    await using var connection =
-        new NpgsqlConnection(
-            GetConnectionString());
+    public async Task<AgentCommandRecord?> ClaimNextCommandAsync(
+        string agentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection =
+            new NpgsqlConnection(
+                GetConnectionString());
 
-    await connection.OpenAsync(
-        cancellationToken);
-
-    /*
-     * A command is claimable when:
-     *
-     * 1. It is waiting in the normal pending state, or
-     *
-     * 2. It was previously claimed but has remained in the
-     *    running state for more than two minutes.
-     *
-     * The second case represents an abandoned command, such as
-     * when the Agent process crashes, the computer shuts down,
-     * or connectivity is lost before completion/failure can be
-     * reported.
-     *
-     * FOR UPDATE SKIP LOCKED ensures that multiple Agent
-     * instances cannot claim the same command concurrently.
-     *
-     * Reclaiming is performed in the same PostgreSQL statement,
-     * so there is no intermediate pending state and therefore no
-     * separate recovery race.
-     */
-    const string sql = """
-        WITH next_command AS
-        (
-            SELECT id
-            FROM agent_commands
-            WHERE agent_id = @agentId
-              AND
-              (
-                  status = 'pending'
-                  OR
-                  (
-                      status = 'running'
-                      AND claimed_at IS NOT NULL
-                      AND claimed_at <
-                          NOW() - INTERVAL '2 minutes'
-                  )
-              )
-            ORDER BY
-                requested_at,
-                id
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-        )
-        UPDATE agent_commands
-        SET
-            status = 'running',
-            claimed_at = NOW(),
-            completed_at = NULL,
-            error_message = NULL
-        WHERE id IN
-        (
-            SELECT id
-            FROM next_command
-        )
-        RETURNING
-            id,
-            agent_id,
-            command_type,
-            status,
-            requested_at,
-            claimed_at,
-            completed_at,
-            error_message;
-        """;
-
-    await using var command =
-        new NpgsqlCommand(
-            sql,
-            connection);
-
-    command.Parameters.AddWithValue(
-        "agentId",
-        agentId);
-
-    await using var reader =
-        await command.ExecuteReaderAsync(
+        await connection.OpenAsync(
             cancellationToken);
 
-    if (!await reader.ReadAsync(
-            cancellationToken))
-    {
-        return null;
-    }
+        /*
+         * Pending commands may be claimed normally.
+         *
+         * A stale running command may only be reclaimed when it
+         * is the read-only scan_system_profile command.
+         *
+         * State-changing remediation commands must never be
+         * automatically reclaimed because doing so could execute
+         * the same remediation twice after a crash, timeout, or
+         * connectivity failure.
+         */
+        const string sql = """
+            WITH next_command AS
+            (
+                SELECT id
+                FROM agent_commands
+                WHERE agent_id = @agentId
+                  AND
+                  (
+                      status = 'pending'
+                      OR
+                      (
+                          status = 'running'
+                          AND command_type = 'scan_system_profile'
+                          AND claimed_at IS NOT NULL
+                          AND claimed_at <
+                              NOW() - INTERVAL '2 minutes'
+                      )
+                  )
+                ORDER BY
+                    requested_at,
+                    id
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE agent_commands
+            SET
+                status = 'running',
+                claimed_at = NOW(),
+                completed_at = NULL,
+                error_message = NULL,
+                result_json = NULL
+            WHERE id IN
+            (
+                SELECT id
+                FROM next_command
+            )
+            RETURNING
+                id,
+                agent_id,
+                command_type,
+                status,
+                requested_at,
+                claimed_at,
+                completed_at,
+                error_message,
+                result_json::text;
+            """;
 
-    return ReadCommand(reader);
-}
+        await using var command =
+            new NpgsqlCommand(
+                sql,
+                connection);
+
+        command.Parameters.AddWithValue(
+            "agentId",
+            agentId);
+
+        await using var reader =
+            await command.ExecuteReaderAsync(
+                cancellationToken);
+
+        if (!await reader.ReadAsync(
+                cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadCommand(reader);
+    }
 
     public async Task<AgentCommandRecord?> CompleteCommandAsync(
         string agentId,
         Guid commandId,
+        string? resultJson,
         CancellationToken cancellationToken = default)
     {
         await using var connection =
@@ -540,7 +537,8 @@ public class AgentRepository : IAgentRepository
             SET
                 status = 'completed',
                 completed_at = NOW(),
-                error_message = NULL
+                error_message = NULL,
+                result_json = @resultJson
             WHERE id = @commandId
               AND agent_id = @agentId
               AND status = 'running'
@@ -552,7 +550,8 @@ public class AgentRepository : IAgentRepository
                 requested_at,
                 claimed_at,
                 completed_at,
-                error_message;
+                error_message,
+                result_json::text;
             """;
 
         await using var command =
@@ -567,6 +566,13 @@ public class AgentRepository : IAgentRepository
         command.Parameters.AddWithValue(
             "agentId",
             agentId);
+
+        command.Parameters.AddWithValue(
+            "resultJson",
+            NpgsqlDbType.Jsonb,
+            string.IsNullOrWhiteSpace(resultJson)
+                ? DBNull.Value
+                : resultJson);
 
         await using var reader =
             await command.ExecuteReaderAsync(
@@ -599,7 +605,8 @@ public class AgentRepository : IAgentRepository
             SET
                 status = 'failed',
                 completed_at = NOW(),
-                error_message = @errorMessage
+                error_message = @errorMessage,
+                result_json = NULL
             WHERE id = @commandId
               AND agent_id = @agentId
               AND status = 'running'
@@ -611,7 +618,8 @@ public class AgentRepository : IAgentRepository
                 requested_at,
                 claimed_at,
                 completed_at,
-                error_message;
+                error_message,
+                result_json::text;
             """;
 
         await using var command =
@@ -665,7 +673,8 @@ public class AgentRepository : IAgentRepository
                 requested_at,
                 claimed_at,
                 completed_at,
-                error_message
+                error_message,
+                result_json::text
             FROM agent_commands
             WHERE id = @commandId
               AND agent_id = @agentId
@@ -853,7 +862,12 @@ public class AgentRepository : IAgentRepository
             ErrorMessage =
                 reader.IsDBNull(7)
                     ? null
-                    : reader.GetString(7)
+                    : reader.GetString(7),
+
+            ResultJson =
+                reader.IsDBNull(8)
+                    ? null
+                    : reader.GetString(8)
         };
     }
 }
