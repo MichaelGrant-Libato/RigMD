@@ -144,10 +144,11 @@ public class AgentApiClient
                 cancellationToken: cancellationToken);
     }
 
-    public async Task CompleteCommandAsync(
-        AgentIdentity identity,
-        Guid commandId,
-        CancellationToken cancellationToken)
+  public async Task CompleteCommandAsync(
+    AgentIdentity identity,
+    Guid commandId,
+    object? result,
+    CancellationToken cancellationToken)
     {
         using var request =
             new HttpRequestMessage(
@@ -158,8 +159,17 @@ public class AgentApiClient
             request,
             identity.AgentId);
 
+        var resultJson =
+            result == null
+                ? null
+                : System.Text.Json.JsonSerializer.Serialize(
+                    result);
+
         request.Content =
-            JsonContent.Create(new { });
+            JsonContent.Create(new
+            {
+                ResultJson = resultJson
+            });
 
         using var response =
             await _httpClient.SendAsync(

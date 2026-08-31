@@ -9,10 +9,11 @@ using RigMD.Application.Models;
 namespace RigMD.Infrastructure.Remediation.Actions;
 
 /// <summary>
-/// Clears deletable files from the current user's %TEMP% directory.
+/// Clears deletable files from a TEMP directory.
 ///
 /// Safety behavior:
-/// - Operates only inside the current user's TEMP directory.
+/// - Uses the current process TEMP directory by default.
+/// - Can accept an explicit TEMP path for Agent-side execution.
 /// - Skips inaccessible directories.
 /// - Skips locked/in-use files.
 /// - Does not follow directory junctions/reparse points.
@@ -29,36 +30,79 @@ public class ClearTempFilesAction
         _logger = logger;
     }
 
-    public async Task<ExecutionResult> ExecuteAsync()
+    public Task<ExecutionResult> ExecuteAsync()
     {
-        var tempPath = Path.GetTempPath();
+        return ExecuteAsync(
+            Path.GetTempPath());
+    }
 
-        if (!Directory.Exists(tempPath))
+    public async Task<ExecutionResult> ExecuteAsync(
+        string tempPath)
+    {
+        if (string.IsNullOrWhiteSpace(tempPath))
         {
             return new ExecutionResult
             {
                 Success = false,
                 Summary =
-                    $"Temp directory does not exist: {tempPath}",
+                    "Temp directory path was not provided.",
                 OutputLog =
-                    "No action was taken because the current user's TEMP directory could not be found."
+                    "No action was taken because the cleanup path was empty."
             };
         }
 
-        // Keep the async contract without moving filesystem work
-        // to another thread unnecessarily.
+        string normalizedTempPath;
+
+        try
+        {
+            normalizedTempPath =
+                Path.GetFullPath(
+                    tempPath);
+        }
+        catch (Exception ex)
+        {
+            return new ExecutionResult
+            {
+                Success = false,
+                Summary =
+                    "The provided temp directory path is invalid.",
+                OutputLog =
+                    $"No action was taken. Path validation failed: {ex.Message}"
+            };
+        }
+
+        if (!Directory.Exists(
+                normalizedTempPath))
+        {
+            return new ExecutionResult
+            {
+                Success = false,
+                Summary =
+                    $"Temp directory does not exist: {normalizedTempPath}",
+                OutputLog =
+                    "No action was taken because the TEMP directory could not be found."
+            };
+        }
+
+        tempPath =
+            normalizedTempPath;
+
+        // Keep the async contract without moving filesystem
+        // work to another thread unnecessarily.
         await Task.Yield();
 
-        // Measure the accessible portion of TEMP before cleanup.
         var bytesBefore =
-            MeasureDirectorySize(tempPath);
+            MeasureDirectorySize(
+                tempPath);
 
         var fileCountBefore =
-            CountFiles(tempPath);
+            CountFiles(
+                tempPath);
 
         var deletedFiles = 0;
         var skippedFiles = 0;
         var removedDirs = 0;
+
         long bytesFreed = 0;
 
         var errors =
@@ -67,9 +111,8 @@ public class ClearTempFilesAction
         /*
          * Delete files first.
          *
-         * EnumerationOptions.IgnoreInaccessible prevents protected
-         * directories such as TEMP\WinSAT from terminating the entire
-         * remediation operation while the enumerator traverses TEMP.
+         * IgnoreInaccessible prevents protected directories
+         * from terminating the entire remediation operation.
          */
         try
         {
@@ -82,7 +125,8 @@ public class ClearTempFilesAction
                 try
                 {
                     var fileInfo =
-                        new FileInfo(filePath);
+                        new FileInfo(
+                            filePath);
 
                     long fileSize;
 
@@ -103,12 +147,10 @@ public class ClearTempFilesAction
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    // Protected file — expected on some Windows systems.
                     skippedFiles++;
                 }
                 catch (IOException)
                 {
-                    // Locked or currently in use.
                     skippedFiles++;
                 }
                 catch (Exception ex)
@@ -125,12 +167,6 @@ public class ClearTempFilesAction
         }
         catch (UnauthorizedAccessException ex)
         {
-            /*
-             * IgnoreInaccessible should normally prevent this while
-             * traversing child directories. This catch protects the
-             * operation if the root TEMP directory itself changes
-             * permissions during execution.
-             */
             errors.Add(
                 $"TEMP enumeration access denied: {ex.Message}");
         }
@@ -143,8 +179,7 @@ public class ClearTempFilesAction
         /*
          * Remove empty directories after deleting files.
          *
-         * Enumerate deepest directories first so children are handled
-         * before their parents.
+         * Deepest directories are handled first.
          */
         try
         {
@@ -175,11 +210,12 @@ public class ClearTempFilesAction
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    // Protected directory — safely skip.
+                    // Protected directory.
                 }
                 catch (IOException)
                 {
-                    // Directory still contains or is using resources.
+                    // Directory is still in use
+                    // or contains resources.
                 }
                 catch
                 {
@@ -190,17 +226,19 @@ public class ClearTempFilesAction
         catch
         {
             /*
-             * Directory cleanup is secondary to deleting the files.
-             * A failure here must not crash the remediation.
+             * Directory cleanup is secondary to deleting
+             * the files, so failure here must not crash
+             * the remediation.
              */
         }
 
-        // Measure accessible TEMP state after cleanup.
         var bytesAfter =
-            MeasureDirectorySize(tempPath);
+            MeasureDirectorySize(
+                tempPath);
 
         var fileCountAfter =
-            CountFiles(tempPath);
+            CountFiles(
+                tempPath);
 
         var outputLines =
             new List<string>
@@ -224,7 +262,8 @@ public class ClearTempFilesAction
         }
 
         _logger.LogInformation(
-            "ClearTempFiles completed: deleted={Deleted}, skipped={Skipped}, directoriesRemoved={DirectoriesRemoved}, bytesFreed={BytesFreed}",
+            "ClearTempFiles completed: path={TempPath}, deleted={Deleted}, skipped={Skipped}, directoriesRemoved={DirectoriesRemoved}, bytesFreed={BytesFreed}",
+            tempPath,
             deletedFiles,
             skippedFiles,
             removedDirs,
@@ -238,86 +277,97 @@ public class ClearTempFilesAction
             deletedFiles > 0
                 ? $"Deleted {deletedFiles} temp files and freed {FormatBytes(bytesFreed)}."
                 : fileCountBefore == 0
-                    ? "The accessible user TEMP directory was already clean."
+                    ? "The accessible TEMP directory was already clean."
                     : "No deletable temp files were found. Remaining files may be locked, protected, or currently in use.";
 
         return new ExecutionResult
         {
-            Success = success,
+            Success =
+                success,
 
-            Summary = summary,
+            Summary =
+                summary,
 
             OutputLog =
                 string.Join(
                     Environment.NewLine,
                     outputLines),
 
-            Proof = new List<ExecutionProof>
-            {
-                new()
+            Proof =
+                new List<ExecutionProof>
                 {
-                    Label = "File Count",
+                    new()
+                    {
+                        Label =
+                            "File Count",
 
-                    Before =
-                        fileCountBefore.ToString(),
+                        Before =
+                            fileCountBefore.ToString(),
 
-                    After =
-                        fileCountAfter.ToString(),
+                        After =
+                            fileCountAfter.ToString(),
 
-                    Status =
-                        deletedFiles > 0
-                            ? "Reduced"
-                            : "Unchanged",
+                        Status =
+                            deletedFiles > 0
+                                ? "Reduced"
+                                : "Unchanged",
 
-                    Meaning =
-                        deletedFiles > 0
-                            ? $"{deletedFiles} accessible temporary files were removed."
-                            : "No accessible temporary files were removed."
-                },
+                        Meaning =
+                            deletedFiles > 0
+                                ? $"{deletedFiles} accessible temporary files were removed."
+                                : "No accessible temporary files were removed."
+                    },
 
-                new()
-                {
-                    Label = "Directory Size",
+                    new()
+                    {
+                        Label =
+                            "Directory Size",
 
-                    Before =
-                        FormatBytes(
-                            bytesBefore),
+                        Before =
+                            FormatBytes(
+                                bytesBefore),
 
-                    After =
-                        FormatBytes(
-                            bytesAfter),
+                        After =
+                            FormatBytes(
+                                bytesAfter),
 
-                    Status =
-                        bytesFreed > 0
-                            ? "Reduced"
-                            : "Unchanged",
+                        Status =
+                            bytesFreed > 0
+                                ? "Reduced"
+                                : "Unchanged",
 
-                    Meaning =
-                        bytesFreed > 0
-                            ? $"{FormatBytes(bytesFreed)} of temporary data was removed."
-                            : "No measurable temporary disk space was recovered."
+                        Meaning =
+                            bytesFreed > 0
+                                ? $"{FormatBytes(bytesFreed)} of temporary data was removed."
+                                : "No measurable temporary disk space was recovered."
+                    }
                 }
-            }
         };
     }
 
     /// <summary>
     /// Provides safe recursive filesystem enumeration.
     ///
-    /// IgnoreInaccessible prevents one protected directory from
-    /// terminating the whole cleanup.
+    /// IgnoreInaccessible prevents one protected directory
+    /// from terminating the whole cleanup.
     ///
-    /// ReparsePoint is skipped so RigMD does not recursively follow
-    /// junctions/symbolic links that could lead outside TEMP.
+    /// ReparsePoint is skipped so RigMD does not recursively
+    /// follow junctions or symbolic links that could lead
+    /// outside the requested TEMP directory.
     /// </summary>
     private static EnumerationOptions
         CreateSafeEnumerationOptions()
     {
         return new EnumerationOptions
         {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            ReturnSpecialDirectories = false,
+            RecurseSubdirectories =
+                true,
+
+            IgnoreInaccessible =
+                true,
+
+            ReturnSpecialDirectories =
+                false,
 
             AttributesToSkip =
                 FileAttributes.ReparsePoint
@@ -384,7 +434,8 @@ public class ClearTempFilesAction
             return $"{bytes} B";
         }
 
-        if (bytes < 1024 * 1024)
+        if (bytes <
+            1024 * 1024)
         {
             return
                 $"{bytes / 1024.0:F1} KB";

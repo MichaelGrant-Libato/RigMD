@@ -50,7 +50,8 @@ public class AgentController : ControllerBase
                 request.AgentVersion,
                 cancellationToken);
 
-        return Ok(ToStatus(agent));
+        return Ok(
+            ToStatus(agent));
     }
 
     [HttpPost("heartbeat")]
@@ -81,7 +82,8 @@ public class AgentController : ControllerBase
             });
         }
 
-        return Ok(ToStatus(agent));
+        return Ok(
+            ToStatus(agent));
     }
 
     [HttpPost("snapshot")]
@@ -153,7 +155,72 @@ public class AgentController : ControllerBase
                 "scan_system_profile",
                 cancellationToken);
 
-        return Ok(ToCommand(command));
+        return Ok(
+            ToCommand(command));
+    }
+
+    [HttpPost("{agentId}/remediation/clear-user-temp-files")]
+    public async Task<IActionResult> CreateClearUserTempFilesRequest(
+        string agentId,
+        [FromBody] AgentRemediationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!request.Confirmed)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Explicit user confirmation is required before remediation."
+            });
+        }
+
+        var clientId =
+            HttpContext.Items["ClientId"]?
+                .ToString();
+
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return BadRequest(new
+            {
+                message = "Client ID is required."
+            });
+        }
+
+        var agent =
+            await _agentRepository.GetAgentAsync(
+                agentId,
+                cancellationToken);
+
+        if (agent == null)
+        {
+            return NotFound(new
+            {
+                message = "Agent was not found."
+            });
+        }
+
+        if (!string.Equals(
+                agent.ClientId,
+                clientId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new
+                {
+                    message =
+                        "This Agent is not associated with the current client."
+                });
+        }
+
+        var command =
+            await _agentRepository.CreateCommandAsync(
+                agentId,
+                "clear_user_temp_files",
+                cancellationToken);
+
+        return Ok(
+            ToCommand(command));
     }
 
     [HttpGet("{agentId}/commands/next")]
@@ -171,7 +238,8 @@ public class AgentController : ControllerBase
             return NoContent();
         }
 
-        return Ok(ToCommand(command));
+        return Ok(
+            ToCommand(command));
     }
 
     [HttpGet("{agentId}/commands/{commandId:guid}")]
@@ -190,23 +258,51 @@ public class AgentController : ControllerBase
         {
             return NotFound(new
             {
-                message = "Agent command was not found."
+                message =
+                    "Agent command was not found."
             });
         }
 
-        return Ok(ToCommand(command));
+        return Ok(
+            ToCommand(command));
     }
 
     [HttpPost("{agentId}/commands/{commandId:guid}/complete")]
     public async Task<IActionResult> CompleteCommand(
         string agentId,
         Guid commandId,
+        [FromBody] AgentCommandCompletionRequest request,
         CancellationToken cancellationToken)
     {
+        var resultJson =
+            string.IsNullOrWhiteSpace(
+                request.ResultJson)
+                ? null
+                : request.ResultJson.Trim();
+
+        if (resultJson != null)
+        {
+            try
+            {
+                using var _ =
+                    JsonDocument.Parse(
+                        resultJson);
+            }
+            catch (JsonException)
+            {
+                return BadRequest(new
+                {
+                    message =
+                        "Agent command result must contain valid JSON."
+                });
+            }
+        }
+
         var command =
             await _agentRepository.CompleteCommandAsync(
                 agentId,
                 commandId,
+                resultJson,
                 cancellationToken);
 
         if (command == null)
@@ -218,7 +314,8 @@ public class AgentController : ControllerBase
             });
         }
 
-        return Ok(ToCommand(command));
+        return Ok(
+            ToCommand(command));
     }
 
     [HttpPost("{agentId}/commands/{commandId:guid}/fail")]
@@ -229,7 +326,8 @@ public class AgentController : ControllerBase
         CancellationToken cancellationToken)
     {
         var errorMessage =
-            string.IsNullOrWhiteSpace(request.ErrorMessage)
+            string.IsNullOrWhiteSpace(
+                request.ErrorMessage)
                 ? "Agent command failed."
                 : request.ErrorMessage.Trim();
 
@@ -255,7 +353,8 @@ public class AgentController : ControllerBase
             });
         }
 
-        return Ok(ToCommand(command));
+        return Ok(
+            ToCommand(command));
     }
 
     [HttpGet("{agentId}")]
@@ -272,11 +371,13 @@ public class AgentController : ControllerBase
         {
             return NotFound(new
             {
-                message = "Agent was not found."
+                message =
+                    "Agent was not found."
             });
         }
 
-        return Ok(ToStatus(agent));
+        return Ok(
+            ToStatus(agent));
     }
 
     [HttpGet("{agentId}/snapshot")]
@@ -335,6 +436,19 @@ public class AgentController : ControllerBase
     private static object ToCommand(
         AgentCommandRecord command)
     {
+        JsonElement? result = null;
+
+        if (!string.IsNullOrWhiteSpace(
+                command.ResultJson))
+        {
+            using var document =
+                JsonDocument.Parse(
+                    command.ResultJson);
+
+            result =
+                document.RootElement.Clone();
+        }
+
         return new
         {
             command.Id,
@@ -344,7 +458,18 @@ public class AgentController : ControllerBase
             command.RequestedAt,
             command.ClaimedAt,
             command.CompletedAt,
-            command.ErrorMessage
+            command.ErrorMessage,
+            Result = result
         };
     }
+}
+
+public class AgentCommandCompletionRequest
+{
+    public string? ResultJson { get; set; }
+}
+
+public class AgentRemediationRequest
+{
+    public bool Confirmed { get; set; }
 }
