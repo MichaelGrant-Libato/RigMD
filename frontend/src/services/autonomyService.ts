@@ -1,4 +1,4 @@
-import { apiPost } from '../lib/api';
+import { apiGet,apiPost, } from '../lib/api';
 
 export interface AutonomyActionDef {
   id?: string;
@@ -57,11 +57,67 @@ export interface AutonomyResult {
   trace?: string;
 }
 
+interface AgentRemediationProof {
+  Label?: string;
+  Status?: string;
+  Meaning?: string;
+  Before?: string;
+  After?: string;
+}
+
+interface AgentRemediationResult {
+  Success?: boolean;
+  Summary?: string;
+  OutputLog?: string;
+  Proof?: AgentRemediationProof[];
+  ActionId?: string;
+  ExecutedBy?: string;
+}
+
+interface AgentCommandResponse {
+  id: string;
+  agentId: string;
+  commandType: string;
+
+  status:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed';
+
+  requestedAt: string;
+  claimedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+
+  result?: AgentRemediationResult | null;
+}
+
+
 export interface AutonomyRequest {
   sessionId: string;
   diagnosedCategory: string;
   userConsentProvided?: boolean;
 }
+
+const AGENT_ID =
+  import.meta.env.VITE_AGENT_ID;
+
+const AGENT_REMEDIATION_TIMEOUT_MS =
+  45_000;
+
+const AGENT_REMEDIATION_POLL_MS =
+  1_500;
+
+const wait = (
+  milliseconds: number,
+) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(
+      resolve,
+      milliseconds,
+    );
+  });
 
 export async function runAutonomyDryRun({
   sessionId,
@@ -93,6 +149,195 @@ export async function runAutonomyExecution({
   );
 
   return response.data;
+}
+
+export async function runAgentClearUserTempFiles(): Promise<AutonomyResult> {
+  if (!AGENT_ID) {
+    throw new Error(
+      'VITE_AGENT_ID is not configured.',
+    );
+  }
+
+  const createResponse =
+    await apiPost<AgentCommandResponse>(
+      `/api/agent/${AGENT_ID}/remediation/clear-user-temp-files`,
+      {
+        confirmed: true,
+      },
+      {
+        headers: {
+          'X-Client-ID':
+            AGENT_ID,
+        },
+      },
+    );
+
+  const commandId =
+    createResponse.data.id;
+
+  if (!commandId) {
+    throw new Error(
+      'RigMD did not return a remediation command ID.',
+    );
+  }
+
+  const deadline =
+    Date.now() +
+    AGENT_REMEDIATION_TIMEOUT_MS;
+
+  while (
+    Date.now() <
+    deadline
+  ) {
+    await wait(
+      AGENT_REMEDIATION_POLL_MS,
+    );
+
+    const commandResponse =
+      await apiGet<AgentCommandResponse>(
+        `/api/agent/${AGENT_ID}/commands/${commandId}`,
+        {
+          headers: {
+            'X-Client-ID':
+              AGENT_ID,
+          },
+        },
+      );
+
+    const command =
+      commandResponse.data;
+
+    if (
+      command.status ===
+      'failed'
+    ) {
+      throw new Error(
+        command.errorMessage ||
+          'The RigMD Agent reported that remediation failed.',
+      );
+    }
+
+    if (
+      command.status !==
+      'completed'
+    ) {
+      continue;
+    }
+
+    const agentResult =
+      command.result;
+
+    const execution: AutonomyExecution =
+      {
+        success:
+          agentResult?.Success ??
+          true,
+
+        summary:
+          agentResult?.Summary ||
+          'The installed RigMD Agent completed the remediation.',
+
+        outputLog:
+          agentResult?.OutputLog,
+
+        proof:
+          agentResult?.Proof?.map(
+            (item) => ({
+              label:
+                item.Label,
+              status:
+                item.Status,
+              meaning:
+                item.Meaning,
+              before:
+                item.Before,
+              after:
+                item.After,
+            }),
+          ),
+      };
+
+    return {
+      plan: {
+        plannedActions: [
+          {
+            id:
+              'clear_user_temp_files',
+
+            name:
+              'Clear User Temp Files',
+
+            description:
+              'Remove accessible temporary files for the active Windows user.',
+
+            category:
+              'Maintain',
+
+            riskLevel:
+              'Low',
+
+            isReversible:
+              false,
+
+            requiresUserConfirmation:
+              true,
+          },
+        ],
+      },
+
+      safety: {
+        isApproved:
+          true,
+
+        requiresUserConfirmation:
+          true,
+
+        warnings: [
+          'Execution was sent to the installed RigMD Agent after explicit user consent.',
+        ],
+      },
+
+      execution,
+
+      attempts: [
+        {
+          action: {
+            id:
+              'clear_user_temp_files',
+
+            name:
+              'Clear User Temp Files',
+
+            riskLevel:
+              'Low',
+
+            isReversible:
+              false,
+
+            requiresUserConfirmation:
+              true,
+          },
+
+          state:
+            'Completed',
+
+          execution,
+
+          notes:
+            agentResult?.ExecutedBy
+              ? `Executed by ${agentResult.ExecutedBy}.`
+              : 'Executed by the installed RigMD Agent.',
+        },
+      ],
+
+      trace:
+        `[AGENT] Command ${commandId} completed through the installed RigMD Agent.`,
+    };
+  }
+
+  throw new Error(
+    'The RigMD Agent did not finish remediation within 45 seconds.',
+  );
 }
 
 export function getBackendErrorMessage(error: unknown) {
