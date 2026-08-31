@@ -72,6 +72,18 @@ public class ProcessAppDto
     public double MemoryMb { get; set; }
 }
 
+public class NetworkStatsDto
+{
+    public bool HasActiveAdapter { get; set; }
+    public string AdapterName { get; set; } = string.Empty;
+    public bool HasIpv4Address { get; set; }
+    public bool HasDefaultGateway { get; set; }
+    public bool HasDnsServers { get; set; }
+    public bool DnsResolutionSucceeded { get; set; }
+    public string DnsTestHost { get; set; } = string.Empty;
+    public string DnsResolutionMessage { get; set; } = string.Empty;
+}
+
 public class HardwareProfileDto
 {
     public string DeviceName { get; set; } = string.Empty;
@@ -83,6 +95,8 @@ public class HardwareProfileDto
     public CpuStatsDto Cpu { get; set; } = new();
     public GpuStatsDto Gpu { get; set; } = new();
     public MemoryStatsDto Ram { get; set; } = new();
+
+    public NetworkStatsDto Network { get; set; } = new();
     
     public List<StorageDriveDto> StorageDrives { get; set; } = new();
     public List<DiskVolumeDto> AllDisks { get; set; } = new();

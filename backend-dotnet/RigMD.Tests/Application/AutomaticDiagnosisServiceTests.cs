@@ -96,6 +96,76 @@ public class AutomaticDiagnosisServiceTests
         Assert.Equal("No Active Issue Detected", result.DiagnosedCategory);
     }
 
+    [Fact]
+    public void Diagnose_DoesNotInventNetworkIssue_WhenDnsResolutionSucceeds()
+    {
+        var input = CreateInput(
+            ramUsage: 50,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "scenario",
+            scenarioId: "network-problem",
+            dnsResolutionSucceeded: true);
+
+        var result =
+            _service.Diagnose(
+                input);
+
+        Assert.Equal(
+            "No Active Issue Detected",
+            result.DiagnosedCategory);
+
+        Assert.Equal(
+            "Monitor",
+            result.ActionCategory);
+
+        Assert.Contains(
+            result.Proof,
+            item =>
+                item.Label ==
+                    "DNS Resolution" &&
+                item.Value ==
+                    "Succeeded");
+    }
+
+    [Fact]
+    public void Diagnose_ReturnsNetworkIssue_WhenDnsResolutionFailsWithValidConfiguration()
+    {
+        var input = CreateInput(
+            ramUsage: 50,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "scenario",
+            scenarioId: "network-problem",
+            dnsResolutionSucceeded: false);
+
+        var result =
+            _service.Diagnose(
+                input);
+
+        Assert.Equal(
+            "Network issue",
+            result.DiagnosedCategory);
+
+        Assert.Equal(
+            "Troubleshoot",
+            result.ActionCategory);
+
+        Assert.Equal(
+            "High",
+            result.ConfidenceLabel);
+
+        Assert.Contains(
+            result.Proof,
+            item =>
+                item.Label ==
+                    "DNS Resolution" &&
+                item.Value ==
+                    "Failed");
+    }
+
     private static AutomaticDiagnosisInput CreateInput(
         double ramUsage,
         bool browserHeavy,
@@ -103,7 +173,8 @@ public class AutomaticDiagnosisServiceTests
         double diskUsage,
         string mode,
         string? scenarioId = null,
-        IReadOnlyList<string>? componentIds = null)
+        IReadOnlyList<string>? componentIds = null,
+        bool dnsResolutionSucceeded = true)
     {
         return new AutomaticDiagnosisInput
         {
@@ -143,6 +214,19 @@ public class AutomaticDiagnosisServiceTests
                     TotalGb = 16,
                     UsedGb = 16 * (ramUsage / 100),
                     UsagePercent = ramUsage
+                },
+                Network = new()
+                {
+                    HasActiveAdapter = true,
+                    AdapterName = "Test Ethernet",
+                    HasIpv4Address = true,
+                    HasDefaultGateway = true,
+                    HasDnsServers = true,
+                    DnsResolutionSucceeded = dnsResolutionSucceeded,
+                    DnsTestHost = "example.com",
+                    DnsResolutionMessage = dnsResolutionSucceeded
+                        ? "DNS resolution for example.com succeeded."
+                        : "DNS resolution failed during the test."
                 },
 
                 StorageDrives =

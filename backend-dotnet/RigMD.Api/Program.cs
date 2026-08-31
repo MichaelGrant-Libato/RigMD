@@ -55,6 +55,10 @@ builder.Services.AddScoped<
     IAutomaticDiagnosisService,
     AutomaticDiagnosisService>();
 
+builder.Services.AddScoped<
+    RigMD.Application.Contracts.Providers.INetworkProvider,
+    RigMD.Infrastructure.Windows.WindowsNetworkProvider>();
+
 // ---------------------------------------------------------------
 // Windows Observation Layer
 // ---------------------------------------------------------------

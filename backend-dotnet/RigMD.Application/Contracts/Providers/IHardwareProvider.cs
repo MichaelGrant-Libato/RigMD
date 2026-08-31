@@ -41,6 +41,12 @@ public interface IProcessProvider
     ProcessInsightsDto GetProcessInsights();
 }
 
+public interface INetworkProvider
+{
+    NetworkStatsDto GetNetworkStats();
+}
+
+
 public interface IWindowsSystemProfileService
 {
     HardwareProfileDto GetLiveSystemProfile();

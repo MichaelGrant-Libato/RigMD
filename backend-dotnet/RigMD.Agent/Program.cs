@@ -81,8 +81,15 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     ClearTempFilesAction>();
 
+builder.Services.AddScoped<
+    FlushDnsAction>();
+
 builder.Services.AddHostedService<
     Worker>();
+
+builder.Services.AddScoped<
+    INetworkProvider,
+    WindowsNetworkProvider>();
 
 var apiBaseUrl =
     builder.Configuration["Agent:ApiBaseUrl"];

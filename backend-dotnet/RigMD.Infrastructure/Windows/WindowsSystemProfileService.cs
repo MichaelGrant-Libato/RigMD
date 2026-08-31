@@ -12,6 +12,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
     private readonly IStorageProvider _storageProvider;
     private readonly IMotherboardProvider _motherboardProvider;
     private readonly IProcessProvider _processProvider;
+    private readonly INetworkProvider _networkProvider;
 
     public WindowsSystemProfileService(
         ICpuProvider cpuProvider,
@@ -20,7 +21,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         IOperatingSystemProvider osProvider,
         IStorageProvider storageProvider,
         IMotherboardProvider motherboardProvider,
-        IProcessProvider processProvider)
+        IProcessProvider processProvider,
+        INetworkProvider networkProvider)
     {
         _cpuProvider = cpuProvider;
         _gpuProvider = gpuProvider;
@@ -29,6 +31,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         _storageProvider = storageProvider;
         _motherboardProvider = motherboardProvider;
         _processProvider = processProvider;
+        _networkProvider = networkProvider;
     }
 
     public HardwareProfileDto GetLiveSystemProfile()
@@ -50,6 +53,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             Cpu = _cpuProvider.GetCpuStats(),
             Gpu = _gpuProvider.GetGpuStats(),
             Ram = _memoryProvider.GetMemoryStats(),
+            Network = _networkProvider.GetNetworkStats(),
             
             StorageDrives = storageDrives,
             AllDisks = allDisks,

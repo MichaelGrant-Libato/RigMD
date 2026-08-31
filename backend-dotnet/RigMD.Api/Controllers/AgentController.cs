@@ -223,6 +223,72 @@ public class AgentController : ControllerBase
             ToCommand(command));
     }
 
+        [HttpPost("{agentId}/remediation/flush-dns")]
+    public async Task<IActionResult> CreateFlushDnsRequest(
+        string agentId,
+        [FromBody] AgentRemediationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!request.Confirmed)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Explicit user confirmation is required before remediation."
+            });
+        }
+
+        var clientId =
+            HttpContext.Items["ClientId"]?
+                .ToString();
+
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Client ID is required."
+            });
+        }
+
+        var agent =
+            await _agentRepository.GetAgentAsync(
+                agentId,
+                cancellationToken);
+
+        if (agent == null)
+        {
+            return NotFound(new
+            {
+                message =
+                    "Agent was not found."
+            });
+        }
+
+        if (!string.Equals(
+                agent.ClientId,
+                clientId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new
+                {
+                    message =
+                        "This Agent is not associated with the current client."
+                });
+        }
+
+        var command =
+            await _agentRepository.CreateCommandAsync(
+                agentId,
+                "flush_dns",
+                cancellationToken);
+
+        return Ok(
+            ToCommand(command));
+    }
+
     [HttpGet("{agentId}/commands/next")]
     public async Task<IActionResult> ClaimNextCommand(
         string agentId,
