@@ -768,3 +768,30 @@ The next priorities are:
 - retire the Python runtime
 - prepare Windows desktop packaging
 - align final implementation with the SRS and SDD
+
+---
+
+## 20. Troubleshooting & Common Pitfalls
+
+If you are setting up the C# environment for the first time or testing the Agent locally, watch out for these common issues:
+
+### 1. `DATABASE_URL is not configured` (API Crash)
+**The Problem:** The `AgentRepository` currently still relies on Supabase (PostgreSQL) instead of the local SQLite database. If your `.env` or `appsettings.Development.json` is missing the `DATABASE_URL`, the API will crash on startup or when the agent heartbeats.
+**The Fix:** Add `DATABASE_URL` to `backend-dotnet/RigMD.Api/appsettings.Development.json`. 
+
+### 2. API Hangs / Error 500 `TimeoutException` (Npgsql & PgBouncer)
+**The Problem:** If your `DATABASE_URL` uses port `6543`, you are connecting to Supabase's `PgBouncer` connection pooler. The C# `.NET Npgsql` driver uses prepared statements by default, which are incompatible with PgBouncer in Transaction Mode, causing queries to hang and time out.
+**The Fix:** Change the port in your `DATABASE_URL` from `6543` to `5432` to connect directly to the Postgres instance.
+
+### 3. Frontend Shows Another PC (e.g., "MIKMIKYULAPPY")
+**The Problem:** You copied `VITE_AGENT_ID` from a co-developer's `.env` file instead of using your own. The API correctly queried Supabase for that ID, returning your co-worker's PC hardware.
+**The Fix:** 
+1. Open `C:\ProgramData\RigMD\agent.json` on your local machine.
+2. Copy the `AgentId`.
+3. Paste it into `frontend/.env.local` as `VITE_AGENT_ID=your-local-guid`.
+4. Restart the Vite dev server.
+
+### 4. Agent "Offline" / Not Running as a Service
+**The Problem:** The RigMD Agent may not be installed natively as a Windows Service on your development machine yet. 
+**PowerShell Gotcha:** If you try to check the service status in PowerShell using `sc qc RigMDAgent`, it will **not** query the service. `sc` in PowerShell is an alias for `Set-Content`! You will accidentally create a text file named `qc` with the text "RigMDAgent".
+**The Fix:** Use `sc.exe query RigMDAgent` in PowerShell, or just manually run the agent for testing: `dotnet run --project RigMD.Agent`.

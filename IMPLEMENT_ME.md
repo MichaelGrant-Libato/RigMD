@@ -144,26 +144,12 @@ Move RigMD toward full offline operation by using SQLite as the local source of 
 
 ### Current Verified State
 
-The active C# backend does not yet use Entity Framework Core or SQLite.
+The active C# backend currently uses a **hybrid persistence structure**:
 
-Current persistence is:
+1. **Diagnostic & Remediation Data:** Uses Entity Framework Core and a local SQLite database (`RigMdDbContext`), which serves as the local source of truth.
+2. **Agent Telemetry:** The `AgentRepository` currently still bypasses SQLite and relies entirely on hardcoded `Npgsql` connections to the Supabase PostgreSQL database.
 
-ASP.NET Core
-    ↓
-DatabaseSessionService
-    ↓
-Npgsql
-    ↓
-Supabase PostgreSQL
-
-Repository verification confirmed:
-- no RigMdDbContext
-- no EF Core persistence implementation
-- no UseSqlite
-- no SQLite repository implementations
-- controllers currently depend directly on DatabaseSessionService
-
-The current Npgsql/Supabase implementation is retained as a migration-compatibility persistence layer.
+This split architecture is what currently requires the `DATABASE_URL` environment variable to be present for the API to run successfully.
 
 The target remains:
 
