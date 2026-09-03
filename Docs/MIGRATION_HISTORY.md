@@ -367,8 +367,8 @@ Historical documentation should remain after runtime retirement.
 
 Relevant files include:
 
-- `Docs/BASELINE.md`
-- `Docs/LEGACY_CAPABILITY_INVENTORY.md`
+- `Docs/Migration_Archive/BASELINE.md`
+- `Docs/Migration_Archive/LEGACY_CAPABILITY_INVENTORY.md`
 
 ---
 

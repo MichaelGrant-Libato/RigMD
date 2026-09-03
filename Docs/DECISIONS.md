@@ -525,8 +525,8 @@ Once those conditions are satisfied, the Python runtime can be removed in a dedi
 
 Historical documentation such as:
 
-- `Docs/BASELINE.md`
-- `Docs/LEGACY_CAPABILITY_INVENTORY.md`
+- `Docs/Migration_Archive/BASELINE.md`
+- `Docs/Migration_Archive/LEGACY_CAPABILITY_INVENTORY.md`
 
 should remain in the repository.
 
