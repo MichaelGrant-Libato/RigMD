@@ -1,4 +1,4 @@
-# RigMD V2 — Windows PC Diagnostic & Remediation System
+# RigMD — Windows PC Diagnostic & Remediation System
 
 RigMD is a Windows desktop PC diagnostic advisory system that is transitioning into a controlled diagnostic and remediation platform.
 
