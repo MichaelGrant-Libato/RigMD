@@ -78,6 +78,8 @@ public class WmiStorageProvider : IStorageProvider
         var volumes = new List<DiskVolumeDto>();
         try
         {
+            var partitionMap = GetLogicalToPhysicalMapping();
+
             var drives = System.IO.DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == System.IO.DriveType.Fixed);
             foreach (var d in drives)
             {
@@ -86,11 +88,15 @@ public class WmiStorageProvider : IStorageProvider
                 var usedGb = totalGb - freeGb;
                 var percent = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
                 
+                var driveLetter = d.Name.TrimEnd('\\', '/');
+                int? diskIndex = partitionMap.ContainsKey(driveLetter) ? partitionMap[driveLetter] : null;
+
                 volumes.Add(new DiskVolumeDto
                 {
                     Drive = d.Name,
                     Mountpoint = d.Name,
                     FsType = d.DriveFormat,
+                    DiskIndex = diskIndex,
                     TotalGb = Math.Round(totalGb, 2),
                     UsedGb = Math.Round(usedGb, 2),
                     UsagePercent = Math.Round(percent, 1)
@@ -102,6 +108,37 @@ public class WmiStorageProvider : IStorageProvider
             // Ignore
         }
         return volumes;
+    }
+
+    private Dictionary<string, int> GetLogicalToPhysicalMapping()
+    {
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var searcher = new ManagementObjectSearcher("SELECT Antecedent, Dependent FROM Win32_LogicalDiskToPartition");
+            foreach (var obj in searcher.Get())
+            {
+                var antecedent = obj["Antecedent"]?.ToString() ?? "";
+                var dependent = obj["Dependent"]?.ToString() ?? "";
+
+                var driveMatch = System.Text.RegularExpressions.Regex.Match(dependent, "DeviceID=\"([A-Za-z]:)\"");
+                var diskMatch = System.Text.RegularExpressions.Regex.Match(antecedent, "Disk #(\\d+)");
+
+                if (driveMatch.Success && diskMatch.Success)
+                {
+                    var drive = driveMatch.Groups[1].Value;
+                    if (int.TryParse(diskMatch.Groups[1].Value, out var index))
+                    {
+                        map[drive] = index;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore
+        }
+        return map;
     }
 
     private (string type, string source) ClassifyStorage(string model, string mediaType, string interfaceType)
