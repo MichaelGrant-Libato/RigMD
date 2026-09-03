@@ -39,8 +39,30 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var storageDrives = _storageProvider.GetStorageDrives();
         var allDisks = _storageProvider.GetAllDisks();
 
-        // In a full implementation, we'd map logical disks (AllDisks) to Physical Disks (StorageDrives) using WMI DiskDriveToDiskPartition.
-        // For now we just return both datasets to the DTO.
+        foreach (var drive in storageDrives)
+        {
+            if (drive.DiskIndex.HasValue)
+            {
+                drive.Volumes = allDisks.Where(d => d.DiskIndex == drive.DiskIndex.Value).ToList();
+                
+                if (drive.Volumes.Any())
+                {
+                    double totalGb = 0;
+                    double usedGb = 0;
+                    foreach (var v in drive.Volumes)
+                    {
+                        totalGb += v.TotalGb;
+                        usedGb += v.UsedGb;
+                    }
+                    
+                    drive.UsedGb = Math.Round(usedGb, 2);
+                    if (totalGb > 0)
+                    {
+                        drive.UsagePercent = Math.Round((usedGb / totalGb) * 100, 1);
+                    }
+                }
+            }
+        }
 
         return new HardwareProfileDto
         {

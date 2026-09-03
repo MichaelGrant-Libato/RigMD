@@ -47,9 +47,9 @@ Preserve the exact Python baseline state so that it can always be referenced, co
 Create a Git tag at the last known good state of the Python baseline. Create the active migration branch. Write inventory documentation that lists every capability of the Python system so nothing is accidentally dropped during migration.
 
 **Key Files:**
-- `Docs/BASELINE.md` — describes the exact state of the Python system at migration start
-- `Docs/LEGACY_CAPABILITY_INVENTORY.md` — file-by-file audit of every Python module and what it does
-- `Docs/MIGRATION_MATRIX.md` — per-capability tracking table: Python source → C# target → status
+- `Docs/Migration_Archive/BASELINE.md` — describes the exact state of the Python system at migration start
+- `Docs/Migration_Archive/LEGACY_CAPABILITY_INVENTORY.md` — file-by-file audit of every Python module and what it does
+- `Docs/Migration_Archive/MIGRATION_MATRIX.md` — per-capability tracking table: Python source → C# target → status
 - Git tag: `v0.1-python-baseline`
 - Git branch: `feature/csharp-migration`
 

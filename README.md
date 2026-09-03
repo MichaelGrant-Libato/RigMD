@@ -201,13 +201,13 @@ Priority tests include:
 ## 7. Documentation
 
 - [Architecture](./Docs/ARCHITECTURE.md)
-- [Architecture Migration](./Docs/ARCHITECTURE_MIGRATION.md)
-- [C# Migration Roadmap](./Docs/C_SHARP_MIGRATION_PLAN.md)
+- [Architecture Migration](./Docs/Migration_Archive/ARCHITECTURE_MIGRATION.md)
+- [C# Migration Roadmap](./Docs/Migration_Archive/C_SHARP_MIGRATION_PLAN.md)
 - [Autonomous Engine](./Docs/AUTONOMOUS_ENGINE.md)
 - [Remediation Policy](./Docs/REMEDIATION_POLICY.md)
-- [Migration Matrix](./Docs/MIGRATION_MATRIX.md)
-- [Legacy Baseline](./Docs/BASELINE.md)
-- [Legacy Capability Inventory](./Docs/LEGACY_CAPABILITY_INVENTORY.md)
+- [Migration Matrix](./Docs/Migration_Archive/MIGRATION_MATRIX.md)
+- [Legacy Baseline](./Docs/Migration_Archive/BASELINE.md)
+- [Legacy Capability Inventory](./Docs/Migration_Archive/LEGACY_CAPABILITY_INVENTORY.md)
 - [Architectural Decisions](./Docs/DECISIONS.md)
 - [Migration History](./Docs/MIGRATION_HISTORY.md)
 
