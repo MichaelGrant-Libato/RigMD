@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using RigMD.Api.Models;
 using RigMD.Application.Contracts.Persistence;
+using RigMD.Application.Contracts.Providers;
 
 namespace RigMD.Api.Controllers;
 
@@ -10,11 +11,14 @@ namespace RigMD.Api.Controllers;
 public class AgentController : ControllerBase
 {
     private readonly IAgentRepository _agentRepository;
+    private readonly IWindowsSystemProfileService _profileService;
 
     public AgentController(
-        IAgentRepository agentRepository)
+        IAgentRepository agentRepository,
+        IWindowsSystemProfileService profileService)
     {
         _agentRepository = agentRepository;
+        _profileService = profileService;
     }
 
     [HttpPost("register")]
@@ -428,6 +432,20 @@ public class AgentController : ControllerBase
         string agentId,
         CancellationToken cancellationToken)
     {
+        if (agentId == "local")
+        {
+            return Ok(new
+            {
+                agentId = "local",
+                clientId = "local",
+                deviceName = Environment.MachineName,
+                agentVersion = "local",
+                registeredAt = DateTime.UtcNow,
+                lastSeen = DateTime.UtcNow,
+                isOnline = true
+            });
+        }
+
         var agent =
             await _agentRepository.GetAgentAsync(
                 agentId,
@@ -451,6 +469,16 @@ public class AgentController : ControllerBase
         string agentId,
         CancellationToken cancellationToken)
     {
+        if (agentId == "local")
+        {
+            return Ok(new
+            {
+                agentId = "local",
+                capturedAt = DateTime.UtcNow,
+                Hardware = _profileService.GetLiveSystemProfile()
+            });
+        }
+
         var snapshot =
             await _agentRepository
                 .GetLatestSnapshotAsync(
