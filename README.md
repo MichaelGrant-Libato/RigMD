@@ -122,42 +122,20 @@ Do not commit:
 - Gemini API keys
 - real `.env` files
 
-### Start the Backend
+### Start the System (Local Desktop Mode)
+
+The latest architecture bundles the frontend inside the backend, bypassing the need for a separate Agent service or a cloud database for local diagnosis.
 
 From the repository root:
 
 ```bash
 cd backend-dotnet
-dotnet run --project RigMD.Api
+dotnet run --project RigMD.Desktop
 ```
 
-Expected backend URL:
+This will automatically launch the WPF desktop wrapper and serve the React UI.
 
-```
-http://localhost:5273
-```
-
-### Start the Frontend
-
-Open another terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Expected frontend URL:
-
-```
-http://localhost:5173
-```
-
-Ensure the frontend environment contains:
-
-```
-VITE_API_BASE_URL=http://localhost:5273
-```
+*Note: If you still need to run the React app separately for frontend development, you can use `npm run dev` in the `frontend` folder.*
 
 ---
 
