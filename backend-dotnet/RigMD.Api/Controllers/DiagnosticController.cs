@@ -100,6 +100,119 @@ public class DiagnosticController : ControllerBase
         }
     }
 
+    [HttpPost("local-scan")]
+    public async Task<IActionResult> LocalDiagnosis(
+        [FromBody] AutomaticDiagnosisRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (
+                request.Mode != "full" &&
+                request.Mode != "component" &&
+                request.Mode != "scenario")
+            {
+                return BadRequest(
+                    new
+                    {
+                        detail =
+                            "Diagnosis mode must be full, component, or scenario."
+                    });
+            }
+
+            var hardware = _profileService.GetLiveSystemProfile();
+            var capturedAt = DateTimeOffset.UtcNow;
+
+            var input =
+                new AutomaticDiagnosisInput
+                {
+                    AgentId = "local",
+                    CommandId = Guid.Empty,
+                    Mode = request.Mode,
+                    ComponentIds = request.ComponentIds,
+                    ScenarioId = request.ScenarioId,
+                    CapturedAt = capturedAt,
+                    Hardware = hardware
+                };
+
+            var result =
+                _automaticDiagnosisService
+                    .Diagnose(input);
+
+            var sessionId =
+                await _sessionRepository
+                    .SaveAutomaticDiagnosisAsync(
+                        hardware,
+                        request.Mode,
+                        request.ComponentIds,
+                        request.ScenarioId,
+                        Guid.Empty,
+                        "local",
+                        result.DiagnosedCategory,
+                        result.ActionCategory,
+                        result.ConfidenceLabel,
+                        result.Explanation,
+                        "local");
+
+            return Ok(
+                new
+                {
+                    session_id =
+                        sessionId.ToString(),
+
+                    diagnosed_category =
+                        result.DiagnosedCategory,
+
+                    action_category =
+                        result.ActionCategory,
+
+                    confidence_label =
+                        result.ConfidenceLabel,
+
+                    ai_explanation =
+                        result.Explanation,
+
+                    proof =
+                        result.Proof,
+
+                    verification_target =
+                        result.VerificationTarget,
+
+                    recommended_next_step =
+                        result.RecommendedNextStep,
+
+                    resolution_status =
+                        "open",
+
+                    resolution_checked_at =
+                        (string?)null,
+
+                    resolution_summary =
+                        string.Empty,
+
+                    resolution_proof =
+                        Array.Empty<object>(),
+
+                    created_at =
+                        DateTime.UtcNow
+                            .ToString("o")
+                });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Local diagnosis failed: {ex}");
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    detail =
+                        "Local diagnosis could not be completed."
+                });
+        }
+    }
+
         [HttpPost("automatic")]
     public async Task<IActionResult> AutomaticDiagnosis(
         [FromBody] AutomaticDiagnosisRequest request,

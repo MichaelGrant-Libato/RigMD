@@ -1143,17 +1143,50 @@ export default function NewDiagnosisView() {
       setError(null);
 
       try {
-        const createResponse =
-          await apiPost<AgentCommandResponse>(
-            `/api/agent/${AGENT_ID}/scan-request`,
-            {},
+        let newCommandId: string | null = null;
+        let freshSnapshot: AgentSnapshotResponse | null = null;
+        let automaticReport: DiagnosticReport | null = null;
+
+        if (AGENT_ID === 'local') {
+          // --- LOCAL DIRECT MODE ---
+          setDiagnosisStage('scanning');
+          
+          const localResponse = await apiPost<DiagnosticReport>(
+            '/api/diagnosis/local-scan',
             {
-              headers: {
-                'X-Client-ID':
-                  AGENT_ID,
-              },
+              mode: diagnosisMode,
+              componentIds: diagnosisMode === 'component' ? selectedComponents : [],
+              scenarioId: diagnosisMode === 'scenario' ? selectedScenarioId : null,
             },
+            {
+              headers: { 'X-Client-ID': AGENT_ID },
+            }
           );
+          
+          automaticReport = localResponse.data;
+          
+          // We need to fetch the snapshot directly since local-scan doesn't return it
+          const snapshotResponse = await apiGet<AgentSnapshotResponse>(
+            `/api/agent/${AGENT_ID}/snapshot`,
+            {
+              headers: { 'X-Client-ID': AGENT_ID },
+            }
+          );
+          freshSnapshot = snapshotResponse.data;
+          
+        } else {
+          // --- HYBRID CLOUD MODE ---
+          const createResponse =
+            await apiPost<AgentCommandResponse>(
+              `/api/agent/${AGENT_ID}/scan-request`,
+              {},
+              {
+                headers: {
+                  'X-Client-ID':
+                    AGENT_ID,
+                },
+              },
+            );
 
         const newCommandId =
           createResponse.data.id;
@@ -1262,39 +1295,40 @@ export default function NewDiagnosisView() {
         'analyzing',
       );
 
-      const automaticResponse =
-        await apiPost<DiagnosticReport>(
-          '/api/diagnosis/automatic',
-          {
-            agentId:
-              AGENT_ID,
+          const automaticResponse =
+            await apiPost<DiagnosticReport>(
+              '/api/diagnosis/automatic',
+              {
+                agentId:
+                  AGENT_ID,
 
-            commandId:
-              newCommandId,
+                commandId:
+                  newCommandId,
 
-            mode:
-              diagnosisMode,
+                mode:
+                  diagnosisMode,
 
-            componentIds:
-              diagnosisMode === 'component'
-                ? selectedComponents
-                : [],
+                componentIds:
+                  diagnosisMode === 'component'
+                    ? selectedComponents
+                    : [],
 
-            scenarioId:
-              diagnosisMode === 'scenario'
-                ? selectedScenarioId
-                : null,
-          },
-          {
-            headers: {
-              'X-Client-ID':
-                AGENT_ID,
-            },
-          },
-        );
+                scenarioId:
+                  diagnosisMode === 'scenario'
+                    ? selectedScenarioId
+                    : null,
+              },
+              {
+                headers: {
+                  'X-Client-ID':
+                    AGENT_ID,
+                },
+              },
+            );
 
-      const automaticReport =
-        automaticResponse.data;
+          automaticReport =
+            automaticResponse.data;
+        }
 
       if (
         !automaticReport ||
