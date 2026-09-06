@@ -377,16 +377,16 @@ public sealed class AutomaticDiagnosisService :
             };
         }
 
-        var primaryDrive =
-            hardware.StorageDrives
+        var primaryDisk =
+            hardware.AllDisks?
                 .FirstOrDefault();
 
-        if (primaryDrive == null)
+        if (primaryDisk == null)
         {
             return null;
         }
 
-        if (primaryDrive.UsagePercent >= 90)
+        if (primaryDisk.UsagePercent >= 90)
         {
             return new AutomaticDiagnosisResult
             {
@@ -423,7 +423,7 @@ public sealed class AutomaticDiagnosisService :
             };
         }
 
-        if (primaryDrive.UsagePercent >= 80)
+        if (primaryDisk.UsagePercent >= 80)
         {
             return new AutomaticDiagnosisResult
             {
