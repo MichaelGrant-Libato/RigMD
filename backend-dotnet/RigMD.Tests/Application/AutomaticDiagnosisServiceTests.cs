@@ -174,7 +174,10 @@ public class AutomaticDiagnosisServiceTests
         string mode,
         string? scenarioId = null,
         IReadOnlyList<string>? componentIds = null,
-        bool dnsResolutionSucceeded = true)
+        bool dnsResolutionSucceeded = true,
+        bool cpuThrottling = false,
+        bool smartWarning = false,
+        string? memoryWarning = null)
     {
         return new AutomaticDiagnosisInput
         {
@@ -198,7 +201,8 @@ public class AutomaticDiagnosisServiceTests
                     UsagePercent = 0,
                     Cores = 8,
                     Threads = 16,
-                    FrequencyMhz = 0
+                    FrequencyMhz = 0,
+                    IsThermallyThrottling = cpuThrottling
                 },
 
                 Gpu = new()
@@ -236,7 +240,8 @@ public class AutomaticDiagnosisServiceTests
                         Model = "Test NVMe",
                         Type = "NVMe SSD",
                         SizeGb = 512,
-                        Interface = "NVMe"
+                        Interface = "NVMe",
+                        IsFailingSmart = smartWarning
                     }
                 ],
 
@@ -261,9 +266,81 @@ public class AutomaticDiagnosisServiceTests
                     BrowserHeavy = browserHeavy,
                     GameDetected = false,
                     GameProcesses = [],
-                    TopMemoryApps = []
+                    TopMemoryApps = [],
+                    MemoryLeakWarning = memoryWarning
                 }
             }
         };
+    }
+
+        [Fact]
+    public void Diagnose_ReturnsPossibleCpuThrottling_WhenFrequencyThrottlingHeuristicIsPresent()
+    {
+        var input = CreateInput(
+            ramUsage: 50,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "component",
+            componentIds: ["cpu"],
+            cpuThrottling: true);
+
+        var result = _service.Diagnose(input);
+
+        Assert.Equal("Thermal condition", result.DiagnosedCategory);
+        Assert.Equal("Troubleshoot", result.ActionCategory);
+        Assert.Equal("Medium", result.ConfidenceLabel);
+        Assert.Contains(
+            result.Proof,
+            item => item.Label == "Possible CPU Frequency Throttling");
+    }
+
+        [Fact]
+    public void Diagnose_ReturnsStorageHealthWarning_WhenPhysicalDriveStatusIsAbnormal()
+    {
+        var input = CreateInput(
+            ramUsage: 50,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "component",
+            componentIds: ["storage"],
+            smartWarning: true);
+
+        var result = _service.Diagnose(input);
+
+        Assert.Equal("Storage health behavior", result.DiagnosedCategory);
+        Assert.Equal("Escalate for Professional Inspection", result.ActionCategory);
+        Assert.Equal("High", result.ConfidenceLabel);
+        Assert.Contains(
+            result.Proof,
+            item => item.Label == "Storage Health Warning");
+    }
+
+        [Fact]
+    public void Diagnose_ReturnsHighProcessMemoryWarning_WithoutClaimingConfirmedLeak()
+    {
+        var input = CreateInput(
+            ramUsage: 55,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "component",
+            componentIds: ["memory"],
+            memoryWarning: "Process 'example' is consuming an unusually high amount of memory.");
+
+        var result = _service.Diagnose(input);
+
+        Assert.Equal("OS performance degradation", result.DiagnosedCategory);
+        Assert.Equal("Troubleshoot", result.ActionCategory);
+        Assert.Equal("Medium", result.ConfidenceLabel);
+        Assert.Contains(
+            result.Proof,
+            item => item.Label == "Unusually High Process Memory Usage");
+
+        Assert.DoesNotContain(
+            "strongly suggests a memory leak",
+            result.Explanation,
+            StringComparison.OrdinalIgnoreCase);
     }
 }
