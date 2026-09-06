@@ -1,0 +1,12 @@
+<Window x:Class="RigMD.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="RigMD" Height="768" Width="1024" WindowStartupLocation="CenterScreen">
+    <Grid>
+        <TextBlock Name="LoadingText" Text="Starting RigMD..." 
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   FontSize="20" Foreground="Gray" />
+        <wv2:WebView2 Name="Browser" Visibility="Collapsed" />
+    </Grid>
+</Window>

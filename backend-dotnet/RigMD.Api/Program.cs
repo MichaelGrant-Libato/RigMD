@@ -123,6 +123,17 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("AllowReact");
 app.UseHttpsRedirection();
+
+// ---------------------------------------------------------------
+// Serve React Frontend
+// ---------------------------------------------------------------
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
+app.MapFallbackToFile("index.html");
+
 app.Run();
+
+public partial class Program { }
