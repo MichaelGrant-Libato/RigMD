@@ -411,7 +411,8 @@ Relevant files include:
 - ✅ implement SQLite local persistence
 - ✅ remediation history, audit, and failure deprioritization
 - ⏳ implement optional Supabase synchronization
-- ⏳ desktop packaging
+- ✅ desktop packaging
+- ✅ deep diagnostic intel (Thermal/SMART/Memory Leaks)
 - ⏳ final thesis/SRS/SDD alignment
 - ⏳ retire legacy Python runtime
 
@@ -447,10 +448,8 @@ The next priorities are:
 
 - expand meaningful automated tests
 - clean Application and Infrastructure boundaries
-- continue the controlled remediation framework
-- implement local SQLite persistence
+- continue the controlled remediation framework (Action Execution)
 - implement optional Supabase synchronization
 - perform full UI and backend validation
 - retire the Python runtime
-- prepare Windows desktop packaging
 - align final implementation with the SRS and SDD

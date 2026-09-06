@@ -5,12 +5,16 @@ RigMD is evolving from a Python-based advisory tool to a React + C#/.NET diagnos
 
 ## Major Application Layers
 
-1. **Presentation Layer (React + Vite)**
+1. **Desktop Shell (WPF + WebView2)**
+   - **Responsibilities**: Provides a standalone native Windows window to host the application. Manages the lifecycle of the internal web server.
+   - **Key Technologies**: WPF, WebView2.
+
+2. **Presentation Layer (React + Vite)**
    - **Responsibilities**: Renders the UI, manages client-side state, handles user intake, and presents diagnostic results and history.
    - **Key Technologies**: React, TypeScript, Tailwind CSS.
 
-2. **API Layer (ASP.NET Core)**
-   - **Responsibilities**: Exposes HTTP endpoints (Minimal APIs/Controllers) to the React frontend. Handles routing, basic request validation, and dependency injection.
+3. **API Layer (ASP.NET Core)**
+   - **Responsibilities**: Exposes HTTP endpoints (Minimal APIs/Controllers) to the React frontend. Handles routing, basic request validation, dependency injection, and serving the static React production build.
    - **Key Technologies**: .NET 8/9, ASP.NET Core.
 
 3. **Application & Domain Layer (C#)**
