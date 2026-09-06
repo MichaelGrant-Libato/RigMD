@@ -5,4 +5,5 @@
   <Project Path="RigMD.Domain/RigMD.Domain.csproj" />
   <Project Path="RigMD.Infrastructure/RigMD.Infrastructure.csproj" />
   <Project Path="RigMD.Tests/RigMD.Tests.csproj" />
+  <Project Path="RigMD.Desktop/RigMD.Desktop.csproj" />
 </Solution>

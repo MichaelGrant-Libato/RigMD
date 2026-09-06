@@ -7,4 +7,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  build: {
+    outDir: '../backend-dotnet/RigMD.Api/wwwroot',
+    emptyOutDir: true,
+  }
 })
