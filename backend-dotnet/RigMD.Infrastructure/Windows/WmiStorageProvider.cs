@@ -24,12 +24,13 @@ public class WmiStorageProvider : IStorageProvider
 
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT Model, MediaType, InterfaceType, Size, Index FROM Win32_DiskDrive");
+            using var searcher = new ManagementObjectSearcher("SELECT Model, MediaType, InterfaceType, Size, Index, Status FROM Win32_DiskDrive");
             foreach (var obj in searcher.Get())
             {
                 var model = obj["Model"]?.ToString() ?? "Unknown";
                 var mediaType = obj["MediaType"]?.ToString() ?? "Unknown";
                 var interfaceType = obj["InterfaceType"]?.ToString() ?? "Unknown";
+                var status = obj["Status"]?.ToString() ?? "OK";
                 
                 var sizeGb = 0.0;
                 if (obj["Size"] != null && long.TryParse(obj["Size"].ToString(), out var sizeBytes))
@@ -53,7 +54,8 @@ public class WmiStorageProvider : IStorageProvider
                     SizeGb = sizeGb,
                     DiskIndex = diskIndex,
                     Type = type,
-                    DetectionSource = source
+                    DetectionSource = source,
+                    IsFailingSmart = !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase)
                 });
             }
 

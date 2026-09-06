@@ -45,6 +45,11 @@ public class ProcessProvider : IProcessProvider
                     appDto.ProcessCount++;
                     appDto.MemoryMb += memoryMb;
 
+                    if (memoryMb > 2500 && !GameHints.Contains(name) && !GameHints.Any(hint => name.Contains(hint, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        dto.MemoryLeakWarning = $"Process '{name}' is consuming an unusually high amount of memory ({Math.Round(memoryMb, 2)} MB). This may indicate a memory leak.";
+                    }
+
                     if (BrowserNames.Contains(name))
                     {
                         dto.BrowserProcessCount++;

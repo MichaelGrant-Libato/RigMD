@@ -7,6 +7,8 @@ public class CpuStatsDto
     public int Cores { get; set; }
     public int Threads { get; set; }
     public double FrequencyMhz { get; set; }
+    public double MaxFrequencyMhz { get; set; }
+    public bool IsThermallyThrottling { get; set; }
 }
 
 public class GpuStatsDto
@@ -34,6 +36,7 @@ public class StorageDriveDto
     public string MediaType { get; set; } = string.Empty;
     public string? BusType { get; set; }
     public string DetectionSource { get; set; } = string.Empty;
+    public bool IsFailingSmart { get; set; }
     
     public double? UsedGb { get; set; }
     public double? UsagePercent { get; set; }
@@ -61,6 +64,8 @@ public class ProcessInsightsDto
     
     public bool GameDetected { get; set; }
     public List<string> GameProcesses { get; set; } = new();
+    
+    public string? MemoryLeakWarning { get; set; }
     
     public List<ProcessAppDto> TopMemoryApps { get; set; } = new();
 }

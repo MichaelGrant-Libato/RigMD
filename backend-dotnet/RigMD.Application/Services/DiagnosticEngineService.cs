@@ -50,7 +50,13 @@ public class DiagnosticEngineService : IDiagnosticEngineService
                 hardwareProfile.ProcessInsights.GameDetected,
 
             GameProcesses =
-                hardwareProfile.ProcessInsights.GameProcesses
+                hardwareProfile.ProcessInsights.GameProcesses,
+
+            CpuThermalThrottling = hardwareProfile.Cpu.IsThermallyThrottling,
+            
+            SmartDriveWarning = hardwareProfile.StorageDrives.Any(d => d.IsFailingSmart),
+            
+            MemoryLeakWarning = hardwareProfile.ProcessInsights.MemoryLeakWarning
         };
 
         // 3. Run deterministic diagnostic engine

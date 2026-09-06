@@ -73,6 +73,10 @@ public class HardwareMetrics
     public bool BrowserHeavy { get; set; }
     public bool GameDetected { get; set; }
     public List<string> GameProcesses { get; set; } = new();
+    
+    public bool CpuThermalThrottling { get; set; }
+    public bool SmartDriveWarning { get; set; }
+    public string? MemoryLeakWarning { get; set; }
 }
 
 public class DiagnosticResult
@@ -220,6 +224,19 @@ public static class DiagnosticEngine
         proof.Add(_MakeProof("Browser workload", $"{metrics.BrowserMemoryMb} MB across {metrics.BrowserProcessCount} processes", browserStatus, "Heavy browser memory usage can explain slowdowns with many tabs or web apps."));
         proof.Add(_MakeProof("Game or launcher process", gameValue, gameStatus, "Game or launcher processes can increase GPU, CPU, memory, and heat while they are open."));
 
+        if (metrics.CpuThermalThrottling)
+        {
+            proof.Add(_MakeProof("CPU Thermal Throttling", "Detected (CPU downclocking under heavy load)", "high", "The processor is overheating and slowing itself down to prevent damage. This causes severe lag."));
+        }
+        if (metrics.SmartDriveWarning)
+        {
+            proof.Add(_MakeProof("SMART Drive Warning", "Imminent hardware failure reported", "high", "The storage drive's internal sensors are reporting it may fail soon. Data loss is a risk."));
+        }
+        if (!string.IsNullOrEmpty(metrics.MemoryLeakWarning))
+        {
+            proof.Add(_MakeProof("Suspicious Memory Usage", metrics.MemoryLeakWarning, "high", "A single process is using an extreme amount of memory, which may indicate a software bug or memory leak."));
+        }
+
         var score = new Dictionary<string, int>
         {
             { "OS performance degradation", 0 },
@@ -308,6 +325,22 @@ public static class DiagnosticEngine
                 _Add(score, evidence, "Display driver behavior", 2, "Graphics workload observed", gameValue, "Live scan");
         }
 
+        if (metrics.CpuThermalThrottling)
+        {
+            _Add(score, evidence, "Thermal condition", 8, "Thermal throttling detected", "CPU downclocking under load", "Live scan");
+            _Add(score, evidence, "OS performance degradation", 4, "Performance drop", "Thermal throttling", "Live scan");
+        }
+        
+        if (metrics.SmartDriveWarning)
+        {
+            _Add(score, evidence, "Storage health behavior", 10, "SMART failure predicted", "Drive reported failure risk", "Live scan");
+        }
+        
+        if (!string.IsNullOrEmpty(metrics.MemoryLeakWarning))
+        {
+            _Add(score, evidence, "OS performance degradation", 5, "Memory leak detected", "Process consuming abnormal RAM", "Live scan");
+        }
+
         if (_Has(warningText, "blue screen", "bsod", "error code", "stop code") || sym.MentionsBlueScreen)
             _Add(score, evidence, "Driver conflict", 5, "Crash warning", !string.IsNullOrEmpty(sym.WarningSignsLabel) ? sym.WarningSignsLabel : (!string.IsNullOrEmpty(sym.WarningSigns) ? sym.WarningSigns : sym.SystemState));
 
@@ -383,6 +416,12 @@ public static class DiagnosticEngine
                 actionCategory = "Monitor";
 
             if (diagnosedCategory == "Boot and startup failure" && (sym.Severity == "high" || _Has(warningText, "no display", "black screen", "no boot device", "startup repair") || sym.MentionsBlackScreen || sym.MentionsNoBoot))
+            {
+                actionCategory = "Escalate for Professional Inspection";
+                confidenceLabel = "High";
+            }
+            
+            if (metrics.SmartDriveWarning)
             {
                 actionCategory = "Escalate for Professional Inspection";
                 confidenceLabel = "High";
