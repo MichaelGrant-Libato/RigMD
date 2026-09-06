@@ -124,21 +124,53 @@ public sealed class AutomaticDiagnosisService :
         {
             return new AutomaticDiagnosisResult
             {
-                DiagnosedCategory = "Thermal condition",
-                ActionCategory = "Escalate for Professional Inspection",
-                ConfidenceLabel = "High",
-                Explanation = "The CPU is downclocking under heavy load, indicating severe thermal throttling.",
-                RecommendedNextStep = "Check cooling system, thermal paste, and airflow immediately to prevent hardware damage.",
-                Proof = new List<AutomaticDiagnosisProof>(evidence) 
-                { 
-                    new AutomaticDiagnosisProof { Label = "CPU Thermal Throttling", Value = "Detected", Status = "high", Meaning = "Processor is overheating" } 
-                },
-                VerificationTarget = new AutomaticVerificationTarget
-                {
-                    Target = "professional_inspection",
-                    Label = "Professional Inspection",
-                    Description = "The system's cooling hardware requires physical inspection."
-                }
+                DiagnosedCategory =
+                    "Thermal condition",
+
+                ActionCategory =
+                    "Troubleshoot",
+
+                ConfidenceLabel =
+                    "Medium",
+
+                Explanation =
+                    "The latest scan detected high CPU utilization together with a lower-than-expected processor frequency. This may indicate CPU frequency throttling, but the current telemetry does not directly confirm overheating.",
+
+                RecommendedNextStep =
+                    "Reduce heavy workloads, check cooling and airflow, and monitor CPU behavior again. If the system repeatedly slows down, shuts down, or shows other heat-related symptoms, have the cooling system inspected.",
+
+                Proof =
+                    new List<AutomaticDiagnosisProof>(
+                        evidence)
+                    {
+                        new()
+                        {
+                            Label =
+                                "Possible CPU Frequency Throttling",
+
+                            Value =
+                                "Observed",
+
+                            Status =
+                                "elevated",
+
+                            Meaning =
+                                "High processor utilization was observed while the reported frequency was below the expected maximum."
+                        }
+                    },
+
+                VerificationTarget =
+                    new AutomaticVerificationTarget
+                    {
+                        Target =
+                            "task_manager",
+
+                        Label =
+                            "Task Manager - Performance",
+
+                        Description =
+                            "Review CPU utilization and reported frequency. The current evidence suggests possible frequency throttling but does not directly confirm overheating."
+                    }
             };
         }
 
@@ -205,26 +237,59 @@ public sealed class AutomaticDiagnosisService :
 
         var processes =
             hardware.ProcessInsights;
-            
-        if (!string.IsNullOrEmpty(processes?.MemoryLeakWarning))
+
+        if (!string.IsNullOrEmpty(
+                processes?.MemoryLeakWarning))
         {
             return new AutomaticDiagnosisResult
             {
-                DiagnosedCategory = "OS performance degradation",
-                ActionCategory = "Troubleshoot",
-                ConfidenceLabel = "High",
-                Explanation = "A single process is consuming an extreme amount of memory, which strongly suggests a memory leak or software bug.",
-                RecommendedNextStep = "Open Task Manager, locate the anomalous process, and terminate it or reinstall the software.",
-                Proof = new List<AutomaticDiagnosisProof>(evidence) 
-                { 
-                    new AutomaticDiagnosisProof { Label = "Suspicious Memory Usage", Value = processes.MemoryLeakWarning, Status = "high", Meaning = "Potential memory leak" } 
-                },
-                VerificationTarget = new AutomaticVerificationTarget
-                {
-                    Target = "task_manager",
-                    Label = "Task Manager - Processes",
-                    Description = "Review and terminate the memory-leaking application."
-                }
+                DiagnosedCategory =
+                    "OS performance degradation",
+
+                ActionCategory =
+                    "Troubleshoot",
+
+                ConfidenceLabel =
+                    "Medium",
+
+                Explanation =
+                    "A process is consuming an unusually large amount of memory. This may contribute to system slowdown, but a single high-memory reading does not by itself confirm a memory leak.",
+
+                RecommendedNextStep =
+                    "Open Task Manager, identify the high-memory process, and monitor whether its memory usage continues to grow over time. Close or restart the application if it is causing performance problems.",
+
+                Proof =
+                    new List<AutomaticDiagnosisProof>(
+                        evidence)
+                    {
+                        new()
+                        {
+                            Label =
+                                "Unusually High Process Memory Usage",
+
+                            Value =
+                                processes.MemoryLeakWarning,
+
+                            Status =
+                                "elevated",
+
+                            Meaning =
+                                "A process is using an unusually large amount of memory."
+                        }
+                    },
+
+                VerificationTarget =
+                    new AutomaticVerificationTarget
+                    {
+                        Target =
+                            "task_manager",
+
+                        Label =
+                            "Task Manager - Processes",
+
+                        Description =
+                            "Review the high-memory process and monitor whether its memory usage continues increasing."
+                    }
             };
         }
 
@@ -355,25 +420,59 @@ public sealed class AutomaticDiagnosisService :
             HardwareProfileDto hardware,
             IReadOnlyList<AutomaticDiagnosisProof> evidence)
     {
-        if (hardware.StorageDrives.Any(d => d.IsFailingSmart))
+        if (hardware.StorageDrives.Any(
+                drive =>
+                    drive.IsFailingSmart))
         {
             return new AutomaticDiagnosisResult
             {
-                DiagnosedCategory = "Storage health behavior",
-                ActionCategory = "Escalate for Professional Inspection",
-                ConfidenceLabel = "High",
-                Explanation = "The storage drive's internal SMART sensors are reporting an imminent hardware failure. Data loss is a critical risk.",
-                RecommendedNextStep = "Immediately back up all important data and prepare to replace the failing drive.",
-                Proof = new List<AutomaticDiagnosisProof>(evidence) 
-                { 
-                    new AutomaticDiagnosisProof { Label = "SMART Drive Warning", Value = "Imminent hardware failure reported", Status = "high", Meaning = "Drive is failing" } 
-                },
-                VerificationTarget = new AutomaticVerificationTarget
-                {
-                    Target = "professional_inspection",
-                    Label = "Professional Inspection",
-                    Description = "The storage drive requires urgent replacement."
-                }
+                DiagnosedCategory =
+                    "Storage health behavior",
+
+                ActionCategory =
+                    "Escalate for Professional Inspection",
+
+                ConfidenceLabel =
+                    "High",
+
+                Explanation =
+                    "Windows reported an abnormal health status for a physical storage device. This indicates a storage health warning, but the current scan does not directly confirm a SMART predictive-failure condition.",
+
+                RecommendedNextStep =
+                    "Back up important data promptly and verify the drive using a dedicated storage-health or SMART diagnostic tool before deciding whether replacement is necessary.",
+
+                Proof =
+                    new List<AutomaticDiagnosisProof>(
+                        evidence)
+                    {
+                        new()
+                        {
+                            Label =
+                                "Storage Health Warning",
+
+                            Value =
+                                "Windows reported a non-OK physical drive status",
+
+                            Status =
+                                "high",
+
+                            Meaning =
+                                "The physical drive reported an abnormal Windows health status."
+                        }
+                    },
+
+                VerificationTarget =
+                    new AutomaticVerificationTarget
+                    {
+                        Target =
+                            "professional_inspection",
+
+                        Label =
+                            "Professional Inspection",
+
+                        Description =
+                            "Back up important data and verify the drive using a dedicated storage-health or SMART diagnostic tool."
+                    }
             };
         }
 
