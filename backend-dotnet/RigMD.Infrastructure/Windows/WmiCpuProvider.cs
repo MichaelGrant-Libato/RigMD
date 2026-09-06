@@ -28,7 +28,7 @@ public class WmiCpuProvider : ICpuProvider
     {
         using var searcher =
             new ManagementObjectSearcher(
-                "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, CurrentClockSpeed FROM Win32_Processor");
+                "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, CurrentClockSpeed, MaxClockSpeed FROM Win32_Processor");
 
         foreach (
             ManagementObject obj
@@ -53,6 +53,11 @@ public class WmiCpuProvider : ICpuProvider
             dto.FrequencyMhz =
                 Convert.ToDouble(
                     obj["CurrentClockSpeed"]
+                    ?? 0);
+
+            dto.MaxFrequencyMhz =
+                Convert.ToDouble(
+                    obj["MaxClockSpeed"]
                     ?? 0);
 
             break;
@@ -110,6 +115,11 @@ public class WmiCpuProvider : ICpuProvider
             {
                 dto.FrequencyMhz =
                     frequency;
+            }
+            
+            if (dto.UsagePercent > 85 && dto.MaxFrequencyMhz > 0 && dto.FrequencyMhz < (dto.MaxFrequencyMhz * 0.90))
+            {
+                dto.IsThermallyThrottling = true;
             }
 
             break;

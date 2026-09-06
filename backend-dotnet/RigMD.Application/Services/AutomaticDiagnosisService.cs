@@ -120,6 +120,28 @@ public sealed class AutomaticDiagnosisService :
         var cpuUsage =
             hardware.Cpu.UsagePercent;
 
+        if (hardware.Cpu.IsThermallyThrottling)
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory = "Thermal condition",
+                ActionCategory = "Escalate for Professional Inspection",
+                ConfidenceLabel = "High",
+                Explanation = "The CPU is downclocking under heavy load, indicating severe thermal throttling.",
+                RecommendedNextStep = "Check cooling system, thermal paste, and airflow immediately to prevent hardware damage.",
+                Proof = new List<AutomaticDiagnosisProof>(evidence) 
+                { 
+                    new AutomaticDiagnosisProof { Label = "CPU Thermal Throttling", Value = "Detected", Status = "high", Meaning = "Processor is overheating" } 
+                },
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "professional_inspection",
+                    Label = "Professional Inspection",
+                    Description = "The system's cooling hardware requires physical inspection."
+                }
+            };
+        }
+
         /*
          * CPU utilization is intentionally interpreted
          * conservatively.
@@ -183,6 +205,28 @@ public sealed class AutomaticDiagnosisService :
 
         var processes =
             hardware.ProcessInsights;
+            
+        if (!string.IsNullOrEmpty(processes?.MemoryLeakWarning))
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory = "OS performance degradation",
+                ActionCategory = "Troubleshoot",
+                ConfidenceLabel = "High",
+                Explanation = "A single process is consuming an extreme amount of memory, which strongly suggests a memory leak or software bug.",
+                RecommendedNextStep = "Open Task Manager, locate the anomalous process, and terminate it or reinstall the software.",
+                Proof = new List<AutomaticDiagnosisProof>(evidence) 
+                { 
+                    new AutomaticDiagnosisProof { Label = "Suspicious Memory Usage", Value = processes.MemoryLeakWarning, Status = "high", Meaning = "Potential memory leak" } 
+                },
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "task_manager",
+                    Label = "Task Manager - Processes",
+                    Description = "Review and terminate the memory-leaking application."
+                }
+            };
+        }
 
         if (ramUsage >= 90)
         {
@@ -311,16 +355,38 @@ public sealed class AutomaticDiagnosisService :
             HardwareProfileDto hardware,
             IReadOnlyList<AutomaticDiagnosisProof> evidence)
     {
-        var primaryDisk =
-            hardware.AllDisks?
+        if (hardware.StorageDrives.Any(d => d.IsFailingSmart))
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory = "Storage health behavior",
+                ActionCategory = "Escalate for Professional Inspection",
+                ConfidenceLabel = "High",
+                Explanation = "The storage drive's internal SMART sensors are reporting an imminent hardware failure. Data loss is a critical risk.",
+                RecommendedNextStep = "Immediately back up all important data and prepare to replace the failing drive.",
+                Proof = new List<AutomaticDiagnosisProof>(evidence) 
+                { 
+                    new AutomaticDiagnosisProof { Label = "SMART Drive Warning", Value = "Imminent hardware failure reported", Status = "high", Meaning = "Drive is failing" } 
+                },
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "professional_inspection",
+                    Label = "Professional Inspection",
+                    Description = "The storage drive requires urgent replacement."
+                }
+            };
+        }
+
+        var primaryDrive =
+            hardware.StorageDrives
                 .FirstOrDefault();
 
-        if (primaryDisk == null)
+        if (primaryDrive == null)
         {
             return null;
         }
 
-        if (primaryDisk.UsagePercent >= 90)
+        if (primaryDrive.UsagePercent >= 90)
         {
             return new AutomaticDiagnosisResult
             {
@@ -357,7 +423,7 @@ public sealed class AutomaticDiagnosisService :
             };
         }
 
-        if (primaryDisk.UsagePercent >= 80)
+        if (primaryDrive.UsagePercent >= 80)
         {
             return new AutomaticDiagnosisResult
             {
