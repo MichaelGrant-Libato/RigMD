@@ -136,18 +136,69 @@ public class RemediationController : ControllerBase
 
     private static object RunOpenTarget(string target)
     {
-        return target.ToLower() switch
+        var normalizedTarget = target
+            .Trim()
+            .Replace("_", " ")
+            .Replace("-", " ")
+            .ToLowerInvariant();
+
+        return normalizedTarget switch
         {
-            "task manager" => OpenProcess("taskmgr.exe", "open_task_manager", "Task Manager opened for verification.", "Task Manager"),
-            "device manager" => OpenProcess("devmgmt.msc", "open_device_manager", "Device Manager opened for verification.", "Device Manager"),
-            "startup apps" => OpenProcess("ms-settings:startupapps", "open_startup_apps", "Startup Apps opened for verification.", "Startup Apps"),
-            "reliability monitor" => OpenProcess("perfmon /rel", "open_reliability_monitor", "Reliability Monitor opened for verification.", "Reliability Monitor"),
-            "storage settings" => OpenProcess("ms-settings:storagesense", "open_storage_settings", "Storage settings opened for verification.", "Storage Settings"),
+            "task manager" => OpenProcess(
+                "taskmgr.exe",
+                "open_task_manager",
+                "Task Manager opened for verification.",
+                "Task Manager"),
+
+            "device manager" => OpenProcess(
+                "devmgmt.msc",
+                "open_device_manager",
+                "Device Manager opened for verification.",
+                "Device Manager"),
+
+            "startup apps" => OpenProcess(
+                "ms-settings:startupapps",
+                "open_startup_apps",
+                "Startup Apps opened for verification.",
+                "Startup Apps"),
+
+            "reliability monitor" => OpenProcess(
+                "perfmon /rel",
+                "open_reliability_monitor",
+                "Reliability Monitor opened for verification.",
+                "Reliability Monitor"),
+
+            "storage settings" => OpenProcess(
+                "ms-settings:storagesense",
+                "open_storage_settings",
+                "Storage settings opened for verification.",
+                "Storage Settings"),
+
+            "backup settings" => OpenProcess(
+                "ms-settings:backup",
+                "open_backup_settings",
+                "Backup settings opened for verification.",
+                "Backup Settings"),
+
+            "power settings" => OpenProcess(
+                "ms-settings:powersleep",
+                "open_power_settings",
+                "Power settings opened for verification.",
+                "Power Settings"),
+
             _ => new
             {
                 success = false,
                 summary = $"Unknown or unsupported verification target: {target}",
-                proof = new[] { new { label = "Target lookup", status = "unsupported", meaning = "RigMD did not open anything because this verification target is not registered." } }
+                proof = new[]
+                {
+                    new
+                    {
+                        label = "Target lookup",
+                        status = "unsupported",
+                        meaning = "RigMD did not open anything because this verification target is not registered."
+                    }
+                }
             }
         };
     }

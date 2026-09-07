@@ -1,10 +1,8 @@
+using System;
 using System.Windows;
 
 namespace RigMD.Desktop;
 
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
 public partial class MainWindow : Window
 {
     public MainWindow()
@@ -15,9 +13,24 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        await Browser.EnsureCoreWebView2Async();
-        Browser.Source = new System.Uri("http://localhost:5273");
-        Browser.Visibility = Visibility.Visible;
-        LoadingText.Visibility = Visibility.Collapsed;
+        try
+        {
+            await Browser.EnsureCoreWebView2Async();
+
+            Browser.Source = new Uri("http://localhost:5273");
+
+            Browser.Visibility = Visibility.Visible;
+            LoadingText.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            LoadingText.Text = "RigMD could not load the desktop interface.";
+
+            MessageBox.Show(
+                $"WebView2 could not initialize.\n\n{ex.Message}",
+                "RigMD Interface Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 }
