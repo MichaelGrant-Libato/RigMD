@@ -30,14 +30,16 @@ public class ClearTempFilesAction
         _logger = logger;
     }
 
-    public Task<ExecutionResult> ExecuteAsync()
+    public Task<ExecutionResult> ExecuteAsync(Action<string>? progressReporter = null)
     {
         return ExecuteAsync(
-            Path.GetTempPath());
+            Path.GetTempPath(),
+            progressReporter);
     }
 
     public async Task<ExecutionResult> ExecuteAsync(
-        string tempPath)
+        string tempPath,
+        Action<string>? progressReporter = null)
     {
         if (string.IsNullOrWhiteSpace(tempPath))
         {
@@ -116,6 +118,11 @@ public class ClearTempFilesAction
          */
         try
         {
+            if (progressReporter != null)
+            {
+                progressReporter("[CLEANUP] Starting cleanup of temporary files...");
+            }
+            
             foreach (var filePath in
                      Directory.EnumerateFiles(
                          tempPath,
@@ -144,6 +151,11 @@ public class ClearTempFilesAction
 
                     deletedFiles++;
                     bytesFreed += fileSize;
+
+                    if (progressReporter != null && deletedFiles % 500 == 0)
+                    {
+                        progressReporter($"[CLEANUP] Deleted {deletedFiles} files...");
+                    }
                 }
                 catch (UnauthorizedAccessException)
                 {
@@ -230,6 +242,12 @@ public class ClearTempFilesAction
              * the files, so failure here must not crash
              * the remediation.
              */
+        }
+
+        if (progressReporter != null)
+        {
+            progressReporter($"[CLEANUP] Finished. Deleted {deletedFiles} files and removed {removedDirs} empty directories.");
+            progressReporter($"[CLEANUP] Freed up {FormatBytes(bytesFreed)} of space.");
         }
 
         var bytesAfter =

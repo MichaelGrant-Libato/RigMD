@@ -5,5 +5,7 @@ namespace RigMD.Application.Contracts.Autonomy;
 
 public interface IDryRunRemediationExecutor
 {
-    Task<ExecutionResult> ExecuteAsync(RemediationActionDef action);
+    Task<ExecutionResult> ExecuteAsync(
+        RemediationActionDef action,
+        Action<string>? progressReporter = null);
 }

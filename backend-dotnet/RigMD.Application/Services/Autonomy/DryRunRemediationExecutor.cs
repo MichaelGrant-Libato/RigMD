@@ -10,7 +10,9 @@ namespace RigMD.Application.Services.Autonomy;
 
 public class DryRunRemediationExecutor : IDryRunRemediationExecutor
 {
-    public Task<ExecutionResult> ExecuteAsync(RemediationActionDef action)
+    public Task<ExecutionResult> ExecuteAsync(
+        RemediationActionDef action,
+        Action<string>? progressReporter = null)
     {
         var (summary, proof) = action.Id switch
         {
