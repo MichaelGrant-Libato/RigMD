@@ -177,7 +177,8 @@ public class AutomaticDiagnosisServiceTests
         bool dnsResolutionSucceeded = true,
         bool cpuThrottling = false,
         bool smartWarning = false,
-        string? memoryWarning = null)
+        string? memoryWarning = null,
+        double cpuUsage = 0)
     {
         return new AutomaticDiagnosisInput
         {
@@ -198,7 +199,7 @@ public class AutomaticDiagnosisServiceTests
                 Cpu = new()
                 {
                     Name = "Test CPU",
-                    UsagePercent = 0,
+                    UsagePercent = cpuUsage,
                     Cores = 8,
                     Threads = 16,
                     FrequencyMhz = 0,
@@ -342,5 +343,44 @@ public class AutomaticDiagnosisServiceTests
             "strongly suggests a memory leak",
             result.Explanation,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Diagnose_ReturnsSevereSystemResourceExhaustion_WhenAllSubsystemsAreSaturated()
+    {
+        var input = CreateInput(
+            ramUsage: 90,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 90,
+            mode: "full",
+            cpuUsage: 90);
+
+        var result = _service.Diagnose(input);
+
+        Assert.Equal("Severe System Resource Exhaustion", result.DiagnosedCategory);
+        Assert.Equal("Maintain", result.ActionCategory);
+        Assert.Equal("High", result.ConfidenceLabel);
+        Assert.Contains(
+            result.Proof,
+            item => item.Label == "Cross-Subsystem Correlation");
+    }
+
+    [Fact]
+    public void Diagnose_DoesNotReturnSystemThrashing_WhenOnlyTwoSubsystemsAreSaturated()
+    {
+        // CPU and RAM are high, but disk is fine. Should fall back to individual diagnosis (CPU/RAM).
+        var input = CreateInput(
+            ramUsage: 90,
+            browserHeavy: false,
+            browserMemoryMb: 900,
+            diskUsage: 45,
+            mode: "full",
+            cpuUsage: 90);
+
+        var result = _service.Diagnose(input);
+
+        // Based on the order, CPU is evaluated first, so it will return CPU diagnosis, not Thrashing.
+        Assert.Equal("Elevated CPU Utilization", result.DiagnosedCategory);
     }
 }

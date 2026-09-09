@@ -67,11 +67,11 @@ public class RemediationPlannerTests
 
         var plan = await planner.CreatePlanAsync(diagnostic);
 
-        var action = Assert.Single(plan.PlannedActions);
+        Assert.Equal(4, plan.PlannedActions.Count);
 
-        Assert.Equal(
-            "clear_user_temp_files",
-            action.Id);
+        Assert.Contains(
+            plan.PlannedActions,
+            a => a.Id == "clear_user_temp_files");
     }
 
     [Fact]
@@ -90,11 +90,36 @@ public class RemediationPlannerTests
 
         var plan = await planner.CreatePlanAsync(diagnostic);
 
-        var action = Assert.Single(plan.PlannedActions);
+        Assert.Equal(4, plan.PlannedActions.Count);
 
-        Assert.Equal(
-            "clear_user_temp_files",
-            action.Id);
+        Assert.Contains(
+            plan.PlannedActions,
+            a => a.Id == "clear_user_temp_files");
+    }
+
+    [Fact]
+    public async Task CreatePlanAsync_WhenSevereSystemResourceExhaustion_SelectsFiveActions()
+    {
+        var registry = new RemediationRegistry();
+        var repo = new FakeRemediationRepo(Array.Empty<string>());
+        var planner = new RemediationPlanner(registry, repo);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "Severe System Resource Exhaustion",
+            ActionCategory = "Maintain",
+            ConfidenceLabel = "High"
+        };
+
+        var plan = await planner.CreatePlanAsync(diagnostic);
+
+        Assert.Equal(5, plan.PlannedActions.Count);
+
+        Assert.Contains(plan.PlannedActions, a => a.Id == "clear_user_temp_files");
+        Assert.Contains(plan.PlannedActions, a => a.Id == "clear_browser_cache");
+        Assert.Contains(plan.PlannedActions, a => a.Id == "clear_windows_update_cache");
+        Assert.Contains(plan.PlannedActions, a => a.Id == "run_disk_cleanup");
+        Assert.Contains(plan.PlannedActions, a => a.Id == "restart_explorer");
     }
 
     [Fact]

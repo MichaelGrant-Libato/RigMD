@@ -11,7 +11,6 @@ namespace RigMD.Infrastructure.Remediation;
 /// <summary>
 /// Verification service that measures system state before and after a remediation action
 /// to determine whether the action had a positive effect.
-/// Currently supports disk-space-based verification for cleanup actions.
 /// </summary>
 public class VerificationService : IVerificationService
 {
@@ -29,6 +28,11 @@ public class VerificationService : IVerificationService
         var status = action.Id switch
         {
             "clear_user_temp_files" => VerifyTempFilesCleaned(executionResult),
+            "flush_dns" => VerifyFlushDns(executionResult),
+            "clear_browser_cache" => VerifyFilesReduced(executionResult, "browser cache"),
+            "clear_windows_update_cache" => VerifyFilesReduced(executionResult, "Windows Update cache"),
+            "run_disk_cleanup" => VerifyDiskSpaceImproved(executionResult),
+            "run_sfc_scan" => VerifySfcScan(executionResult),
             _ => VerificationStatus.Unknown
         };
 
@@ -68,4 +72,115 @@ public class VerificationService : IVerificationService
 
         return VerificationStatus.Unresolved;
     }
+
+    /// <summary>
+    /// Verifies that the DNS cache was successfully flushed
+    /// by inspecting the execution result proof.
+    /// </summary>
+    private VerificationStatus VerifyFlushDns(ExecutionResult executionResult)
+    {
+        if (executionResult == null || !executionResult.Success)
+        {
+            return VerificationStatus.Unresolved;
+        }
+
+        var dnsProof = executionResult.Proof
+            .FirstOrDefault(p => p.Label == "DNS Cache Flush");
+
+        if (dnsProof == null)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        return dnsProof.Status == "Completed"
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    /// <summary>
+    /// Generic verifier for file-cleanup actions (browser cache,
+    /// Windows Update cache). Checks if any files were reduced.
+    /// </summary>
+    private VerificationStatus VerifyFilesReduced(
+        ExecutionResult executionResult, string context)
+    {
+        if (executionResult == null || !executionResult.Success)
+        {
+            return VerificationStatus.Unresolved;
+        }
+
+        var filesProof = executionResult.Proof
+            .FirstOrDefault(p =>
+                p.Label == "Files Deleted" ||
+                p.Label == "File Count");
+
+        if (filesProof == null)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        _logger.LogInformation(
+            "VerifyFilesReduced ({Context}): Proof = {Status}",
+            context, filesProof.Status);
+
+        return filesProof.Status == "Reduced"
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    /// <summary>
+    /// Verifies that Disk Cleanup freed some disk space
+    /// by checking the free space proof.
+    /// </summary>
+    private VerificationStatus VerifyDiskSpaceImproved(
+        ExecutionResult executionResult)
+    {
+        if (executionResult == null || !executionResult.Success)
+        {
+            return VerificationStatus.Unresolved;
+        }
+
+        var spaceProof = executionResult.Proof
+            .FirstOrDefault(p => p.Label == "Free Disk Space");
+
+        if (spaceProof == null)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        return spaceProof.Status == "Improved"
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    /// <summary>
+    /// Verifies the SFC scan result by inspecting the
+    /// integrity status proof.
+    /// </summary>
+    private VerificationStatus VerifySfcScan(
+        ExecutionResult executionResult)
+    {
+        if (executionResult == null || !executionResult.Success)
+        {
+            return VerificationStatus.Unresolved;
+        }
+
+        var integrityProof = executionResult.Proof
+            .FirstOrDefault(p =>
+                p.Label == "System File Integrity");
+
+        if (integrityProof == null)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        return integrityProof.Status switch
+        {
+            "Healthy" => VerificationStatus.Resolved,
+            "Repaired" => VerificationStatus.Resolved,
+            "Unrepairable" => VerificationStatus.Unresolved,
+            _ => VerificationStatus.Unknown
+        };
+    }
 }
+
