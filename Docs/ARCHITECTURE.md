@@ -14,8 +14,8 @@ RigMD is evolving from a Python-based advisory tool to a React + C#/.NET diagnos
    - **Key Technologies**: React, TypeScript, Tailwind CSS.
 
 3. **API Layer (ASP.NET Core)**
-   - **Responsibilities**: Exposes HTTP endpoints (Minimal APIs/Controllers) to the React frontend. Handles routing, basic request validation, dependency injection, and serving the static React production build.
-   - **Key Technologies**: .NET 8/9, ASP.NET Core.
+   - **Responsibilities**: Exposes HTTP endpoints (Minimal APIs/Controllers) to the React frontend. Handles routing, basic request validation, dependency injection, and serving the static React production build. Hosts a SignalR Hub for real-time progress streaming during remediation execution.
+   - **Key Technologies**: .NET 8/9, ASP.NET Core, SignalR.
 
 3. **Application & Domain Layer (C#)**
    - **Responsibilities**: Contains the core business logic, the diagnostic engine, the autonomous remediation orchestration, and domain models (e.g., `DiagnosticSession`, `Profile`).
@@ -28,6 +28,26 @@ RigMD is evolving from a Python-based advisory tool to a React + C#/.NET diagnos
 5. **Persistence Layer (EF Core + Hybrid Database)**
    - **Responsibilities**: Manages local data storage to ensure offline functionality and handles optional cloud synchronization for cross-device telemetry.
    - **Key Technologies**: Entity Framework Core, SQLite (Local), Supabase PostgreSQL (Cloud).
+
+## Real-Time Communication (SignalR)
+
+The API layer hosts a SignalR Hub (`/hubs/remediation`) that streams live progress from remediation actions to connected frontend clients.
+
+```
+AutonomyController
+    ↓ progressReporter callback
+AutonomousOrchestrator
+    ↓ progressReporter callback
+WindowsRemediationExecutor
+    ↓ progressReporter callback
+Remediation Action (e.g. ClearTempFilesAction)
+    ↓ progressReporter("[CLEANUP] Deleted 500 files...")
+AutonomyController (lambda)
+    ↓ IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveProgress", msg)
+SignalR Hub → WebSocket → React Frontend
+```
+
+The frontend subscribes to the `ReceiveProgress` event using `@microsoft/signalr` and renders progress in a live terminal UI within the `AutonomyRemediationPanel` component.
 
 ## Data Flow
 

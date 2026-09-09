@@ -21,3 +21,13 @@ The engine must record the previous system state before mutating any configurati
 
 ## 3. Pivot Logic
 If a remediation attempt fails and is rolled back, the engine "pivots" to the next most probable cause and associated action, escalating the severity level or eventually falling back to manual advisory output.
+
+## 4. Live Progress Streaming (SignalR)
+During real execution, remediation actions report their progress in real time to connected frontend clients via a SignalR WebSocket connection.
+
+- The `AutonomyController` provides a `progressReporter` callback to the orchestration chain.
+- Each remediation action (e.g., `ClearTempFilesAction`, `RunDiskCleanupAction`, `RunSfcScanAction`) calls the reporter at meaningful intervals.
+- The controller forwards each message to all connected clients via `IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveProgress", msg)`.
+- The frontend renders these messages in a live terminal UI within the `AutonomyRemediationPanel` component.
+
+This provides transparency into what the engine is doing during execution without requiring the user to wait for the final result.
