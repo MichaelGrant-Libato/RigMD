@@ -623,3 +623,46 @@ A Pivot Engine (`IPivotEngine`) has been introduced to the `AutonomousOrchestrat
 ### Consequences
 
 The orchestrator now evaluates a `List<RemediationAttempt>` rather than a single attempt per cycle, tracking the history of all actions tried in a single plan until either resolution is achieved or all safe actions are exhausted.
+
+---
+
+## DECISION-016: SignalR for Live Remediation Progress Streaming
+
+- **Date:** September 2026
+- **Status:** Implemented
+
+### Context
+
+When the autonomous engine executes remediation actions (e.g., clearing thousands of temporary files or running Windows Disk Cleanup), the operation can take several seconds to minutes. The user had no visibility into what the system was doing until the HTTP response returned with the final result.
+
+### Decision
+
+A SignalR Hub (`RemediationHub`) was introduced to stream real-time progress messages from remediation actions to the frontend during execution.
+
+### Implementation
+
+```
+AutonomyController (progressReporter lambda)
+    → AutonomousOrchestrator (progressReporter parameter)
+    → WindowsRemediationExecutor (progressReporter parameter)
+    → Remediation Action (calls progressReporter at intervals)
+    → IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveProgress", msg)
+    → WebSocket → React frontend (AutonomyRemediationPanel)
+```
+
+The `progressReporter` is an `Action<string>?` callback that flows through the entire execution chain. Actions that support streaming include:
+
+- `ClearTempFilesAction` — reports file deletion progress every 500 files
+- `RunDiskCleanupAction` — reports cleanup phases and results
+- `RunSfcScanAction` — reports SFC scan progress (currently mock mode)
+
+### CORS Requirement
+
+SignalR WebSocket connections require `.AllowCredentials()` in the CORS policy when the frontend runs on a different origin (port 5173 → 5273).
+
+### Consequences
+
+- Users can observe remediation progress in real time
+- The `progressReporter` callback is optional (`Action<string>?`) so all existing code paths remain unaffected
+- Fast-completing actions (FlushDns, ClearBrowserCache) intentionally do not report progress since they complete in under a second
+- The frontend dependency `@microsoft/signalr` was added
