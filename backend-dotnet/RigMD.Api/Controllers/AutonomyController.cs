@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using RigMD.Api.Hubs;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
@@ -16,6 +18,7 @@ public class AutonomyController : ControllerBase
     private readonly IWindowsSystemProfileService _profileService;
     private readonly IDiagnosticSessionRepository _sessionRepository;
     private readonly IRemediationRepository _remediationRepository;
+    private readonly IHubContext<RemediationHub> _hubContext;
     private readonly ILogger<AutonomyController> _logger;
 
     public AutonomyController(
@@ -23,12 +26,14 @@ public class AutonomyController : ControllerBase
         IWindowsSystemProfileService profileService,
         IDiagnosticSessionRepository sessionRepository,
         IRemediationRepository remediationRepository,
+        IHubContext<RemediationHub> hubContext,
         ILogger<AutonomyController> logger)
     {
         _orchestrator = orchestrator;
         _profileService = profileService;
         _sessionRepository = sessionRepository;
         _remediationRepository = remediationRepository;
+        _hubContext = hubContext;
         _logger = logger;
     }
 
@@ -120,7 +125,11 @@ public class AutonomyController : ControllerBase
             await _orchestrator.RunExecutionCycleAsync(
                 diagnostic,
                 hardware,
-                request.UserConsentProvided);
+                request.UserConsentProvided,
+                progressReporter: msg => 
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveProgress", msg);
+                });
 
         if (result.Plan != null)
         {

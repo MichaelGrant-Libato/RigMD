@@ -1,4 +1,5 @@
-import { apiGet,apiPost, } from '../lib/api';
+import { API_BASE_URL, apiGet,apiPost, } from '../lib/api';
+import * as signalR from '@microsoft/signalr';
 
 export interface AutonomyActionDef {
   id?: string;
@@ -118,6 +119,38 @@ const wait = (
       milliseconds,
     );
   });
+
+// --- SignalR Live Streaming Setup ---
+let remediationHubConnection: signalR.HubConnection | null = null;
+
+export async function startRemediationStream(onProgress: (message: string) => void) {
+  if (remediationHubConnection) {
+    await stopRemediationStream();
+  }
+
+  remediationHubConnection = new signalR.HubConnectionBuilder()
+    .withUrl(`${API_BASE_URL}/hubs/remediation`)
+    .withAutomaticReconnect()
+    .build();
+
+  remediationHubConnection.on('ReceiveProgress', (message: string) => {
+    onProgress(message);
+  });
+
+  try {
+    await remediationHubConnection.start();
+  } catch (err) {
+    console.error('SignalR Connection Error: ', err);
+  }
+}
+
+export async function stopRemediationStream() {
+  if (remediationHubConnection) {
+    await remediationHubConnection.stop();
+    remediationHubConnection = null;
+  }
+}
+// ------------------------------------
 
 export async function runAutonomyDryRun({
   sessionId,

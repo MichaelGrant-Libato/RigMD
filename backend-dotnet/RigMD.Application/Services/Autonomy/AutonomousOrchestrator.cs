@@ -52,22 +52,25 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
     public Task<OrchestrationResult> RunExecutionCycleAsync(
         DiagnosticOutput diagnostic,
         HardwareProfileDto hardware,
-        bool userConsentProvided = false)
+        bool userConsentProvided = false,
+        Action<string>? progressReporter = null)
     {
         return RunCycleAsync(
             diagnostic,
             hardware,
             _realExecutor.ExecuteAsync,
             isDryRun: false,
-            userConsentProvided: userConsentProvided);
+            userConsentProvided: userConsentProvided,
+            progressReporter: progressReporter);
     }
 
     private async Task<OrchestrationResult> RunCycleAsync(
         DiagnosticOutput diagnostic,
         HardwareProfileDto hardware,
-        Func<RemediationActionDef, Task<ExecutionResult>> executeAction,
+        Func<RemediationActionDef, Action<string>?, Task<ExecutionResult>> executeAction,
         bool isDryRun,
-        bool userConsentProvided)
+        bool userConsentProvided,
+        Action<string>? progressReporter = null)
     {
         var trace = new StringBuilder();
         var mode = isDryRun ? "Dry Run" : "Real Execution";
@@ -184,7 +187,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                 $"[EXECUTOR] Attempting {(isDryRun ? "simulation" : "execution")} of {actionToExecute.Name}...");
 
             var executionResult =
-                await executeAction(actionToExecute);
+                await executeAction(actionToExecute, progressReporter);
 
             attempt.Execution =
                 executionResult;

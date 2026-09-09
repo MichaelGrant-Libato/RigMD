@@ -23,6 +23,8 @@ import {
   runAgentRemediation,
   runAutonomyDryRun,
   runAutonomyExecution,
+  startRemediationStream,
+  stopRemediationStream,
 } from '../services/autonomyService';
 
 interface AutonomyRemediationPanelProps {
@@ -619,6 +621,8 @@ export default function AutonomyRemediationPanel({
     setUserConsentProvided,
   ] = useState(false);
 
+  const [streamLogs, setStreamLogs] = useState<string[]>([]);
+
   const consentRequired =
     useMemo(() => {
       if (executionResult) {
@@ -715,6 +719,11 @@ export default function AutonomyRemediationPanel({
 
     setIsExecuteLoading(true);
     setExecuteError(null);
+    setStreamLogs([]);
+
+    await startRemediationStream((message: string) => {
+      setStreamLogs((prev) => [...prev, message]);
+    });
 
     try {
       const result =
@@ -751,6 +760,7 @@ export default function AutonomyRemediationPanel({
       );
     } finally {
       setIsExecuteLoading(false);
+      await stopRemediationStream();
     }
   };
 
@@ -931,6 +941,19 @@ export default function AutonomyRemediationPanel({
                 }
                 mode="execute"
               />
+            </div>
+          )}
+
+          {streamLogs.length > 0 && (
+            <div className="mt-3 rounded-xl border border-cyan-500/20 bg-black p-4">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                Live Terminal Stream
+              </p>
+              <div className="mt-2 max-h-40 overflow-y-auto font-mono text-xs text-green-400 custom-scrollbar">
+                {streamLogs.map((log, i) => (
+                  <div key={i}>{log}</div>
+                ))}
+              </div>
             </div>
           )}
         </div>

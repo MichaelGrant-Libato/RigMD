@@ -34,7 +34,8 @@ public class WindowsRemediationExecutor :
 
     public async Task<ExecutionResult>
         ExecuteAsync(
-            RemediationActionDef action)
+            RemediationActionDef action,
+            Action<string>? progressReporter = null)
     {
         _logger.LogInformation(
             "WindowsRemediationExecutor: dispatching action '{ActionId}' ({ActionName})",
@@ -44,7 +45,7 @@ public class WindowsRemediationExecutor :
         return action.Id switch
         {
             "clear_user_temp_files" =>
-                await ExecuteClearTempFiles(),
+                await ExecuteClearTempFiles(progressReporter),
 
             "flush_dns" =>
                 await ExecuteFlushDns(),
@@ -56,10 +57,10 @@ public class WindowsRemediationExecutor :
                 await ExecuteClearWindowsUpdateCache(),
 
             "run_disk_cleanup" =>
-                await ExecuteRunDiskCleanup(),
+                await ExecuteRunDiskCleanup(progressReporter),
 
             "run_sfc_scan" =>
-                await ExecuteRunSfcScan(),
+                await ExecuteRunSfcScan(progressReporter),
 
             _ =>
                 CreateUnsupportedActionResult(
@@ -68,7 +69,7 @@ public class WindowsRemediationExecutor :
     }
 
     private async Task<ExecutionResult>
-        ExecuteClearTempFiles()
+        ExecuteClearTempFiles(Action<string>? progressReporter)
     {
         var actionLogger =
             _loggerFactory
@@ -79,7 +80,7 @@ public class WindowsRemediationExecutor :
             new ClearTempFilesAction(
                 actionLogger);
 
-        return await action.ExecuteAsync();
+        return await action.ExecuteAsync(progressReporter);
     }
 
     private async Task<ExecutionResult>
@@ -126,7 +127,7 @@ public class WindowsRemediationExecutor :
     }
 
     private async Task<ExecutionResult>
-        ExecuteRunDiskCleanup()
+        ExecuteRunDiskCleanup(Action<string>? progressReporter)
     {
         var actionLogger =
             _loggerFactory
@@ -137,11 +138,11 @@ public class WindowsRemediationExecutor :
             new RunDiskCleanupAction(
                 actionLogger);
 
-        return await action.ExecuteAsync();
+        return await action.ExecuteAsync(progressReporter);
     }
 
     private async Task<ExecutionResult>
-        ExecuteRunSfcScan()
+        ExecuteRunSfcScan(Action<string>? progressReporter)
     {
         var actionLogger =
             _loggerFactory
@@ -150,7 +151,7 @@ public class WindowsRemediationExecutor :
         var action =
             new RunSfcScanAction(actionLogger);
 
-        return await action.ExecuteAsync();
+        return await action.ExecuteAsync(progressReporter);
     }
 
     private static ExecutionResult

@@ -10,6 +10,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
+builder.Services.AddSignalR();
 
 // Add CORS policy to allow the React frontend
 builder.Services.AddCors(options =>
@@ -18,7 +19,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:5273", "http://localhost:5173")
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -132,6 +134,7 @@ app.UseStaticFiles();
 
 app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
+app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");
 app.MapFallbackToFile("index.html");
 
 app.Run();

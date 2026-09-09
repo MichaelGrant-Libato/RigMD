@@ -9,7 +9,7 @@ import axios, {
 } from 'axios';
 import { getClientId } from './clientId';
 
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 export async function apiFetch(
