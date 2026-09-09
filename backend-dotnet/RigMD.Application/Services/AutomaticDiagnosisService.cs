@@ -31,6 +31,19 @@ public sealed class AutomaticDiagnosisService :
                 evaluateStorage,
                 evaluateNetwork);
 
+        if (evaluateCpu && evaluateMemory && evaluateStorage)
+        {
+            var thrashingResult =
+                DiagnoseSystemThrashing(
+                    input.Hardware,
+                    evidence);
+
+            if (thrashingResult != null)
+            {
+                return thrashingResult;
+            }
+        }
+
         if (evaluateCpu)
         {
             var result =
@@ -106,6 +119,65 @@ public sealed class AutomaticDiagnosisService :
             Proof =
                 evidence
         };
+    }
+
+    // =======================================================
+    // CROSS-SUBSYSTEM CORRELATION
+    // =======================================================
+
+    private static AutomaticDiagnosisResult?
+        DiagnoseSystemThrashing(
+            HardwareProfileDto hardware,
+            IReadOnlyList<AutomaticDiagnosisProof> evidence)
+    {
+        var cpuUsage = hardware.Cpu.UsagePercent;
+        var ramUsage = hardware.Ram.UsagePercent;
+        var primaryDisk = hardware.AllDisks?.FirstOrDefault();
+        var storageUsage = primaryDisk?.UsagePercent ?? 0;
+
+        // "Severe System Thrashing" occurs when all major resources are critically bottlenecked.
+        if (cpuUsage >= 85 && ramUsage >= 85 && storageUsage >= 85)
+        {
+            return new AutomaticDiagnosisResult
+            {
+                DiagnosedCategory =
+                    "Severe System Resource Exhaustion",
+
+                ActionCategory =
+                    "Maintain",
+
+                ConfidenceLabel =
+                    "High",
+
+                Explanation =
+                    "Your system is experiencing cascading resource pressure. High memory usage is forcing Windows to use the hard drive as virtual memory (page file thrashing), which is saturating both your disk I/O and CPU. This is a systemic problem, not an isolated component failure.",
+
+                RecommendedNextStep =
+                    "Clear system temp files to free disk space for the page file, identify memory-heavy applications in Task Manager, and restart the Windows Explorer shell to recover UI memory.",
+
+                Proof =
+                    new List<AutomaticDiagnosisProof>(evidence)
+                    {
+                        new()
+                        {
+                            Label = "Cross-Subsystem Correlation",
+                            Value = $"CPU: {cpuUsage:0.0}%, RAM: {ramUsage:0.0}%, Disk: {storageUsage:0.0}%",
+                            Status = "critical",
+                            Meaning = "Multiple critical subsystems are saturated simultaneously, indicating severe system thrashing."
+                        }
+                    },
+
+                VerificationTarget =
+                    new AutomaticVerificationTarget
+                    {
+                        Target = "task_manager",
+                        Label = "Task Manager - Performance",
+                        Description = "Review the Performance tab to monitor CPU, Memory, and Disk usage recovering after cleanup."
+                    }
+            };
+        }
+
+        return null;
     }
 
     // =======================================================

@@ -17,7 +17,8 @@ public class RemediationRegistry : IRemediationRegistry
             SupportedDiagnosisCategories = new List<string>
             {
                 "Low Available Storage Space",
-                "Elevated Storage Utilization"
+                "Elevated Storage Utilization",
+                "Severe System Resource Exhaustion"
             },
             RiskLevel = "Low",
             IsReversible = false
@@ -28,7 +29,8 @@ public class RemediationRegistry : IRemediationRegistry
             Name = "Restart Windows Explorer",
             SupportedDiagnosisCategories = new List<string>
             {
-                "OS performance degradation"
+                "OS performance degradation",
+                "Severe System Resource Exhaustion"
             },
             RiskLevel = "Low",
             IsReversible = false
@@ -43,6 +45,62 @@ public class RemediationRegistry : IRemediationRegistry
             },
             RiskLevel = "Low",
             IsReversible = false
+        },
+        new RemediationActionDef
+        {
+            Id = "clear_browser_cache",
+            Name = "Clear Browser Cache",
+            Description = "Clears cached data from Chrome, Edge, and Firefox. Does not affect bookmarks, passwords, or history.",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Low Available Storage Space",
+                "Elevated Storage Utilization",
+                "Severe System Resource Exhaustion"
+            },
+            RiskLevel = "Low",
+            IsReversible = false
+        },
+        new RemediationActionDef
+        {
+            Id = "clear_windows_update_cache",
+            Name = "Clear Windows Update Cache",
+            Description = "Clears downloaded Windows Update files from the SoftwareDistribution folder.",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Low Available Storage Space",
+                "Elevated Storage Utilization",
+                "Severe System Resource Exhaustion"
+            },
+            RiskLevel = "Low",
+            IsReversible = false,
+            RequiresUserConfirmation = true
+        },
+        new RemediationActionDef
+        {
+            Id = "run_disk_cleanup",
+            Name = "Run Windows Disk Cleanup",
+            Description = "Runs the built-in Windows Disk Cleanup utility to remove system-safe temporary files.",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "Low Available Storage Space",
+                "Elevated Storage Utilization",
+                "Severe System Resource Exhaustion"
+            },
+            RiskLevel = "Low",
+            IsReversible = false
+        },
+        new RemediationActionDef
+        {
+            Id = "run_sfc_scan",
+            Name = "Run System File Checker",
+            Description = "Scans and repairs corrupted Windows system files using sfc /scannow.",
+            SupportedDiagnosisCategories = new List<string>
+            {
+                "OS performance degradation"
+            },
+            RiskLevel = "Low",
+            IsReversible = false,
+            RequiresUserConfirmation = true
         }
     };
 

@@ -46,6 +46,21 @@ public class WindowsRemediationExecutor :
             "clear_user_temp_files" =>
                 await ExecuteClearTempFiles(),
 
+            "flush_dns" =>
+                await ExecuteFlushDns(),
+
+            "clear_browser_cache" =>
+                await ExecuteClearBrowserCache(),
+
+            "clear_windows_update_cache" =>
+                await ExecuteClearWindowsUpdateCache(),
+
+            "run_disk_cleanup" =>
+                await ExecuteRunDiskCleanup(),
+
+            "run_sfc_scan" =>
+                await ExecuteRunSfcScan(),
+
             _ =>
                 CreateUnsupportedActionResult(
                     action)
@@ -63,6 +78,77 @@ public class WindowsRemediationExecutor :
         var action =
             new ClearTempFilesAction(
                 actionLogger);
+
+        return await action.ExecuteAsync();
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteFlushDns()
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<FlushDnsAction>();
+
+        var action =
+            new FlushDnsAction(actionLogger);
+
+        return await action.ExecuteAsync();
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteClearBrowserCache()
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<
+                    ClearBrowserCacheAction>();
+
+        var action =
+            new ClearBrowserCacheAction(
+                actionLogger);
+
+        return await action.ExecuteAsync();
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteClearWindowsUpdateCache()
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<
+                    ClearWindowsUpdateCacheAction>();
+
+        var action =
+            new ClearWindowsUpdateCacheAction(
+                actionLogger);
+
+        return await action.ExecuteAsync();
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteRunDiskCleanup()
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<
+                    RunDiskCleanupAction>();
+
+        var action =
+            new RunDiskCleanupAction(
+                actionLogger);
+
+        return await action.ExecuteAsync();
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteRunSfcScan()
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<RunSfcScanAction>();
+
+        var action =
+            new RunSfcScanAction(actionLogger);
 
         return await action.ExecuteAsync();
     }
