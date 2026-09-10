@@ -35,47 +35,59 @@ public class RunSfcScanAction
 
         try
         {
+            var processInfo = new ProcessStartInfo
+            {
+                FileName = "sfc",
+                Arguments = "/scannow",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = processInfo };
+
             if (progressReporter != null)
             {
-                progressReporter("[SFC] Starting Windows System File Checker (Mock Mode)...");
-                await Task.Delay(1000);
-                
-                progressReporter("[SFC] Beginning system scan. This process will take some time.");
-                await Task.Delay(1000);
-
-                progressReporter("[SFC] Beginning verification phase of system scan.");
-                await Task.Delay(1000);
-
-                for (int i = 1; i <= 10; i++)
+                process.OutputDataReceived += (sender, e) =>
                 {
-                    progressReporter($"[SFC] Verification {i * 10}% complete.");
-                    await Task.Delay(500); // Wait half a second per 10%
-                }
-
-                progressReporter("[SFC] Windows Resource Protection found corrupt files and successfully repaired them.");
-                await Task.Delay(1000);
-                
-                progressReporter("[SFC] For online repairs, details are included in the CBS log file.");
-                await Task.Delay(500);
-                
-                progressReporter("[SFC] Scan completed successfully.");
+                    if (!string.IsNullOrWhiteSpace(e.Data))
+                    {
+                        progressReporter($"[SFC] {e.Data}");
+                    }
+                };
             }
 
-            var success = true;
-            var status = "Repaired";
-            var meaning = "Windows System File Checker found and successfully repaired corrupted system files (Mock).";
+            process.Start();
+            
+            if (progressReporter != null)
+            {
+                process.BeginOutputReadLine();
+            }
+
+            // SFC can take a while, wait indefinitely or set a high timeout (e.g. 1 hour)
+            await process.WaitForExitAsync();
+
+            var exitCode = process.ExitCode;
+            var success = exitCode == 0;
+            var status = success ? "Scanned" : "Failed";
+            var meaning = success 
+                ? "Windows System File Checker completed the scan."
+                : $"SFC scan exited with code {exitCode}. Administrator privileges may be required.";
 
             _logger.LogInformation(
                 "SFC scan completed: exitCode={ExitCode}, status={Status}",
-                0, status);
+                exitCode, status);
 
             return new ExecutionResult
             {
                 Success = success,
 
-                Summary = "System File Checker: corrupted files were found and repaired (Mock).",
+                Summary = success 
+                    ? "System File Checker scan completed successfully."
+                    : $"System File Checker scan failed with exit code {exitCode}.",
 
-                OutputLog = "Mock log output generated for UI streaming demonstration.",
+                OutputLog = $"SFC Exit Code: {exitCode}",
 
                 Proof = new List<ExecutionProof>
                 {
@@ -93,13 +105,13 @@ public class RunSfcScanAction
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "SFC scan failed");
+                "SFC scan failed to start");
 
             return new ExecutionResult
             {
                 Success = false,
                 Summary =
-                    "System File Checker failed to execute.",
+                    "System File Checker failed to start.",
                 OutputLog = ex.Message
             };
         }
