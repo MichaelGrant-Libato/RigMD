@@ -834,9 +834,12 @@ public class AutonomousOrchestratorTests
         public bool WasCalled { get; private set; }
 
         public Task<ExecutionResult> ExecuteAsync(
-            RemediationActionDef action)
+            RemediationActionDef action,
+            Action<string>? progressCallback = null)
         {
             WasCalled = true;
+
+            progressCallback?.Invoke("Dry-run test execution.");
 
             return Task.FromResult(
                 new ExecutionResult
@@ -854,9 +857,12 @@ public class AutonomousOrchestratorTests
         public bool ShouldSucceed { get; set; } = true;
 
         public Task<ExecutionResult> ExecuteAsync(
-            RemediationActionDef action)
+            RemediationActionDef action,
+            Action<string>? progressCallback = null)
         {
             WasCalled = true;
+
+            progressCallback?.Invoke("Real execution test.");
 
             return Task.FromResult(
                 new ExecutionResult
