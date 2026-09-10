@@ -11,7 +11,12 @@ namespace RigMD.Desktop;
 public partial class App : System.Windows.Application
 {
     private Process? _apiProcess;
-    private const string ApiUrl = "http://localhost:5273";
+
+    private const string ApiHost = "localhost";
+    private const int ApiPort = 5273;
+
+    private static readonly string ApiUrl =
+        $"http{Uri.SchemeDelimiter}{ApiHost}:{ApiPort}";
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -41,9 +46,31 @@ public partial class App : System.Windows.Application
 
     private void StartApiProcess()
     {
-        var apiExe = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "RigMD.Api.exe");
+        var desktopDirectory =
+            AppDomain.CurrentDomain.BaseDirectory;
+
+        var rigMdDirectory =
+            Directory.GetParent(
+                desktopDirectory.TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar))
+            ?.FullName;
+
+        if (string.IsNullOrWhiteSpace(rigMdDirectory))
+        {
+            throw new DirectoryNotFoundException(
+                "The RigMD installation directory could not be determined.");
+        }
+
+        var apiDirectory =
+            Path.Combine(
+                rigMdDirectory,
+                "Api");
+
+        var apiExe =
+            Path.Combine(
+                apiDirectory,
+                "RigMD.Api.exe");
 
         if (!File.Exists(apiExe))
         {
@@ -60,12 +87,12 @@ public partial class App : System.Windows.Application
                 Arguments = $"--urls={ApiUrl}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
+                WorkingDirectory = apiDirectory
             }
         };
 
-        _apiProcess.StartInfo.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] =
-            "Development";
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "ASPNETCORE_ENVIRONMENT"] = "Production";
 
         if (!_apiProcess.Start())
         {
@@ -91,27 +118,36 @@ public partial class App : System.Windows.Application
 
             try
             {
-                using var response = await client.GetAsync(ApiUrl);
+                using var response =
+                    await client.GetAsync(ApiUrl);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var html = await response.Content.ReadAsStringAsync();
+                    var html =
+                        await response.Content.ReadAsStringAsync();
 
-                    var cssMatch = Regex.Match(
-                        html,
-                        "<link[^>]+href=\"([^\"]+\\.css)\"",
-                        RegexOptions.IgnoreCase);
+                    var cssMatch =
+                        Regex.Match(
+                            html,
+                            "<link[^>]+href=\"([^\"]+\\.css)\"",
+                            RegexOptions.IgnoreCase);
 
                     if (cssMatch.Success)
                     {
-                        var cssPath = cssMatch.Groups[1].Value;
-                        var cssUrl = new Uri(new Uri(ApiUrl), cssPath);
+                        var cssPath =
+                            cssMatch.Groups[1].Value;
 
-                        using var cssResponse = await client.GetAsync(cssUrl);
+                        var cssUrl =
+                            new Uri(
+                                new Uri(ApiUrl),
+                                cssPath);
+
+                        using var cssResponse =
+                            await client.GetAsync(cssUrl);
 
                         if (cssResponse.IsSuccessStatusCode &&
-                            cssResponse.Content.Headers.ContentType?.MediaType ==
-                            "text/css")
+                            cssResponse.Content.Headers.ContentType
+                                ?.MediaType == "text/css")
                         {
                             return;
                         }
@@ -120,11 +156,11 @@ public partial class App : System.Windows.Application
             }
             catch (HttpRequestException)
             {
-                // The API is not accepting connections yet.
+                // API is not accepting connections yet.
             }
             catch (TaskCanceledException)
             {
-                // The request timed out while the API was starting.
+                // Request timed out while API was starting.
             }
 
             await Task.Delay(1000);
@@ -148,7 +184,7 @@ public partial class App : System.Windows.Application
             }
             catch (InvalidOperationException)
             {
-                // The process has already exited.
+                // Process already exited.
             }
             finally
             {
