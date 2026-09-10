@@ -7,6 +7,8 @@ using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 using RigMD.Domain.Entities;
 using RigMD.Domain.Rules;
+using Microsoft.AspNetCore.SignalR;
+using RigMD.Api.Hubs;
 
 namespace RigMD.Tests.Api;
 
@@ -252,6 +254,7 @@ public class AutonomyControllerTests
             new FakeDiagnosticSessionRepository(
                 diagnostic),
             remediationRepository,
+            new FakeHubContext(),
             NullLogger<AutonomyController>.Instance);
     }
 
@@ -323,7 +326,8 @@ public class AutonomyControllerTests
             RunExecutionCycleAsync(
                 DiagnosticOutput diagnostic,
                 HardwareProfileDto hardware,
-                bool userConsentProvided = false)
+                bool userConsentProvided = false,
+                Action<string>? progressCallback = null)
         {
             return Task.FromResult(
                 ExecutionResult);
@@ -512,4 +516,81 @@ public class AutonomyControllerTests
             throw new NotSupportedException();
         }
     }
+
+    private sealed class FakeHubContext : IHubContext<RemediationHub>
+{
+    public IHubClients Clients { get; } = new FakeHubClients();
+
+    public IGroupManager Groups { get; } = new FakeGroupManager();
+}
+
+private sealed class FakeHubClients : IHubClients
+{
+    private static readonly IClientProxy Proxy = new FakeClientProxy();
+
+    public IClientProxy All => Proxy;
+
+    public IClientProxy AllExcept(
+        IReadOnlyList<string> excludedConnectionIds)
+        => Proxy;
+
+    public IClientProxy Client(
+        string connectionId)
+        => Proxy;
+
+    public IClientProxy Clients(
+        IReadOnlyList<string> connectionIds)
+        => Proxy;
+
+    public IClientProxy Group(
+        string groupName)
+        => Proxy;
+
+    public IClientProxy GroupExcept(
+        string groupName,
+        IReadOnlyList<string> excludedConnectionIds)
+        => Proxy;
+
+    public IClientProxy Groups(
+        IReadOnlyList<string> groupNames)
+        => Proxy;
+
+    public IClientProxy User(
+        string userId)
+        => Proxy;
+
+    public IClientProxy Users(
+        IReadOnlyList<string> userIds)
+        => Proxy;
+}
+
+private sealed class FakeClientProxy : IClientProxy
+{
+    public Task SendCoreAsync(
+        string method,
+        object?[] args,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+}
+
+private sealed class FakeGroupManager : IGroupManager
+{
+    public Task AddToGroupAsync(
+        string connectionId,
+        string groupName,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveFromGroupAsync(
+        string connectionId,
+        string groupName,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+}
 }
