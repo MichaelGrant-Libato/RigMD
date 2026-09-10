@@ -24,9 +24,8 @@ const INSTALLER_FILE_NAME =
   import.meta.env.VITE_RIGMD_INSTALLER_FILE_NAME?.trim() ??
   'RigMD-Setup.exe';
 
-const DEV_DOWNLOAD_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_RIGMD_DOWNLOAD_URL?.trim() ?? ''
-  : '';
+const RELEASE_DOWNLOAD_URL =
+  import.meta.env.VITE_RIGMD_DOWNLOAD_URL?.trim() ?? '';
 
 const SIGNED_URL_TTL_SECONDS = 60;
 const hasSecureDownloadConfig = Boolean(DOWNLOAD_BUCKET && INSTALLER_PATH);
@@ -105,7 +104,7 @@ function DownloadLandingPage() {
     setIsPreparingDownload(true);
 
     try {
-      let downloadUrl = DEV_DOWNLOAD_URL;
+      let downloadUrl = RELEASE_DOWNLOAD_URL;
 
       if (hasSecureDownloadConfig) {
         try {
@@ -119,7 +118,7 @@ function DownloadLandingPage() {
 
           downloadUrl = data.signedUrl;
         } catch (error) {
-          if (!DEV_DOWNLOAD_URL) throw error;
+          if (!RELEASE_DOWNLOAD_URL) throw error;
         }
       }
 
