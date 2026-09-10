@@ -16,4 +16,12 @@
     <ProjectReference Include="..\RigMD.Api\RigMD.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\RigMD.Api\wwwroot\**\*">
+      <Link>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
