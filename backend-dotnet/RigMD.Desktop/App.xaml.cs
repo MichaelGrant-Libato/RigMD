@@ -49,6 +49,11 @@ public partial class App : System.Windows.Application
         var desktopDirectory =
             AppDomain.CurrentDomain.BaseDirectory;
 
+        string apiDirectory;
+
+#if DEBUG
+        apiDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "..", "..", "..", "RigMD.Api", "bin", "Debug", "net10.0-windows"));
+#else
         var rigMdDirectory =
             Directory.GetParent(
                 desktopDirectory.TrimEnd(
@@ -62,10 +67,11 @@ public partial class App : System.Windows.Application
                 "The RigMD installation directory could not be determined.");
         }
 
-        var apiDirectory =
+        apiDirectory =
             Path.Combine(
                 rigMdDirectory,
                 "Api");
+#endif
 
         var apiExe =
             Path.Combine(
