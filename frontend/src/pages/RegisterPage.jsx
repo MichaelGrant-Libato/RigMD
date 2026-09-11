@@ -67,6 +67,11 @@ function RegisterPage() {
     const cleanEmail = email.trim();
     const cleanName = fullName.trim();
 
+    if (!cleanName) {
+      setError('Please provide your full name.');
+      return;
+    }
+
     if (password.length < 6) {
       setError('Use a password with at least 6 characters.');
       return;
@@ -82,13 +87,10 @@ function RegisterPage() {
     try {
       const options = {
         emailRedirectTo: getAuthRedirectUrl('/verify-email'),
-      };
-
-      if (cleanName) {
-        options.data = {
+        data: {
           full_name: cleanName,
-        };
-      }
+        },
+      };
 
       const { data, error: signUpError } =
         await supabase.auth.signUp({
@@ -99,6 +101,13 @@ function RegisterPage() {
 
       if (signUpError) {
         setError(signUpError.message);
+        return;
+      }
+
+      // Supabase returns an empty identities array if the user already exists
+      // to prevent email enumeration. We must check for this explicitly.
+      if (data?.user?.identities?.length === 0) {
+        setError('An account with this email address already exists. Please log in.');
         return;
       }
 
