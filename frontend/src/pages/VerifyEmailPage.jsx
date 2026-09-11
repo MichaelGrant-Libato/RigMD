@@ -70,9 +70,6 @@ function VerifyEmailPage() {
     () => getVerificationParams(location),
     [location]
   );
-  const hasManualVerificationToken = Boolean(
-    verificationParams.tokenHash
-  );
 
   useEffect(() => {
     if (!supabase) {
@@ -82,7 +79,7 @@ function VerifyEmailPage() {
     let mounted = true;
 
     const updateFromUser = async (user) => {
-      if (!mounted) {
+      if (!mounted || verified.current) {
         return;
       }
 
@@ -108,13 +105,53 @@ function VerifyEmailPage() {
       setStatus('waiting');
     };
 
-    const checkUser = async () => {
-      if (hasManualVerificationToken) {
-        setStatus('ready_to_confirm');
+    const verifyFromEmailLink = async () => {
+      const search = new URLSearchParams(location.search);
+      const tokenHash = search.get('token_hash');
+      const type = search.get('type') || 'signup';
+
+      if (tokenHash) {
+        setStatus('checking');
+        setError('');
+        setMessage('');
+
+        const { data, error: verifyError } =
+          await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type,
+          });
+
+        if (!mounted) {
+          return;
+        }
+
+        if (verifyError) {
+          setError(
+            verifyError.message ||
+              'This verification link is invalid or has already been used.'
+          );
+          setStatus('waiting');
+          return;
+        }
+
+        if (data.user?.email) {
+          setEmail(data.user.email);
+        }
+
+        verified.current = true;
+        setStatus('verified');
+        signedOutAfterCallback.current = true;
+
+        await supabase.auth.signOut();
+
+        window.history.replaceState(
+          null,
+          '',
+          '/verify-email?verified=1'
+        );
+
         return;
       }
-
-      const search = new URLSearchParams(location.search);
 
       if (search.has('code')) {
         const { error: exchangeError } =
@@ -130,10 +167,10 @@ function VerifyEmailPage() {
       }
 
       const { data } = await supabase.auth.getUser();
-      updateFromUser(data.user);
+      await updateFromUser(data.user);
     };
 
-    checkUser();
+    verifyFromEmailLink();
 
     const { data } = supabase.auth.onAuthStateChange(
       (_event, session) => {
@@ -149,12 +186,7 @@ function VerifyEmailPage() {
       mounted = false;
       data.subscription.unsubscribe();
     };
-  }, [
-    callbackDetected,
-    email,
-    hasManualVerificationToken,
-    location.search,
-  ]);
+  }, [callbackDetected, email, location.search]);
 
   const handleConfirmEmail = async () => {
     setError('');
