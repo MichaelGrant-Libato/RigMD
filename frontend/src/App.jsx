@@ -64,17 +64,7 @@ function DesktopAppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<DashboardApp />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
-      <Route
-        path="/download"
-        element={
-          <ProtectedDownloadRoute>
-            <DownloadLandingPage />
-          </ProtectedDownloadRoute>
-        }
-      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
