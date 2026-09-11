@@ -598,35 +598,35 @@ function QuickActionPanel({ setActivePage }: { setActivePage: (page: PageKey) =>
     >
       <div className="mb-4 flex items-center gap-2">
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-        <h3 className="font-semibold text-white">Quick Actions</h3>
+        <h3 className="font-semibold text-white">What do you want to do?</h3>
       </div>
 
       <div className="space-y-3">
         <QuickActionButton
           icon={Stethoscope}
-          title="Start Full Guided Diagnosis"
-          description="Answer guided questions for a complete analysis"
+          title="Check My PC"
+          description="Answer simple questions about the problem"
           primary
           onClick={() => setActivePage('newDiagnosis')}
         />
 
         <QuickActionButton
-          icon={History}
-          title="View Diagnostic History"
-          description="Review past sessions and trends"
-          onClick={() => setActivePage('diagnosticHistory')}
+          icon={Server}
+          title="See My PC Info"
+          description="View the important parts RigMD found"
+          onClick={() => setActivePage('systemProfile')}
         />
 
         <QuickActionButton
-          icon={Server}
-          title="View System Profile"
-          description="Inspect automatically detected hardware details"
-          onClick={() => setActivePage('systemProfile')}
+          icon={History}
+          title="Past Checks"
+          description="See previous results and recommendations"
+          onClick={() => setActivePage('diagnosticHistory')}
         />
       </div>
 
       <div className="mt-5 rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-main-surface)]/45 p-3.5 text-xs leading-relaxed text-[var(--rigmd-text-faint)]">
-        RigMD provides probable diagnostic advisory only. Results do not replace professional hardware inspection.
+        RigMD gives guidance to help you understand what may be wrong. Serious hardware issues should still be checked by a technician.
       </div>
     </motion.section>
   );
@@ -672,12 +672,28 @@ function PcHealthSummaryCard({
   const hasSavedSession = Boolean(latestSession);
   const profileComplete = getProfileCompletion(stats);
   const healthStatus = getHealthStatusLabel(currentAction, hasSavedSession);
-  const latestIssue = latestSession?.diagnosed_category ?? 'No saved diagnosis yet';
-  const actionLabel = currentAction || 'No action';
-  const confidence = latestSession?.confidence_label ?? 'Not available';
+  const latestIssue = latestSession?.diagnosed_category ?? 'No PC check yet';
+  const actionLabel = currentAction || 'Nothing needed yet';
+  const confidence = latestSession?.confidence_label ?? 'Not checked yet';
   const profileStatus = getProfileStatusLabel(profileComplete, stats);
   const nextStep = getRecommendedNextStep(currentAction, hasSavedSession);
   const healthStatusColor = getHealthStatusColor(healthStatus);
+
+  const friendlyTitle =
+    healthStatus === 'Stable'
+      ? 'Your PC looks stable'
+      : healthStatus === 'Needs Attention'
+        ? 'Your PC may need attention'
+        : healthStatus === 'Critical Attention'
+          ? 'This may need a technician'
+          : stats
+            ? 'Your PC info is ready'
+            : 'RigMD is checking your PC';
+
+  const friendlySubtitle = hasSavedSession
+    ? 'Here is the plain summary from your latest check.'
+    : 'Run a guided check when something feels wrong, slow, noisy, or unusual.';
+
   const liveStatusColor =
     liveStatus === 'live'
       ? 'text-emerald-300'
@@ -699,27 +715,28 @@ function PcHealthSummaryCard({
         <div className="min-w-0">
           <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">
             <ShieldAlert size={14} />
-            PC Health Summary
+            PC Health
           </div>
 
-          <h3 className="text-xl font-bold text-white">
-            Status: <span className={healthStatusColor}>{healthStatus}</span>
+          <h3 className="text-2xl font-bold text-white">
+            <span className={healthStatusColor}>{friendlyTitle}</span>
           </h3>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--rigmd-text-muted)]">
-            At-a-glance read of your machine&apos;s current condition.
+
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--rigmd-text-muted)]">
+            {friendlySubtitle}
           </p>
 
           <div className="mt-5 grid grid-cols-1 gap-x-8 md:grid-cols-2">
             <div className="min-w-0">
-              <HealthDetailRow icon={Activity} label="Latest Issue" value={latestIssue} />
-              <HealthDetailRow icon={Wrench} label="Current Action" value={actionLabel} valueClassName={getActionTextColor(actionLabel)} />
+              <HealthDetailRow icon={Activity} label="Last result" value={latestIssue} />
+              <HealthDetailRow icon={Wrench} label="Suggested action" value={actionLabel} valueClassName={getActionTextColor(actionLabel)} />
               <HealthDetailRow icon={CheckCircle2} label="Confidence" value={confidence} valueClassName={getConfidenceTextColor(confidence)} />
             </div>
 
             <div className="min-w-0">
-              <HealthDetailRow icon={Server} label="System Profile" value={profileStatus} valueClassName={profileStatus === 'Complete' ? 'text-emerald-300' : 'text-amber-300'} />
-              <HealthDetailRow icon={Activity} label="Live Scan" value={getLiveStatusLabel(liveStatus)} valueClassName={liveStatusColor} />
-              <HealthDetailRow icon={Clock3} label="Last Scan" value={formatLastUpdated(hardwareUpdatedAt)} />
+              <HealthDetailRow icon={Server} label="PC info" value={profileStatus} valueClassName={profileStatus === 'Complete' ? 'text-emerald-300' : 'text-amber-300'} />
+              <HealthDetailRow icon={Activity} label="Live check" value={getLiveStatusLabel(liveStatus)} valueClassName={liveStatusColor} />
+              <HealthDetailRow icon={Clock3} label="Last updated" value={formatLastUpdated(hardwareUpdatedAt)} />
             </div>
           </div>
         </div>
@@ -731,20 +748,20 @@ function PcHealthSummaryCard({
               background: `conic-gradient(#22d3ee ${profileComplete * 3.6}deg, rgba(51, 65, 85, 0.75) 0deg)`,
             }}
           >
-            <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-[var(--rigmd-header)] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-[var(--rigmd-header)]">
               <span className="text-xl font-bold text-white">{profileComplete}%</span>
-              <span className="text-[10px] text-slate-400">Profile</span>
+              <span className="text-[10px] text-slate-400">PC info</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="mx-5 mb-5 rounded-lg border border-[#164e63]/55 bg-[#0b3340]/35 p-5 shadow-[inset_0_1px_0_rgba(248,250,252,0.025)] sm:mx-6 sm:mb-6">
+      <div className="mx-5 mb-5 rounded-lg border border-[#164e63]/55 bg-[#0b3340]/35 p-5 sm:mx-6 sm:mb-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2">
               <CheckCircle2 size={16} className="text-teal-300" />
-              <h4 className="font-semibold text-white">Recommended Next Step</h4>
+              <h4 className="font-semibold text-white">Next best step</h4>
             </div>
             <p className="max-w-3xl text-sm leading-relaxed text-slate-400">{nextStep}</p>
           </div>
@@ -757,7 +774,7 @@ function PcHealthSummaryCard({
               className="inline-flex items-center gap-2 rounded-lg bg-[#1fb6c9] px-4 py-2.5 text-sm font-bold text-[#041014] transition hover:bg-[#38c7d7]"
             >
               <Stethoscope size={16} />
-              Start New Diagnosis
+              Check My PC
             </motion.button>
 
             <motion.button
@@ -767,7 +784,7 @@ function PcHealthSummaryCard({
               className="inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border-soft)] bg-black/20 px-4 py-2.5 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"
             >
               <Server size={16} />
-              View System Profile
+              See My PC Info
             </motion.button>
           </div>
         </div>

@@ -271,11 +271,11 @@ export default function AppSidebar({
         </div>
 
         <div className="mb-6">
-          {renderSectionLabel('DIAGNOSTICS', collapsed)}
+          {renderSectionLabel('CHECKUP', collapsed)}
 
           <SidebarItem
             icon={Server}
-            label="System Profile"
+            label="My PC Info"
             collapsed={collapsed}
             active={activePage === 'systemProfile'}
             onClick={() => navigate('systemProfile')}
@@ -283,7 +283,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={Stethoscope}
-            label="New Diagnosis"
+            label="Check My PC"
             collapsed={collapsed}
             active={activePage === 'newDiagnosis'}
             onClick={() => navigate('newDiagnosis')}
@@ -291,7 +291,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={History}
-            label="Diagnostic History"
+            label="Past Checks"
             badge={historyBadgeCount > 0 ? formatBadge(historyBadgeCount) : null}
             collapsed={collapsed}
             active={activePage === 'diagnosticHistory'}
@@ -300,7 +300,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={Activity}
-            label="Recurring Patterns"
+            label="Repeated Problems"
             badge={recurringBadgeCount > 0 ? formatBadge(recurringBadgeCount) : null}
             collapsed={collapsed}
             active={activePage === 'recurringPatterns'}
@@ -309,7 +309,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={AlertTriangle}
-            label="Warning Signs"
+            label="Alerts"
             alert={warningAlert}
             collapsed={collapsed}
             active={activePage === 'warningSigns'}
@@ -318,11 +318,11 @@ export default function AppSidebar({
         </div>
 
         <div className="mb-6">
-          {renderSectionLabel('DATA', collapsed)}
+          {renderSectionLabel('RECORDS', collapsed)}
 
           <SidebarItem
             icon={FileText}
-            label="Reports"
+            label="Share Report"
             collapsed={collapsed}
             active={activePage === 'reports'}
             onClick={() => navigate('reports')}
@@ -330,7 +330,7 @@ export default function AppSidebar({
         </div>
 
         <div className="mb-6">
-          {renderSectionLabel('SYSTEM', collapsed)}
+          {renderSectionLabel('APP', collapsed)}
 
           <SidebarItem
             icon={Settings}
@@ -342,7 +342,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={HelpCircle}
-            label="Help / Scope"
+            label="Help"
             collapsed={collapsed}
             active={activePage === 'help'}
             onClick={() => navigate('help')}
