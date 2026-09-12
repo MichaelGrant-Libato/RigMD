@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Download,
   History,
-  Loader2,
   LogOut,
   Monitor,
   ShieldCheck,
@@ -16,19 +15,11 @@ import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabase';
 
-const DOWNLOAD_BUCKET =
-  import.meta.env.VITE_SUPABASE_DOWNLOAD_BUCKET?.trim() ?? '';
-const INSTALLER_PATH =
-  import.meta.env.VITE_SUPABASE_INSTALLER_PATH?.trim() ?? '';
-const INSTALLER_FILE_NAME =
-  import.meta.env.VITE_RIGMD_INSTALLER_FILE_NAME?.trim() ??
-  'RigMD-Setup.exe';
-
+const DEFAULT_RELEASE_DOWNLOAD_URL =
+  'https://github.com/MichaelGrant-Libato/RigMD/releases/download/v0.1.1-beta/RigMD-Setup-v0.1.1-beta.exe';
 const RELEASE_DOWNLOAD_URL =
-  import.meta.env.VITE_RIGMD_DOWNLOAD_URL?.trim() ?? '';
-
-const SIGNED_URL_TTL_SECONDS = 60;
-const hasSecureDownloadConfig = Boolean(DOWNLOAD_BUCKET && INSTALLER_PATH);
+  import.meta.env.VITE_RIGMD_DOWNLOAD_URL?.trim() ||
+  DEFAULT_RELEASE_DOWNLOAD_URL;
 
 const INSTALLER_SHA256 =
   'd9d9db1026c9247e20f8f6abe75ffd2eb712a805705d419fdb84cd3589245c8a';
@@ -69,8 +60,6 @@ const features = [
 function DownloadLandingPage() {
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState('');
-  const [isPreparingDownload, setIsPreparingDownload] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
@@ -92,51 +81,6 @@ function DownloadLandingPage() {
       mounted = false;
     };
   }, []);
-
-  const handleDownload = async () => {
-    setDownloadError('');
-
-    if (!supabase) {
-      setDownloadError('Supabase authentication is not configured yet.');
-      return;
-    }
-
-    setIsPreparingDownload(true);
-
-    try {
-      let downloadUrl = RELEASE_DOWNLOAD_URL;
-
-      if (hasSecureDownloadConfig) {
-        try {
-          const { data, error } = await supabase.storage
-            .from(DOWNLOAD_BUCKET)
-            .createSignedUrl(INSTALLER_PATH, SIGNED_URL_TTL_SECONDS, {
-              download: INSTALLER_FILE_NAME,
-            });
-
-          if (error) throw error;
-
-          downloadUrl = data.signedUrl;
-        } catch (error) {
-          if (!RELEASE_DOWNLOAD_URL) throw error;
-        }
-      }
-
-      if (!downloadUrl) {
-        throw new Error('Secure installer storage is not configured yet.');
-      }
-
-      window.location.href = downloadUrl;
-    } catch (error) {
-      setDownloadError(
-        error instanceof Error
-          ? error.message
-          : 'Unable to prepare the installer download.'
-      );
-    } finally {
-      setIsPreparingDownload(false);
-    }
-  };
 
   const handleSignOut = async () => {
     await supabase?.auth.signOut();
@@ -224,7 +168,7 @@ function DownloadLandingPage() {
                   size={16}
                   className="text-[var(--rigmd-success)]"
                 />
-                RigMD v0.1.0 for verified Windows users
+                RigMD v0.1.1 beta for verified Windows users
               </div>
 
               <h1 className="text-5xl font-bold tracking-tight text-white sm:text-6xl lg:text-7xl">
@@ -237,34 +181,21 @@ function DownloadLandingPage() {
               </p>
 
               <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
-                <motion.button
+                <motion.a
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={handleDownload}
-                  disabled={isPreparingDownload}
-                  className="inline-flex items-center justify-center gap-3 rounded-lg bg-[var(--rigmd-accent)] px-8 py-4 font-semibold text-slate-950 shadow-lg shadow-black/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                  href={RELEASE_DOWNLOAD_URL}
+                  className="inline-flex items-center justify-center gap-3 rounded-lg bg-[var(--rigmd-accent)] px-8 py-4 font-semibold text-slate-950 shadow-lg shadow-black/20 transition hover:brightness-110"
                 >
-                  {isPreparingDownload ? (
-                    <Loader2 size={20} className="animate-spin" />
-                  ) : (
-                    <Download size={20} />
-                  )}
-
-                  {isPreparingDownload
-                    ? 'Preparing secure link'
-                    : 'Download RigMD'}
-                </motion.button>
+                  <Download size={20} />
+                  Download RigMD
+                </motion.a>
 
                 <p className="text-sm text-[var(--rigmd-text-faint)]">
                   Windows 10 / 11 - 64-bit
                 </p>
               </div>
 
-              {downloadError && (
-                <p className="mt-5 max-w-xl rounded-lg border border-[var(--rigmd-danger)]/35 bg-[var(--rigmd-danger-soft)] px-4 py-3 text-sm text-[var(--rigmd-text-soft)]">
-                  {downloadError}
-                </p>
-              )}
             </motion.div>
           </div>
         </section>
@@ -326,7 +257,7 @@ function DownloadLandingPage() {
                   </h2>
 
                   <p className="mt-2 text-sm leading-6 text-[var(--rigmd-text-muted)]">
-                    RigMD v0.1.0 is an academic capstone release. Windows
+                    RigMD v0.1.1 beta is an academic capstone release. Windows
                     SmartScreen may display an unrecognized application warning
                     because the installer is not yet digitally signed.
                   </p>
@@ -350,12 +281,10 @@ function DownloadLandingPage() {
                     </code>
                   </div>
 
-                  {!hasSecureDownloadConfig && (
-                    <p className="mt-4 text-sm leading-6 text-[var(--rigmd-warning)]">
+                  <p className="mt-4 text-sm leading-6 text-[var(--rigmd-warning)]">
                     RigMD is currently provided as a verified-access capstone release. Only
                     install it from the official RigMD download page.
-                    </p>
-                  )}
+                  </p>
                 </div>
               </div>
             </motion.div>
