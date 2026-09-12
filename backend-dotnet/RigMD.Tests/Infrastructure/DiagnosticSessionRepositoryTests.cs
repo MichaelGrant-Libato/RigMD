@@ -580,6 +580,42 @@ public class DiagnosticSessionRepositoryTests
     }
 
     [Fact]
+    public async Task DeleteSessionAsync_RemovesSessionAnswersAndOutput()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db, "client");
+
+        var hardware = new HardwareProfileDto
+        {
+            Cpu = new CpuStatsDto { Name = "Intel i9" },
+            OsVersion = "Windows 11",
+            Ram = new MemoryStatsDto { TotalGb = 32 }
+        };
+
+        var sessionId = await repo.SaveDiagnosisAsync(
+            new DiagnosticSymptomPayload
+            {
+                SymptomType = "Slow system",
+                WarningSigns = "None"
+            },
+            hardware,
+            "Elevated Memory Usage",
+            "Monitor",
+            "Moderate",
+            "Memory use was high during the check.",
+            "client");
+
+        db.ChangeTracker.Clear();
+
+        var deleted = await repo.DeleteSessionAsync(sessionId);
+
+        Assert.True(deleted);
+        Assert.Empty(await db.DiagnosticSessions.ToListAsync());
+        Assert.Empty(await db.SessionAnswers.ToListAsync());
+        Assert.Empty(await db.DiagnosticOutputs.ToListAsync());
+    }
+
+    [Fact]
     public async Task GetRemediationHistoryAsync_ReturnsRunsAndAttempts()
     {
         await using var db = GetMemoryContext();

@@ -340,6 +340,93 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return session == null ? null : MapToDto(session);
     }
 
+    public async Task<bool> DeleteSessionAsync(Guid sessionId)
+    {
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions
+            .Include(s => s.Answers)
+            .Include(s => s.Output)
+            .Include(s => s.Profile)
+            .Where(s => s.Id == sessionId);
+
+        if (!string.IsNullOrEmpty(clientId))
+        {
+            query = query.Where(s =>
+                s.Profile.ClientId == clientId ||
+                s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        }
+
+        var session = await query.FirstOrDefaultAsync();
+        if (session == null)
+        {
+            return false;
+        }
+
+        await using var transaction =
+            await _db.Database.BeginTransactionAsync();
+
+        if (session.Output != null)
+        {
+            var outputId = session.Output.Id;
+
+            var remediationRunIds = await _db.RemediationRuns
+                .Where(r => r.DiagnosticOutputId == outputId)
+                .Select(r => r.Id)
+                .ToListAsync();
+
+            if (remediationRunIds.Count > 0)
+            {
+                var actionAttemptIds = await _db.ActionAttempts
+                    .Where(a => remediationRunIds.Contains(a.RemediationRunId))
+                    .Select(a => a.Id)
+                    .ToListAsync();
+
+                if (actionAttemptIds.Count > 0)
+                {
+                    var verifications = await _db.VerificationResults
+                        .Where(v => actionAttemptIds.Contains(v.ActionAttemptId))
+                        .ToListAsync();
+
+                    _db.VerificationResults.RemoveRange(verifications);
+
+                    var rollbacks = await _db.RollbackEvents
+                        .Where(r => actionAttemptIds.Contains(r.ActionAttemptId))
+                        .ToListAsync();
+
+                    _db.RollbackEvents.RemoveRange(rollbacks);
+                }
+
+                var pivots = await _db.PivotEvents
+                    .Where(p => remediationRunIds.Contains(p.RemediationRunId))
+                    .ToListAsync();
+
+                _db.PivotEvents.RemoveRange(pivots);
+
+                var attempts = await _db.ActionAttempts
+                    .Where(a => remediationRunIds.Contains(a.RemediationRunId))
+                    .ToListAsync();
+
+                _db.ActionAttempts.RemoveRange(attempts);
+
+                var runs = await _db.RemediationRuns
+                    .Where(r => remediationRunIds.Contains(r.Id))
+                    .ToListAsync();
+
+                _db.RemediationRuns.RemoveRange(runs);
+            }
+
+            _db.DiagnosticOutputs.Remove(session.Output);
+        }
+
+        _db.SessionAnswers.RemoveRange(session.Answers);
+        _db.DiagnosticSessions.Remove(session);
+
+        await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        return true;
+    }
+
     public async Task<DiagnosticOutput?> GetDiagnosticOutputAsync(Guid sessionId)
     {
         var clientId = GetCurrentClientId();

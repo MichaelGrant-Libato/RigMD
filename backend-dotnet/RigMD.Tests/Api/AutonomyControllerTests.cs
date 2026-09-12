@@ -15,14 +15,14 @@ namespace RigMD.Tests.Api;
 public class AutonomyControllerTests
 {
     [Fact]
-    public async Task DryRun_DoesNotPersistRemediationHistory()
+    public async Task Preview_DoesNotPersistRemediationHistory()
     {
         var sessionId = Guid.NewGuid();
         var diagnostic = CreateDiagnostic();
 
         var orchestrator = new FakeOrchestrator
         {
-            DryRunResult = new OrchestrationResult
+            PreviewResult = new OrchestrationResult
             {
                 Plan = CreatePlan(),
                 Execution = new ExecutionResult
@@ -54,12 +54,11 @@ public class AutonomyControllerTests
             diagnostic,
             remediationRepository);
 
-        var result = await controller.DryRun(
-            new AutonomyController.DryRunRequest
+        var result = await controller.Preview(
+            new AutonomyController.PreviewRequest
             {
                 SessionId = sessionId.ToString(),
-                DiagnosedCategory =
-                    diagnostic.DiagnosedCategory
+                DiagnosedCategory = diagnostic.DiagnosedCategory
             });
 
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -301,7 +300,7 @@ public class AutonomyControllerTests
     private sealed class FakeOrchestrator :
         IAutonomousOrchestrator
     {
-        public OrchestrationResult DryRunResult
+        public OrchestrationResult PreviewResult
         {
             get;
             set;
@@ -319,7 +318,7 @@ public class AutonomyControllerTests
                 HardwareProfileDto hardware)
         {
             return Task.FromResult(
-                DryRunResult);
+                PreviewResult);
         }
 
         public Task<OrchestrationResult>
@@ -447,6 +446,12 @@ public class AutonomyControllerTests
         public Task<DiagnosticSessionDto?>
             GetSessionAsync(
                 Guid sessionId)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> DeleteSessionAsync(
+            Guid sessionId)
         {
             throw new NotSupportedException();
         }

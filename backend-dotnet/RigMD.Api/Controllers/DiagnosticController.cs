@@ -559,6 +559,37 @@ public class DiagnosticController : ControllerBase
     }
 
     // =========================================================
+    // DELETE SINGLE SESSION
+    // =========================================================
+
+    [HttpDelete("sessions/{sessionId}")]
+    public async Task<IActionResult> DeleteSession(string sessionId)
+    {
+        try
+        {
+            if (!Guid.TryParse(sessionId, out var id))
+                return BadRequest(new { detail = "Invalid diagnosis session ID." });
+
+            var deleted = await _sessionRepository.DeleteSessionAsync(id);
+
+            if (!deleted)
+                return NotFound(new { detail = "Diagnosis record not found." });
+
+            return Ok(new
+            {
+                session_id = sessionId,
+                deleted = true
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to delete diagnosis session: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { error = "Diagnosis session could not be deleted." });
+        }
+    }
+
+    // =========================================================
     // CHECK RESOLUTION
     // =========================================================
 

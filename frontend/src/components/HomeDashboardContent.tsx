@@ -11,16 +11,48 @@ interface Props {
 function recommendedStep(action: string | undefined) {
   switch (action?.toLowerCase()) {
     case 'monitor':
-      return 'Continue observing the issue. Run another check if it becomes frequent or severe.';
+      return 'Nothing needs to be changed right now. Run another check if the problem happens again or gets worse.';
     case 'maintain':
-      return 'Review your latest result and follow the recommended maintenance steps.';
+      return 'Review the latest result and follow the simple care steps RigMD recommends.';
     case 'troubleshoot':
-      return 'Review your latest result and follow the suggested troubleshooting steps.';
+      return 'Review the latest result before trying any safe fix.';
     case 'escalate':
-      return 'Stop repeated troubleshooting attempts and consider professional inspection.';
+      return 'Avoid repeated fixes for now. Consider asking a technician to inspect the PC.';
     default:
       return 'Open your latest result to review the available recommendations.';
   }
+}
+
+function friendlyActionLabel(action: string | undefined) {
+  switch (action?.toLowerCase()) {
+    case 'monitor':
+      return 'Keep an eye on it';
+    case 'maintain':
+      return 'Do simple care';
+    case 'troubleshoot':
+      return 'Try a safe fix';
+    case 'escalate':
+      return 'Get help';
+    default:
+      return 'See full result';
+  }
+}
+
+function friendlyResultLabel(result: string | undefined) {
+  if (!result) return 'Result unavailable';
+  if (result.toLowerCase() === 'no active issue detected') return 'No active problem found';
+  return result;
+}
+
+function friendlyStatusLabel(status: string | undefined) {
+  if (!status) return null;
+
+  const normalized = status.replaceAll('_', ' ').toLowerCase();
+  if (normalized === 'open') return 'Saved for review';
+  if (normalized === 'resolved') return 'Marked fixed';
+  if (normalized === 'needs recheck') return 'Needs another check';
+
+  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export default function HomeDashboardContent({ stats, dashboard, setActivePage, onViewSession }: Props) {
@@ -89,7 +121,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
         </section>
         <section className="rigmd-card-surface flex min-w-0 flex-col rounded-lg border p-6">
           <h3 className="flex items-center gap-2 font-semibold text-white"><Server size={18} className="text-cyan-400" /> Your PC at a Glance</h3>
-          <p className="mt-2 text-sm text-slate-300">Hardware from your latest collected PC information</p>
+          <p className="mt-2 text-sm text-slate-300">The main PC details RigMD found during the latest scan.</p>
           <dl className="mt-4 grid gap-x-5 gap-y-4 sm:grid-cols-2">
             {hardwareDetails.map(([label, value]) => (
               <div key={label} className="min-w-0">
@@ -108,9 +140,9 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
             <div className="my-4 space-y-3">
               <p className="text-sm text-slate-300">{latest.display_date ?? 'Check date unavailable'}</p>
               <p className="break-words text-lg font-semibold text-white">{latest.symptom_type}</p>
-              <p className="break-words text-sm text-slate-300"><span className="text-slate-300">Probable cause: </span>{latest.diagnosed_category}</p>
-              <p className="text-sm text-slate-300"><span className="text-slate-300">Suggested action: </span>{latest.action_category || 'See full result'}</p>
-              {latest.resolution_status && <p className="text-sm text-slate-300">Status: {latest.resolution_status.replaceAll('_', ' ')}</p>}
+              <p className="break-words text-sm text-slate-300"><span className="text-slate-300">Result: </span>{friendlyResultLabel(latest.diagnosed_category)}</p>
+              <p className="text-sm text-slate-300"><span className="text-slate-300">What to do: </span>{friendlyActionLabel(latest.action_category)}</p>
+              {friendlyStatusLabel(latest.resolution_status) && <p className="text-sm text-slate-300">Check status: {friendlyStatusLabel(latest.resolution_status)}</p>}
             </div>
           ) : <p className="mt-4 text-sm leading-relaxed text-slate-300">No checks completed yet. Your results will appear here.</p>}
           {!latest && !unavailable && (
@@ -135,7 +167,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
                 </ul>
               )}
               {hasPatterns && <button type="button" onClick={() => setActivePage('recurringPatterns')} className={linkClass}>
-                {dashboard.recurring_issues_count} repeated problem{dashboard.recurring_issues_count === 1 ? '' : 's'} <ChevronRight size={16} />
+                {dashboard.recurring_issues_count} thing{dashboard.recurring_issues_count === 1 ? '' : 's'} appeared more than once <ChevronRight size={16} />
               </button>}
               {!hasPatterns && hasWarnings && <p className="text-sm text-slate-300">No repeated problems detected in saved checks.</p>}
               {!hasWarnings && !hasPatterns && (

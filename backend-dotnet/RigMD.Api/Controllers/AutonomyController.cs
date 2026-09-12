@@ -37,14 +37,14 @@ public class AutonomyController : ControllerBase
         _logger = logger;
     }
 
-    public class DryRunRequest
+    public class PreviewRequest
     {
         public string SessionId { get; set; } = string.Empty;
         public string DiagnosedCategory { get; set; } = string.Empty;
     }
 
-    [HttpPost("dry-run")]
-    public async Task<IActionResult> DryRun([FromBody] DryRunRequest request)
+    [HttpPost("preview")]
+    public async Task<IActionResult> Preview([FromBody] PreviewRequest request)
     {
         if (!Guid.TryParse(request.SessionId, out var sessionId))
         {
@@ -65,22 +65,18 @@ public class AutonomyController : ControllerBase
             });
         }
 
-        var mockHardware = new HardwareProfileDto
-        {
-            OsVersion = "Windows 11"
-        };
+        var hardware = _profileService.GetLiveSystemProfile();
 
         var result =
             await _orchestrator.RunDryRunCycleAsync(
                 diagnostic,
-                mockHardware);
+                hardware);
 
         if (result.Plan != null)
         {
             result.Plan.SessionId = sessionId.ToString();
         }
 
-        // Dry-run is deliberately not persisted as remediation history.
         return Ok(result);
     }
 

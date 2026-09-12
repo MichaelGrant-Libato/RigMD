@@ -14,12 +14,14 @@ import {
   FileText,
   RefreshCw,
   Search,
+  Trash2,
   Zap,
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
-import { apiFetch } from '../lib/api';
+import { apiDelete, apiFetch } from '../lib/api';
 import type { SessionSummary } from '../types/rigmd';
 
 const filters = [
@@ -224,11 +226,15 @@ function FilterButton({
 function SessionRow({
   session,
   onViewSession,
+  onDeleteSession,
   selected,
+  deleting,
 }: {
   session: SessionSummary;
   onViewSession?: (sessionId: string) => void;
+  onDeleteSession?: (session: SessionSummary) => void;
   selected?: boolean;
+  deleting?: boolean;
 }) {
   const action = normalizeAction(
     session.action_category || ''
@@ -257,7 +263,7 @@ function SessionRow({
       whileHover={canOpen ? { y: -1 } : undefined}
       transition={{ duration: 0.2 }}
       onClick={canOpen ? openSession : undefined}
-      className={`grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] items-center border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${
+      className={`grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] items-center border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${
         canOpen ? 'cursor-pointer' : ''
       } ${
         selected
@@ -323,7 +329,7 @@ function SessionRow({
         </span>
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-2">
         <motion.button
           type="button"
           disabled={!canOpen}
@@ -337,6 +343,21 @@ function SessionRow({
         >
           View
         </motion.button>
+
+        <motion.button
+          type="button"
+          disabled={deleting}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDeleteSession?.(session);
+          }}
+          whileTap={buttonTap}
+          className="inline-flex items-center justify-center rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] font-bold uppercase text-red-300 transition hover:border-red-300/55 hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-50"
+          title="Delete this saved check"
+        >
+          <Trash2 size={13} />
+          <span className="sr-only">Delete</span>
+        </motion.button>
       </div>
     </motion.div>
   );
@@ -344,7 +365,7 @@ function SessionRow({
 
 function TableRowSkeleton() {
   return (
-    <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0">
+    <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0">
       {Array.from({ length: 7 }).map((_, index) => (
         <div key={index} className="flex justify-center">
           <div className="h-4 w-24 animate-pulse rounded bg-[var(--rigmd-card-soft)]" />
@@ -377,6 +398,12 @@ export default function DiagnosticHistoryView({
 
   const [visibleCount, setVisibleCount] =
     useState(DEFAULT_VISIBLE_SESSIONS);
+
+  const [deletingSessionId, setDeletingSessionId] =
+    useState<string | null>(null);
+
+  const [sessionPendingDelete, setSessionPendingDelete] =
+    useState<SessionSummary | null>(null);
 
   const fetchSessions =
     useCallback(async () => {
@@ -519,6 +546,27 @@ export default function DiagnosticHistoryView({
   const resetFilters = () => {
     setFilter('All Sessions');
     setSearch('');
+  };
+
+  const deleteSession = async (session: SessionSummary) => {
+    if (!session.session_id || deletingSessionId) {
+      return;
+    }
+
+    setDeletingSessionId(session.session_id);
+    setError(null);
+
+    try {
+      await apiDelete(`/api/diagnosis/sessions/${session.session_id}`);
+      setSessions((current) =>
+        current.filter((item) => item.session_id !== session.session_id)
+      );
+      setSessionPendingDelete(null);
+    } catch {
+      setError('Could not delete this saved check. Please try again.');
+    } finally {
+      setDeletingSessionId(null);
+    }
   };
 
   const recurringCount =
@@ -703,7 +751,7 @@ export default function DiagnosticHistoryView({
 
             <div className="overflow-x-auto">
               <div className="min-w-[1380px]">
-                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_120px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
                   <div>
                     Date
                   </div>
@@ -729,7 +777,7 @@ export default function DiagnosticHistoryView({
                   </div>
 
                   <div className="text-center">
-                    Details
+                    Actions
                   </div>
                 </div>
 
@@ -819,6 +867,13 @@ export default function DiagnosticHistoryView({
                         session={
                           session
                         }
+                        onDeleteSession={
+                          setSessionPendingDelete
+                        }
+                        deleting={
+                          deletingSessionId ===
+                          session.session_id
+                        }
                         onViewSession={
                           onViewSession
                         }
@@ -865,6 +920,45 @@ export default function DiagnosticHistoryView({
           </section>
         </div>
       </motion.div>
+
+      <DeleteConfirmationDialog
+        open={sessionPendingDelete != null}
+        title="Delete this saved check?"
+        description="This removes one saved result from Past Checks and removes it from repeated-problem counts."
+        confirmLabel="Delete saved check"
+        isWorking={deletingSessionId === sessionPendingDelete?.session_id}
+        onCancel={() => {
+          if (!deletingSessionId) {
+            setSessionPendingDelete(null);
+          }
+        }}
+        onConfirm={() => {
+          if (sessionPendingDelete) {
+            void deleteSession(sessionPendingDelete);
+          }
+        }}
+        details={
+          sessionPendingDelete ? (
+            <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                Saved check
+              </p>
+              <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="text-slate-500">Date</p>
+                  <p className="font-bold text-white">{formatSessionDate(sessionPendingDelete)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">What RigMD found</p>
+                  <p className="font-bold text-white">
+                    {sessionPendingDelete.probable_cause || 'No active issue detected'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null
+        }
+      />
     </>
   );
 }

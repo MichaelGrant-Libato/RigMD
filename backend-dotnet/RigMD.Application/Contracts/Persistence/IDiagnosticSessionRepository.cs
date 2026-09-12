@@ -39,6 +39,9 @@ public interface IDiagnosticSessionRepository
     /// <summary>Returns a single session by ID, or null if not found.</summary>
     Task<DiagnosticSessionDto?> GetSessionAsync(Guid sessionId);
 
+    /// <summary>Deletes a session owned by the current client, including related diagnosis and remediation history.</summary>
+    Task<bool> DeleteSessionAsync(Guid sessionId);
+
     /// <summary>
     /// Returns the persisted diagnostic output for a session owned by the current client,
     /// or null when the session does not exist or is not accessible.

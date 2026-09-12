@@ -150,14 +150,13 @@ export async function stopRemediationStream() {
     remediationHubConnection = null;
   }
 }
-// ------------------------------------
 
-export async function runAutonomyDryRun({
+export async function runAutonomyPreview({
   sessionId,
   diagnosedCategory,
 }: AutonomyRequest) {
   const response = await apiPost<AutonomyResult>(
-    '/api/autonomy/dry-run',
+    '/api/autonomy/preview',
     {
       sessionId,
       diagnosedCategory,

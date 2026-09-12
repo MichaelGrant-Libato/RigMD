@@ -78,7 +78,7 @@ function getToneClasses(tone: FriendlyInfoCardProps['tone'] = 'neutral') {
 
 function usageLabel(value: number | null | undefined) {
   return typeof value === 'number' && Number.isFinite(value)
-    ? `${value.toFixed(1)}% used at last scan`
+    ? `${value.toFixed(1)}% in use during last scan`
     : 'Usage unavailable';
 }
 
@@ -193,7 +193,7 @@ export default function SystemProfileView({
                 className="flex items-center gap-2 rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-[#041014] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={16} className={isRefreshingHardware ? 'animate-spin' : ''} />
-                {isRefreshingHardware ? 'Reloading...' : 'Reload Saved Readings'}
+                {isRefreshingHardware ? 'Refreshing...' : 'Refresh PC Info'}
               </motion.button>
 
               <motion.button
@@ -205,7 +205,7 @@ export default function SystemProfileView({
                 className="flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Database size={16} className={isSavingProfile ? 'animate-spin' : ''} />
-                {isSavingProfile ? 'Saving...' : 'Save PC Info'}
+                {isSavingProfile ? 'Saving...' : 'Save Current PC Info'}
               </motion.button>
               </div>
             </div>
@@ -250,7 +250,7 @@ export default function SystemProfileView({
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
                     helper={usageLabel(stats.cpu.usage_percent)}
                     tone={getUsageTone(stats.cpu.usage_percent)}
-                    warningLabel={stats.cpu.usage_percent >= 90 ? 'Very high processor usage' : 'High processor usage'}
+                    warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                   />
 
                   <FriendlyInfoCard
@@ -259,7 +259,7 @@ export default function SystemProfileView({
                     value={`${stats.ram.total_gb} GB total`}
                     helper={usageLabel(stats.ram.usage_percent)}
                     tone={getUsageTone(stats.ram.usage_percent)}
-                    warningLabel={stats.ram.usage_percent >= 90 ? 'Very high memory usage' : 'High memory usage'}
+                    warningLabel={stats.ram.usage_percent >= 90 ? 'Memory was very high' : 'Memory was high'}
                   />
 
                   <FriendlyInfoCard
@@ -268,7 +268,7 @@ export default function SystemProfileView({
                     value={`${formatStorageSize(stats.disk.total_gb)} ${cleanValue(stats.storage_type)}`}
                     helper={usageLabel(stats.disk.usage_percent)}
                     tone={getUsageTone(stats.disk.usage_percent)}
-                    warningLabel={stats.disk.usage_percent >= 90 ? 'Almost full' : 'Space running low'}
+                    warningLabel={stats.disk.usage_percent >= 90 ? 'Storage is almost full' : 'Storage is getting full'}
                   />
 
                   <FriendlyInfoCard

@@ -87,6 +87,22 @@ interface Props {
   onBack: () => void;
 }
 
+function shouldShowSafeActions(session: SessionDetail) {
+  const actionCategory =
+    session.action_category?.trim().toLowerCase();
+
+  if (!actionCategory) {
+    return false;
+  }
+
+  return [
+    'maintain',
+    'troubleshoot',
+    'repair',
+    'fix',
+  ].includes(actionCategory);
+}
+
 function getResolutionLabel(
   status?: string,
 ) {
@@ -287,6 +303,9 @@ export default function DiagnosticSessionDetailView({
             ?.diagnosed_category &&
           !isNoActiveIssue(
             loadedSession.diagnosed_category,
+          ) &&
+          shouldShowSafeActions(
+            loadedSession,
           )
         ) {
           const actionsResponse =
@@ -434,6 +453,13 @@ export default function DiagnosticSessionDetailView({
       }
     };
 
+  const showSafeActions =
+    session
+      ? shouldShowSafeActions(
+          session,
+        )
+      : false;
+
   useEffect(() => {
     fetchSession();
   }, [fetchSession]);
@@ -542,9 +568,7 @@ export default function DiagnosticSessionDetailView({
                       }
                     </span>
 
-                    {!isNoActiveIssue(
-                      session.diagnosed_category,
-                    ) && (
+                    {showSafeActions && (
                       <span
                         className={`rounded border px-3 py-1 text-xs font-bold uppercase ${getResolutionStyle(
                           session.resolution_status,
@@ -704,96 +728,98 @@ export default function DiagnosticSessionDetailView({
                 </motion.section>
               ) : (
                 <>
-                  <motion.section
-                    variants={
-                      cardFadeUp
-                    }
-                    initial="hidden"
-                    animate="visible"
-                    transition={
-                      cardTransition
-                    }
-                    className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
-                  >
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                          Resolution Status
-                        </h3>
+                  {showSafeActions && (
+                    <motion.section
+                      variants={
+                        cardFadeUp
+                      }
+                      initial="hidden"
+                      animate="visible"
+                      transition={
+                        cardTransition
+                      }
+                      className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+                    >
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                            Resolution Status
+                          </h3>
 
-                        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                          {session.resolution_summary ||
-                            'Use a safe action if needed, then check whether the live issue is fixed.'}
-                        </p>
+                          <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                            {session.resolution_summary ||
+                              'Use a safe action if needed, then check whether the live issue is fixed.'}
+                          </p>
+                        </div>
+
+                        <motion.button
+                          type="button"
+                          onClick={
+                            checkResolution
+                          }
+                          disabled={
+                            checking
+                          }
+                          whileTap={
+                            buttonTap
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
+                        >
+                          <RefreshCw
+                            size={16}
+                            className={
+                              checking
+                                ? 'animate-spin'
+                                : ''
+                            }
+                          />
+
+                          {checking
+                            ? 'Checking...'
+                            : 'Check if Fixed'}
+                        </motion.button>
                       </div>
 
-                      <motion.button
-                        type="button"
-                        onClick={
-                          checkResolution
-                        }
-                        disabled={
-                          checking
-                        }
-                        whileTap={
-                          buttonTap
-                        }
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
-                      >
-                        <RefreshCw
-                          size={16}
-                          className={
-                            checking
-                              ? 'animate-spin'
-                              : ''
-                          }
-                        />
-
-                        {checking
-                          ? 'Checking...'
-                          : 'Check if Fixed'}
-                      </motion.button>
-                    </div>
-
-                    {session.resolution_proof &&
-                      session
-                        .resolution_proof
-                        .length >
-                        0 && (
-                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                          {session.resolution_proof.map(
-                            (
-                              item,
-                            ) => (
-                              <div
-                                key={
-                                  item.label
-                                }
-                                className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4"
-                              >
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                                  {
+                      {session.resolution_proof &&
+                        session
+                          .resolution_proof
+                          .length >
+                          0 && (
+                          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                            {session.resolution_proof.map(
+                              (
+                                item,
+                              ) => (
+                                <div
+                                  key={
                                     item.label
                                   }
-                                </p>
+                                  className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4"
+                                >
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    {
+                                      item.label
+                                    }
+                                  </p>
 
-                                <p className="mt-1 text-sm font-bold text-white">
-                                  {
-                                    item.value
-                                  }
-                                </p>
+                                  <p className="mt-1 text-sm font-bold text-white">
+                                    {
+                                      item.value
+                                    }
+                                  </p>
 
-                                <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                                  {
-                                    item.meaning
-                                  }
-                                </p>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      )}
-                  </motion.section>
+                                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                                    {
+                                      item.meaning
+                                    }
+                                  </p>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        )}
+                    </motion.section>
+                  )}
 
                   {session.remediation_history &&
                     session
@@ -920,109 +946,144 @@ export default function DiagnosticSessionDetailView({
                       </motion.section>
                     )}
 
-                  <motion.section
-                    variants={
-                      cardFadeUp
-                    }
-                    initial="hidden"
-                    animate="visible"
-                    transition={
-                      cardTransition
-                    }
-                    className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
-                  >
-                    <div className="flex items-start gap-3">
-                      <ShieldCheck
-                        size={20}
-                        className="mt-0.5 text-cyan-400"
-                      />
+                  {showSafeActions ? (
+                    <motion.section
+                      variants={
+                        cardFadeUp
+                      }
+                      initial="hidden"
+                      animate="visible"
+                      transition={
+                        cardTransition
+                      }
+                      className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+                    >
+                      <div className="flex items-start gap-3">
+                        <ShieldCheck
+                          size={20}
+                          className="mt-0.5 text-cyan-400"
+                        />
 
-                      <div>
-                        <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                          Safe Actions Available
-                        </h3>
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                            Safe Actions Available
+                          </h3>
 
-                        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                          Preview the backend autonomy plan, run an approved action if needed, then use Check if Fixed to prove whether the issue is resolved.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      <AutonomyRemediationPanel
-                        diagnosedCategory={
-                          session.diagnosed_category
-                        }
-                        onExecutionComplete={
-                          handleAutonomyExecutionComplete
-                        }
-                        sessionId={
-                          sessionId
-                        }
-                      />
-
-                      {actions.length ===
-                      0 ? (
-                        <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-500">
-                          No safe action is available for this saved diagnosis.
+                          <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                            RigMD will show you what it plans to change before anything runs. You stay in control.
+                          </p>
                         </div>
-                      ) : (
-                        <motion.div
-                          variants={
-                            staggerContainer
+                      </div>
+
+                      <div className="mt-5 space-y-3">
+                        <AutonomyRemediationPanel
+                          diagnosedCategory={
+                            session.diagnosed_category
                           }
-                          initial="hidden"
-                          animate="visible"
-                          className="space-y-3"
-                        >
-                          {actions.map(
-                            (
-                              action,
-                            ) => (
-                              <motion.div
-                                key={
-                                  action.id
-                                }
-                                variants={
-                                  cardFadeUp
-                                }
-                                transition={
-                                  cardTransition
-                                }
-                                className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4"
-                              >
-                                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                                  <div>
-                                    <h4 className="text-sm font-bold text-cyan-400">
-                                      {
-                                        action.label
-                                      }
-                                    </h4>
+                          onExecutionComplete={
+                            handleAutonomyExecutionComplete
+                          }
+                          sessionId={
+                            sessionId
+                          }
+                        />
 
-                                    <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                                      {
-                                        action.description
-                                      }
-                                    </p>
+                        {actions.length ===
+                        0 ? (
+                          <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-500">
+                            No safe action is available for this saved diagnosis.
+                          </div>
+                        ) : (
+                          <motion.div
+                            variants={
+                              staggerContainer
+                            }
+                            initial="hidden"
+                            animate="visible"
+                            className="space-y-3"
+                          >
+                            {actions.map(
+                              (
+                                action,
+                              ) => (
+                                <motion.div
+                                  key={
+                                    action.id
+                                  }
+                                  variants={
+                                    cardFadeUp
+                                  }
+                                  transition={
+                                    cardTransition
+                                  }
+                                  className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4"
+                                >
+                                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                      <h4 className="text-sm font-bold text-cyan-400">
+                                        {
+                                          action.label
+                                        }
+                                      </h4>
 
-                                    <p className="mt-1 text-[11px] text-slate-500">
-                                      {
-                                        action.risk
-                                      }
-                                    </p>
+                                      <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                                        {
+                                          action.description
+                                        }
+                                      </p>
+
+                                      <p className="mt-1 text-[11px] text-slate-500">
+                                        {
+                                          action.risk
+                                        }
+                                      </p>
+                                    </div>
+
+                                    <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                                      Backend candidate
+                                    </span>
                                   </div>
+                                </motion.div>
+                              ),
+                            )}
+                          </motion.div>
+                        )}
+                      </div>
+                    </motion.section>
+                  ) : (
+                    <motion.section
+                      variants={
+                        cardFadeUp
+                      }
+                      initial="hidden"
+                      animate="visible"
+                      transition={
+                        cardTransition
+                      }
+                      className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.045] p-6"
+                    >
+                      <div className="flex items-start gap-3">
+                        <CheckCircle2
+                          size={22}
+                          className="mt-0.5 shrink-0 text-emerald-300"
+                        />
 
-                                  <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-                                    Backend candidate
-                                  </span>
-                                </div>
-                              </motion.div>
-                            ),
-                          )}
-                        </motion.div>
-                      )}
-                    </div>
-                  </motion.section>
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-200">
+                            No action needed right now
+                          </h3>
+
+                          <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                            RigMD found something to watch, but it does not recommend changing anything on this PC right now.
+                          </p>
+
+                          <p className="mt-3 text-sm leading-relaxed text-slate-400">
+                            Keep using the computer normally. Run another check if the problem gets worse or happens again.
+                          </p>
+                        </div>
+                      </div>
+                    </motion.section>
+                  )}
                 </>
               )}
             </>

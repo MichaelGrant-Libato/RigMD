@@ -61,6 +61,10 @@ import type {
   AutonomyResult,
 } from '../services/autonomyService';
 
+interface NewDiagnosisViewProps {
+  onDiagnosisComplete?: (sessionId: string) => void;
+}
+
 interface AgentCommandResponse {
   id: string;
   agentId: string;
@@ -762,7 +766,7 @@ function getActionPreview(
   );
 }
 
-export default function NewDiagnosisView() {
+export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisViewProps) {
   const [
     diagnosisMode,
     setDiagnosisMode,
@@ -1346,6 +1350,10 @@ export default function NewDiagnosisView() {
       setDiagnosisStage(
         'completed',
       );
+
+      if (automaticReport.session_id) {
+        onDiagnosisComplete?.(automaticReport.session_id);
+      }
 
       } catch (err: any) {
         console.error(

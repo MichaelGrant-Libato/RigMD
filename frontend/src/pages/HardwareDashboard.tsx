@@ -14,6 +14,7 @@ import WarningSignsView from './WarningSignsView';
 import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
 import HelpScopeView from './HelpScopeView';
 import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
+import ShareReportView from './ShareReportView';
 
 import {
   cardTransition,
@@ -591,15 +592,23 @@ export default function HardwareDashboard() {
 
       case 'warningSigns':
         return <WarningSignsView />;
-
       case 'newDiagnosis':
-        return <NewDiagnosisView />; // TARGET SWAP: Safely maps the new modular view file component
+        return (
+          <NewDiagnosisView
+            onDiagnosisComplete={(sessionId) => {
+              setSelectedSessionId(sessionId);
+              setActivePage('diagnosticHistory');
+            }}
+          />
+        );
 
       case 'reports':
         return (
-          <PlaceholderView
-            title="Reports"
-            subtitle="Technician-ready diagnostic report output"
+          <ShareReportView
+            stats={stats}
+            dashboard={dashboard}
+            hardwareUpdatedAt={hardwareUpdatedAt}
+            onStartNewDiagnosis={() => setActivePage('newDiagnosis')}
           />
         );
 

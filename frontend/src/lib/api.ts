@@ -76,3 +76,16 @@ export async function apiPost<T = unknown>(
     },
   });
 }
+
+export async function apiDelete<T = unknown>(
+  path: string,
+  config: AxiosRequestConfig = {},
+): Promise<AxiosResponse<T>> {
+  return axios.delete<T>(`${API_BASE_URL}${path}`, {
+    ...config,
+    headers: {
+      ...clientHeaders(),
+      ...config.headers,
+    },
+  });
+}
