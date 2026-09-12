@@ -22,9 +22,22 @@ public class AgentRepository : IAgentRepository
         string agentVersion,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr))
+        {
+            return new AgentDeviceRecord
+            {
+                AgentId = agentId,
+                ClientId = clientId,
+                DeviceName = deviceName,
+                AgentVersion = agentVersion,
+                RegisteredAt = DateTimeOffset.UtcNow,
+                LastSeen = DateTimeOffset.UtcNow
+            };
+        }
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -100,9 +113,22 @@ public class AgentRepository : IAgentRepository
         string agentVersion,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr))
+        {
+            return new AgentDeviceRecord
+            {
+                AgentId = agentId,
+                ClientId = "local",
+                DeviceName = deviceName,
+                AgentVersion = agentVersion,
+                RegisteredAt = DateTimeOffset.UtcNow,
+                LastSeen = DateTimeOffset.UtcNow
+            };
+        }
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -160,9 +186,11 @@ public class AgentRepository : IAgentRepository
         string hardwareJson,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -219,9 +247,22 @@ public class AgentRepository : IAgentRepository
         string agentId,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr))
+        {
+            return new AgentDeviceRecord
+            {
+                AgentId = agentId,
+                ClientId = "local",
+                DeviceName = "Local Agent",
+                AgentVersion = "1.0",
+                RegisteredAt = DateTimeOffset.UtcNow,
+                LastSeen = DateTimeOffset.UtcNow
+            };
+        }
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -265,9 +306,11 @@ public class AgentRepository : IAgentRepository
         string agentId,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -312,9 +355,11 @@ public class AgentRepository : IAgentRepository
         Guid commandId,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -364,9 +409,21 @@ public class AgentRepository : IAgentRepository
         string commandType,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr))
+        {
+            return new AgentCommandRecord
+            {
+                Id = Guid.NewGuid(),
+                AgentId = agentId,
+                CommandType = commandType,
+                Status = "pending",
+                RequestedAt = DateTimeOffset.UtcNow
+            };
+        }
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -431,9 +488,11 @@ public class AgentRepository : IAgentRepository
         string agentId,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -525,9 +584,11 @@ public class AgentRepository : IAgentRepository
         string? resultJson,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -593,9 +654,11 @@ public class AgentRepository : IAgentRepository
         string errorMessage,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -657,9 +720,11 @@ public class AgentRepository : IAgentRepository
         Guid commandId,
         CancellationToken cancellationToken = default)
     {
+        var connStr = GetConnectionString();
+        if (string.IsNullOrEmpty(connStr)) return null;
+
         await using var connection =
-            new NpgsqlConnection(
-                GetConnectionString());
+            new NpgsqlConnection(connStr);
 
         await connection.OpenAsync(
             cancellationToken);
@@ -707,7 +772,7 @@ public class AgentRepository : IAgentRepository
         return ReadCommand(reader);
     }
 
-    private string GetConnectionString()
+    private string? GetConnectionString()
     {
         var databaseUrl =
             _configuration["DATABASE_URL"] ??
@@ -715,10 +780,9 @@ public class AgentRepository : IAgentRepository
                 "DATABASE_URL");
 
         if (string.IsNullOrWhiteSpace(
-                databaseUrl))
+                databaseUrl) || databaseUrl.Contains("[YOUR-PASSWORD]"))
         {
-            throw new InvalidOperationException(
-                "DATABASE_URL is not configured.");
+            return null;
         }
 
         var uri =
