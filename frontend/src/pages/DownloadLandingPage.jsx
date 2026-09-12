@@ -15,11 +15,8 @@ import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabase';
 
-const DEFAULT_RELEASE_DOWNLOAD_URL =
-  'https://github.com/MichaelGrant-Libato/RigMD/releases/download/v0.1.1-beta/RigMD-Setup-v0.1.1-beta.exe';
 const RELEASE_DOWNLOAD_URL =
-  import.meta.env.VITE_RIGMD_DOWNLOAD_URL?.trim() ||
-  DEFAULT_RELEASE_DOWNLOAD_URL;
+  'https://github.com/MichaelGrant-Libato/RigMD/releases/download/v0.1.1-beta/RigMD-Setup-v0.1.1-beta.exe';
 
 const INSTALLER_SHA256 =
   'd9d9db1026c9247e20f8f6abe75ffd2eb712a805705d419fdb84cd3589245c8a';
