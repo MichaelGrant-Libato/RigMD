@@ -1,16 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
-  CheckCircle2,
   Cpu,
   Database,
   HardDrive,
-  Info,
   MemoryStick,
   Monitor,
   RefreshCw,
-  ShieldCheck,
   Terminal,
   type LucideIcon,
 } from 'lucide-react';
@@ -32,13 +29,14 @@ interface FriendlyInfoCardProps {
   icon: LucideIcon;
   title: string;
   value: string;
-  helper: string;
+  helper?: string;
+  warningLabel?: string;
   tone?: 'good' | 'watch' | 'danger' | 'neutral';
 }
 
 function cleanValue(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === '') return 'Still checking...';
-  if (String(value).toLowerCase() === 'unknown') return 'Still checking...';
+  if (value === null || value === undefined || value === '') return 'Not available';
+  if (String(value).toLowerCase() === 'unknown') return 'Not available';
   return String(value);
 }
 
@@ -60,12 +58,12 @@ function formatLastUpdated(value: Date | null) {
 }
 
 function formatStorageSize(sizeGb: number | null | undefined) {
-  if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Still checking...';
+  if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Not available';
   return sizeGb >= 1000 ? `${(sizeGb / 1024).toFixed(1)} TB` : `${sizeGb} GB`;
 }
 
 function getUsageTone(value: number | null | undefined) {
-  if (typeof value !== 'number') return 'neutral';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'neutral';
   if (value >= 90) return 'danger';
   if (value >= 75) return 'watch';
   return 'good';
@@ -78,118 +76,40 @@ function getToneClasses(tone: FriendlyInfoCardProps['tone'] = 'neutral') {
   return 'border-cyan-400/25 bg-cyan-400/10 text-cyan-300';
 }
 
-function getPlainUsageLabel(kind: 'processor' | 'memory' | 'storage', value: number | null | undefined) {
-  if (typeof value !== 'number') return 'RigMD is still checking this part.';
-
-  if (kind === 'storage') {
-    if (value >= 90) return 'Storage is almost full. This can slow down saving, loading, and updates.';
-    if (value >= 75) return 'Storage is getting full. It is okay for now, but worth watching.';
-    return 'Storage space looks okay.';
-  }
-
-  if (kind === 'memory') {
-    if (value >= 90) return 'Memory is very busy. Closing unused apps may help.';
-    if (value >= 75) return 'Memory is somewhat busy, but still usable.';
-    return 'Memory use looks normal.';
-  }
-
-  if (value >= 90) return 'The processor is working very hard right now.';
-  if (value >= 75) return 'The processor is busy, but not necessarily a problem.';
-  return 'Processor activity looks normal.';
+function usageLabel(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toFixed(1)}% used at last scan`
+    : 'Usage unavailable';
 }
 
-function FriendlyInfoCard({ icon: Icon, title, value, helper, tone = 'neutral' }: FriendlyInfoCardProps) {
+function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone = 'neutral' }: FriendlyInfoCardProps) {
   return (
     <motion.section
       variants={cardFadeUp}
       transition={cardTransition}
-      className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-5"
+      className="flex flex-col rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-5"
     >
       <div className="mb-4 flex items-start gap-4">
-        <div className={`rounded-lg border p-3 ${getToneClasses(tone)}`}>
+        <div className={`shrink-0 rounded-lg border p-3 ${getToneClasses()}`}>
           <Icon size={22} />
         </div>
 
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-400">{title}</p>
-          <p className="mt-1 truncate text-lg font-bold text-white">{value}</p>
+          <p className="mt-1 break-words text-lg font-bold text-white">{value}</p>
         </div>
       </div>
 
-      <p className="text-sm leading-relaxed text-slate-400">{helper}</p>
-    </motion.section>
-  );
-}
-
-function SimpleStatusPanel({
-  stats,
-  hardwareUpdatedAt,
-}: {
-  stats: HardwareStats | null;
-  hardwareUpdatedAt: Date | null;
-}) {
-  const detectedItems = useMemo(
-    () => [
-      stats?.cpu?.name,
-      stats?.ram?.total_gb,
-      stats?.disk?.total_gb,
-      stats?.gpu?.name,
-      stats?.os_version,
-      stats?.gpu?.driver,
-      stats?.system_age,
-    ],
-    [stats]
-  );
-
-  const detectedCount = detectedItems.filter(isDetected).length;
-  const totalCount = detectedItems.length;
-  const percent = Math.round((detectedCount / totalCount) * 100);
-
-  const headline =
-    percent >= 90
-      ? 'RigMD found the important PC details'
-      : percent >= 60
-        ? 'RigMD found most PC details'
-        : 'RigMD is still checking this PC';
-
-  return (
-    <motion.section
-      variants={cardFadeUp}
-      initial="hidden"
-      animate="visible"
-      transition={cardTransition}
-      className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6"
-    >
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-2 text-cyan-300">
-            <ShieldCheck size={18} />
-            <span className="text-xs font-bold uppercase tracking-[0.18em]">My PC Info</span>
-          </div>
-
-          <h3 className="text-2xl font-bold text-white">{headline}</h3>
-
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
-            This page shows the PC parts that matter most in simple words. The deeper technical details are still saved for diagnosis, but they do not need to be front and center.
-          </p>
+      {helper && (
+        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-sm leading-relaxed text-slate-300">{helper}</p>
+          {warningLabel && (tone === 'watch' || tone === 'danger') && (
+            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getToneClasses(tone)}`}>
+              {warningLabel}
+            </span>
+          )}
         </div>
-
-        <div className="shrink-0 rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-5 py-4 text-center">
-          <p className="text-3xl font-bold text-white">{percent}%</p>
-          <p className="text-xs font-semibold text-cyan-300">{detectedCount}/{totalCount} details found</p>
-        </div>
-      </div>
-
-      <div className="mt-5 h-3 w-full overflow-hidden rounded-full bg-[var(--rigmd-card-soft)]">
-        <motion.div
-          className="h-full rounded-full bg-cyan-400"
-          initial={{ width: 0 }}
-          animate={{ width: `${percent}%` }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-        />
-      </div>
-
-      <p className="mt-4 text-xs text-slate-500">Last updated: {formatLastUpdated(hardwareUpdatedAt)}</p>
+      )}
     </motion.section>
   );
 }
@@ -253,28 +173,32 @@ export default function SystemProfileView({
         className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
       >
         <div className="w-full space-y-6">
-          <SimpleStatusPanel stats={stats} hardwareUpdatedAt={hardwareUpdatedAt} />
-
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <CheckCircle2 size={16} className="text-emerald-400" />
-              <span>RigMD checks this automatically.</span>
+          <section className="rounded-xl border border-[var(--rigmd-border)] bg-[#101821] p-6">
+            <div className="min-w-0">
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">My PC Info</p>
+              <h3 className="text-2xl font-bold text-white">Your PC details, at a glance</h3>
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">Review your hardware and Windows information. Expand Technical details for more.</p>
+              {stats && [stats.cpu.name, stats.ram.total_gb, stats.disk.total_gb, stats.gpu.name, stats.os_version].some(value => !isDetected(value)) && <p className="mt-2 text-sm text-amber-300">Some hardware details are unavailable.</p>}
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="mt-5 flex flex-col gap-4 border-t border-slate-700/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+              <p className="text-sm text-slate-300">Last collected: {formatLastUpdated(hardwareUpdatedAt)}</p>
+              <div className="flex flex-wrap gap-3">
               <motion.button
                 type="button"
+                title="Retrieve the latest saved readings without starting a new hardware scan"
                 onClick={onRefreshHardware}
                 disabled={isRefreshingHardware}
                 whileTap={buttonTap}
                 className="flex items-center gap-2 rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-[#041014] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={16} className={isRefreshingHardware ? 'animate-spin' : ''} />
-                Check Again
+                {isRefreshingHardware ? 'Reloading...' : 'Reload Saved Readings'}
               </motion.button>
 
               <motion.button
                 type="button"
+                title="Store a hardware profile for your records"
                 onClick={handleSaveProfile}
                 disabled={isSavingProfile || !stats}
                 whileTap={buttonTap}
@@ -283,8 +207,9 @@ export default function SystemProfileView({
                 <Database size={16} className={isSavingProfile ? 'animate-spin' : ''} />
                 {isSavingProfile ? 'Saving...' : 'Save PC Info'}
               </motion.button>
+              </div>
             </div>
-          </div>
+          </section>
 
           {error && (
             <div className="rounded-lg border border-red-500/25 bg-red-500/10 p-4 text-sm font-medium text-red-300">
@@ -297,9 +222,9 @@ export default function SystemProfileView({
               <div className="flex items-start gap-3">
                 <Activity className="mt-0.5 animate-pulse text-cyan-300" size={18} />
                 <div>
-                  <h3 className="font-semibold text-white">Checking your PC...</h3>
+                  <h3 className="font-semibold text-white">PC information unavailable</h3>
                   <p className="mt-1 text-sm text-slate-400">
-                    This usually takes a few seconds.
+                    Run a hardware scan to collect PC information, then reload the saved readings.
                   </p>
                 </div>
               </div>
@@ -317,45 +242,46 @@ export default function SystemProfileView({
                   initial="hidden"
                   animate="visible"
                   transition={cardTransition}
-                  className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3"
+                  className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
                 >
                   <FriendlyInfoCard
                     icon={Cpu}
                     title="Processor"
-                    value={cleanValue(stats.cpu.name)}
-                    helper={getPlainUsageLabel('processor', stats.cpu.usage_percent)}
+                    value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
+                    helper={usageLabel(stats.cpu.usage_percent)}
                     tone={getUsageTone(stats.cpu.usage_percent)}
+                    warningLabel={stats.cpu.usage_percent >= 90 ? 'Very high processor usage' : 'High processor usage'}
                   />
 
                   <FriendlyInfoCard
                     icon={MemoryStick}
                     title="Memory"
                     value={`${stats.ram.total_gb} GB total`}
-                    helper={getPlainUsageLabel('memory', stats.ram.usage_percent)}
+                    helper={usageLabel(stats.ram.usage_percent)}
                     tone={getUsageTone(stats.ram.usage_percent)}
+                    warningLabel={stats.ram.usage_percent >= 90 ? 'Very high memory usage' : 'High memory usage'}
                   />
 
                   <FriendlyInfoCard
                     icon={HardDrive}
                     title="Storage"
                     value={`${formatStorageSize(stats.disk.total_gb)} ${cleanValue(stats.storage_type)}`}
-                    helper={getPlainUsageLabel('storage', stats.disk.usage_percent)}
+                    helper={usageLabel(stats.disk.usage_percent)}
                     tone={getUsageTone(stats.disk.usage_percent)}
+                    warningLabel={stats.disk.usage_percent >= 90 ? 'Almost full' : 'Space running low'}
                   />
 
                   <FriendlyInfoCard
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
-                    helper="This handles display, videos, visual effects, and games."
                     tone="neutral"
                   />
 
                   <FriendlyInfoCard
                     icon={Terminal}
                     title="Windows"
-                    value={cleanValue(stats.os_version)}
-                    helper="This helps RigMD understand your system environment."
+                    value={cleanValue(stats.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}
                     tone="neutral"
                   />
 
@@ -363,45 +289,28 @@ export default function SystemProfileView({
                     icon={Activity}
                     title="Computer Name"
                     value={cleanValue(stats.device_name)}
-                    helper="This is the PC currently connected to RigMD."
                     tone="neutral"
                   />
                 </motion.div>
               </section>
 
-              <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6">
-                <div className="mb-4 flex items-start gap-3">
-                  <Info className="mt-0.5 shrink-0 text-cyan-300" size={18} />
-                  <div>
-                    <h3 className="font-semibold text-white">More Details</h3>
-                    <p className="mt-1 text-sm text-slate-400">
-                      These are useful for technicians or deeper troubleshooting.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Graphics driver</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{cleanValue(stats.gpu.driver)}</p>
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Device driver</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{cleanValue(stats.chipset_driver)}</p>
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Approximate age</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{cleanValue(stats.system_age)}</p>
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Storage used</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{stats.disk.usage_percent}% full</p>
-                  </div>
-                </div>
-              </section>
+              <details className="rounded-xl border border-[var(--rigmd-border)] bg-[#101821] p-5">
+                <summary className="cursor-pointer rounded font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">Technical details</summary>
+                <dl className="mt-4 divide-y divide-slate-700/50">
+                  {[
+                    ['Processor model', cleanValue(stats.cpu.name)],
+                    ['Windows version', cleanValue(stats.os_version)],
+                    ['Graphics driver', cleanValue(stats.gpu.driver)],
+                    ['Motherboard model', stats.chipset_driver === 'Standard/Auto-Managed' ? 'Not available' : cleanValue(stats.chipset_driver).replace(/\s*\(Auto-Managed\)$/, '')],
+                    ['Time since Windows installation (estimate)', cleanValue(stats.system_age).replace(/^~/, 'About ').replace(/\b1 years\b/, '1 year')],
+                  ].map(([label, value]) => (
+                    <div key={label} className="grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] sm:gap-5">
+                      <dt className="text-sm text-slate-300">{label}</dt>
+                      <dd className="break-words text-sm font-medium text-white">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
             </>
           )}
 
