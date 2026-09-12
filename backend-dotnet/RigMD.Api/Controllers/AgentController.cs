@@ -432,7 +432,7 @@ public class AgentController : ControllerBase
         string agentId,
         CancellationToken cancellationToken)
     {
-        if (agentId == "local")
+        if (agentId == "local" || agentId == "default")
         {
             return Ok(new
             {
@@ -469,7 +469,7 @@ public class AgentController : ControllerBase
         string agentId,
         CancellationToken cancellationToken)
     {
-        if (agentId == "local")
+        if (agentId == "local" || agentId == "default")
         {
             return Ok(new
             {

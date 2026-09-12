@@ -90,7 +90,7 @@ public partial class App : System.Windows.Application
             StartInfo = new ProcessStartInfo
             {
                 FileName = apiExe,
-                Arguments = $"--urls={ApiUrl}",
+                Arguments = "",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = apiDirectory
@@ -99,6 +99,12 @@ public partial class App : System.Windows.Application
 
         _apiProcess.StartInfo.EnvironmentVariables[
             "ASPNETCORE_ENVIRONMENT"] = "Production";
+
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "DOTNET_ENVIRONMENT"] = "Production";
+
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "ASPNETCORE_URLS"] = ApiUrl;
 
         if (!_apiProcess.Start())
         {

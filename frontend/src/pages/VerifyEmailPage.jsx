@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   CheckCircle2,
+  ShieldCheck,
   Loader2,
   Mail,
 } from 'lucide-react';
@@ -26,10 +27,21 @@ function hasAuthCallback(location) {
 
   return (
     search.has('code') ||
+    search.has('token_hash') ||
     search.get('type') === 'signup' ||
     hash.has('access_token') ||
     hash.get('type') === 'signup'
   );
+}
+
+function getVerificationParams(location) {
+  const params = new URLSearchParams(location.search);
+  const type = params.get('type') || 'signup';
+
+  return {
+    tokenHash: params.get('token_hash') ?? '',
+    type,
+  };
 }
 
 function VerifyEmailPage() {
@@ -46,11 +58,16 @@ function VerifyEmailPage() {
   );
   const [message, setMessage] = useState('');
   const [isResending, setIsResending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const signedOutAfterCallback = useRef(false);
   const verified = useRef(false);
 
   const callbackDetected = useMemo(
     () => hasAuthCallback(location),
+    [location]
+  );
+  const verificationParams = useMemo(
+    () => getVerificationParams(location),
     [location]
   );
 
@@ -62,7 +79,7 @@ function VerifyEmailPage() {
     let mounted = true;
 
     const updateFromUser = async (user) => {
-      if (!mounted) {
+      if (!mounted || verified.current) {
         return;
       }
 
@@ -88,12 +105,72 @@ function VerifyEmailPage() {
       setStatus('waiting');
     };
 
-    const checkUser = async () => {
+    const verifyFromEmailLink = async () => {
+      const search = new URLSearchParams(location.search);
+      const tokenHash = search.get('token_hash');
+      const type = search.get('type') || 'signup';
+
+      if (tokenHash) {
+        setStatus('checking');
+        setError('');
+        setMessage('');
+
+        const { data, error: verifyError } =
+          await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type,
+          });
+
+        if (!mounted) {
+          return;
+        }
+
+        if (verifyError) {
+          setError(
+            verifyError.message ||
+              'This verification link is invalid or has already been used.'
+          );
+          setStatus('waiting');
+          return;
+        }
+
+        if (data.user?.email) {
+          setEmail(data.user.email);
+        }
+
+        verified.current = true;
+        setStatus('verified');
+        signedOutAfterCallback.current = true;
+
+        await supabase.auth.signOut();
+
+        window.history.replaceState(
+          null,
+          '',
+          '/verify-email?verified=1'
+        );
+
+        return;
+      }
+
+      if (search.has('code')) {
+        const { error: exchangeError } =
+          await supabase.auth.exchangeCodeForSession(
+            search.get('code')
+          );
+
+        if (exchangeError && mounted) {
+          setError(exchangeError.message);
+          setStatus('waiting');
+          return;
+        }
+      }
+
       const { data } = await supabase.auth.getUser();
-      updateFromUser(data.user);
+      await updateFromUser(data.user);
     };
 
-    checkUser();
+    verifyFromEmailLink();
 
     const { data } = supabase.auth.onAuthStateChange(
       (_event, session) => {
@@ -109,7 +186,48 @@ function VerifyEmailPage() {
       mounted = false;
       data.subscription.unsubscribe();
     };
-  }, [callbackDetected, email]);
+  }, [callbackDetected, email, location.search]);
+
+  const handleConfirmEmail = async () => {
+    setError('');
+    setMessage('');
+
+    if (!supabase) {
+      setError(supabaseConfigError);
+      return;
+    }
+
+    if (!verificationParams.tokenHash) {
+      setError('The verification link is missing its confirmation token.');
+      return;
+    }
+
+    setIsConfirming(true);
+
+    try {
+      const { data, error: verifyError } =
+        await supabase.auth.verifyOtp({
+          token_hash: verificationParams.tokenHash,
+          type: verificationParams.type,
+        });
+
+      if (verifyError) {
+        setError(verifyError.message);
+        setStatus('waiting');
+        return;
+      }
+
+      if (data.user?.email && !email) {
+        setEmail(data.user.email);
+      }
+
+      verified.current = true;
+      setStatus('verified');
+      await supabase.auth.signOut();
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   const handleResend = async (event) => {
     event.preventDefault();
@@ -193,8 +311,8 @@ function VerifyEmailPage() {
   if (status === 'verified') {
     return (
       <AuthFormShell
-        title="Email verified"
-        subtitle="Your RigMD account is ready for installer access."
+        title="Account verified"
+        subtitle="Your RigMD account is verified. You can now log in."
       >
         <div className="rounded-lg border border-[var(--rigmd-success)]/35 bg-[var(--rigmd-success-soft)] p-4">
           <div className="flex gap-3">
@@ -204,11 +322,11 @@ function VerifyEmailPage() {
             />
             <div>
               <p className="font-semibold text-white">
-                Verification complete
+                Your account is verified
               </p>
               <p className="mt-1 text-sm leading-6 text-[var(--rigmd-text-soft)]">
-                Log in with your verified account to access the RigMD
-                installer.
+                Continue to the login page and use your verified email
+                to unlock the RigMD installer.
               </p>
             </div>
           </div>
@@ -220,6 +338,55 @@ function VerifyEmailPage() {
           className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[var(--rigmd-accent)] px-4 py-3 font-semibold text-slate-950 transition hover:brightness-110"
         >
           Continue to login
+        </button>
+      </AuthFormShell>
+    );
+  }
+
+  if (status === 'ready_to_confirm') {
+    return (
+      <AuthFormShell
+        title="Confirm account"
+        subtitle="Click the button below to verify your RigMD account."
+      >
+        {error && (
+          <div className="mb-4 flex gap-3 rounded-lg border border-[var(--rigmd-danger)]/35 bg-[var(--rigmd-danger-soft)] p-4 text-sm text-[var(--rigmd-text-soft)]">
+            <AlertCircle
+              size={19}
+              className="mt-0.5 shrink-0 text-[var(--rigmd-danger)]"
+            />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-main-surface)] p-4">
+          <div className="flex gap-3">
+            <ShieldCheck
+              size={22}
+              className="mt-0.5 shrink-0 text-[var(--rigmd-accent)]"
+            />
+            <div>
+              <p className="font-semibold text-white">
+                Verify this email address
+              </p>
+              <p className="mt-1 text-sm leading-6 text-[var(--rigmd-text-soft)]">
+                This confirms your email and activates installer
+                download access for your RigMD account.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleConfirmEmail}
+          disabled={isConfirming}
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--rigmd-accent)] px-4 py-3 font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {isConfirming && (
+            <Loader2 size={18} className="animate-spin" />
+          )}
+          Confirm my RigMD account
         </button>
       </AuthFormShell>
     );

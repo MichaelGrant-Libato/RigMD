@@ -16,11 +16,12 @@ ArchitecturesAllowed=x64compatible
 OutputBaseFilename=RigMD-Setup-v0.1.1
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=output
-SetupIconFile=C:\Users\Michael Grant\OneDrive\Documents\GitHub\RigMD-Project\installer\assets\rigmd-logo.ico
+SetupIconFile=assets\rigmd-logo.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=RigMD
+UninstallDisplayIcon={app}\Desktop\RigMD.Desktop.exe
 SetupLogging=yes
 CloseApplications=yes
 RestartApplications=no
@@ -41,6 +42,16 @@ Source: "..\backend-dotnet\RigMD.Agent\bin\Release\net10.0-windows\win-x64\publi
     Excludes: "*.pdb,appsettings.Development.json"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
+Source: "Uninstall-RigMD.bat"; \
+    DestDir: "{app}\Desktop"; \
+    DestName: "uninstall.bat"; \
+    Flags: ignoreversion
+
+Source: "Uninstall-RigMD.bat"; \
+    DestDir: "{app}"; \
+    DestName: "uninstall.bat"; \
+    Flags: ignoreversion
+
 [Tasks]
 Name: "desktopicon"; \
     Description: "Create a desktop shortcut"; \
@@ -48,14 +59,29 @@ Name: "desktopicon"; \
     Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\RigMD"; \
+Name: "{autoprograms}\RigMD\RigMD"; \
     Filename: "{app}\Desktop\RigMD.Desktop.exe"; \
-    WorkingDir: "{app}\Desktop"
+    WorkingDir: "{app}\Desktop"; \
+    IconFilename: "{app}\Desktop\RigMD.Desktop.exe"
+
+Name: "{autoprograms}\RigMD\Uninstall RigMD"; \
+    Filename: "{uninstallexe}"; \
+    WorkingDir: "{app}"; \
+    IconFilename: "{app}\Desktop\RigMD.Desktop.exe"
+
+Name: "{app}\Desktop\Uninstall RigMD"; \
+    Filename: "{uninstallexe}"; \
+    WorkingDir: "{app}"; \
+    IconFilename: "{app}\Desktop\RigMD.Desktop.exe"
 
 Name: "{autodesktop}\RigMD"; \
     Filename: "{app}\Desktop\RigMD.Desktop.exe"; \
     WorkingDir: "{app}\Desktop"; \
     Tasks: desktopicon
+
+[UninstallDelete]
+Type: files; Name: "{app}\Agent\appsettings.json"
+Type: filesandordirs; Name: "{app}"
 
 [Run]
 Filename: "{sys}\sc.exe"; \

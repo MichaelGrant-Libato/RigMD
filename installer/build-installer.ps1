@@ -38,10 +38,22 @@ $InstallerScript =
         $PSScriptRoot `
         "RigMD-Setup.iss"
 
-$InnoCompiler =
-    Join-Path `
-        $env:LOCALAPPDATA `
-        "Programs\Inno Setup 6\ISCC.exe"
+$InnoCompiler = $null
+$CandidateCompilerPaths = @(
+    (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+
+foreach ($candidate in $CandidateCompilerPaths)
+{
+    if ($candidate -and (Test-Path $candidate))
+    {
+        $InnoCompiler = $candidate
+        break
+    }
+}
 
 Write-Host ""
 Write-Host "======================================"
@@ -56,10 +68,12 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue))
     throw ".NET SDK was not found in PATH."
 }
 
-if (-not (Test-Path $InnoCompiler))
+if (-not $InnoCompiler -or -not (Test-Path $InnoCompiler))
 {
-    throw "Inno Setup compiler was not found at: $InnoCompiler"
+    throw "Inno Setup compiler (ISCC.exe) was not found. Please install Inno Setup 6."
 }
+
+Write-Host "Inno Setup compiler found: $InnoCompiler"
 
 Write-Host "Required tools found."
 Write-Host ""
@@ -233,11 +247,29 @@ if ($LASTEXITCODE -ne 0)
 $InstallerOutput =
     Join-Path `
         $PSScriptRoot `
-        "output\RigMD-Setup.exe"
+        "output\RigMD-Setup-v0.1.1.exe"
 
 if (-not (Test-Path $InstallerOutput))
 {
-    throw "RigMD-Setup.exe was not created."
+    $InstallerOutput =
+        Join-Path `
+            $PSScriptRoot `
+            "output\RigMD-Setup.exe"
+}
+
+if (-not (Test-Path $InstallerOutput))
+{
+    throw "RigMD setup executable was not created in output directory."
+}
+
+$GenericOutput =
+    Join-Path `
+        $PSScriptRoot `
+        "output\RigMD-Setup.exe"
+
+if ($InstallerOutput -ne $GenericOutput)
+{
+    Copy-Item $InstallerOutput $GenericOutput -Force
 }
 
 Write-Host ""
@@ -247,4 +279,9 @@ Write-Host "======================================"
 Write-Host ""
 Write-Host "Output:"
 Write-Host $InstallerOutput
+if (Test-Path $GenericOutput)
+{
+    Write-Host "Generic alias:"
+    Write-Host $GenericOutput
+}
 Write-Host ""
