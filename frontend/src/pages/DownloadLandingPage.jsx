@@ -165,7 +165,7 @@ function DownloadLandingPage() {
                   size={16}
                   className="text-[var(--rigmd-success)]"
                 />
-                RigMD v0.1.1 beta for verified Windows users
+                RigMD for verified Windows users
               </div>
 
               <h1 className="text-5xl font-bold tracking-tight text-white sm:text-6xl lg:text-7xl">
@@ -254,7 +254,7 @@ function DownloadLandingPage() {
                   </h2>
 
                   <p className="mt-2 text-sm leading-6 text-[var(--rigmd-text-muted)]">
-                    RigMD v0.1.1 beta is an academic capstone release. Windows
+                    RigMD is an academic capstone release. Windows
                     SmartScreen may display an unrecognized application warning
                     because the installer is not yet digitally signed.
                   </p>
