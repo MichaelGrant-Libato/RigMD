@@ -1147,7 +1147,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       setError(null);
 
       try {
-        let newCommandId: string | null = null;
+        const newCommandId: string | null = null;
         let freshSnapshot: AgentSnapshotResponse | null = null;
         let automaticReport: DiagnosticReport | null = null;
 
