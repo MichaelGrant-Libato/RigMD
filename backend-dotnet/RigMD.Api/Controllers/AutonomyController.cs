@@ -27,6 +27,7 @@ public class AutonomyController : ControllerBase
             "csrss",
             "dllhost",
             "dwm",
+            "explorer",
             "fontdrvhost",
             "lsass",
             "memory compression",
@@ -735,7 +736,7 @@ public class AutonomyController : ControllerBase
             return false;
         }
 
-        return true;
+        return IsSupportedClosableUserApp(normalized);
     }
 
     private static string ToDisplayName(
@@ -757,11 +758,8 @@ public class AutonomyController : ControllerBase
             "code" => "Visual Studio Code",
             "discord" => "Discord",
             "msedge" => "Microsoft Edge",
-            "msedgewebview2" => "Microsoft Edge WebView",
             "firefox" => "Firefox",
             "brave" => "Brave",
-            "memory compression" => "Windows Memory Compression",
-            "memorycompression" => "Windows Memory Compression",
             "opera" => "Opera",
             "opera_gx" => "Opera GX",
             "slack" => "Slack",
@@ -860,6 +858,24 @@ public class AutonomyController : ControllerBase
                processName.Equals("opera", StringComparison.OrdinalIgnoreCase) ||
                processName.Equals("opera_gx", StringComparison.OrdinalIgnoreCase) ||
                processName.Equals("vivaldi", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSupportedClosableUserApp(
+        string processName)
+    {
+        if (IsBrowserProcess(processName))
+        {
+            return true;
+        }
+
+        return processName.Equals("code", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("chatgpt", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("discord", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("slack", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("teams", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("zoom", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("spotify", StringComparison.OrdinalIgnoreCase) ||
+               processName.Equals("steam", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class CloseAppOutcome
