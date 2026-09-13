@@ -17,7 +17,7 @@ function recommendedStep(action: string | undefined) {
     case 'troubleshoot':
       return 'Review the latest result before trying any safe fix.';
     case 'escalate':
-      return 'Avoid repeated fixes for now. Consider asking a technician to inspect the PC.';
+      return 'Avoid repeated fixes for now. Consider asking a technician to inspect the Device.';
     default:
       return 'Open your latest result to review the available recommendations.';
   }
@@ -81,7 +81,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
         ? action === 'escalate' ? 'Your latest check recommends professional inspection'
           : action === 'maintain' || action === 'troubleshoot' ? 'Your latest check has steps to follow'
             : 'Your latest check is ready to review'
-        : 'Ready for your first PC check';
+        : 'Ready for your first Device check';
   const linkClass = 'inline-flex items-center gap-2 rounded text-sm font-semibold text-cyan-300 hover:text-cyan-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300';
   const hardwareDetails = [
     ['Processor', stats?.cpu?.name?.replace(/\s+\d+-Core Processor$/i, '').trim()],
@@ -95,7 +95,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
         <section className={`rigmd-card-surface flex flex-col rounded-lg border p-6 ${hasWarnings ? 'border-amber-400/50' : ''}`}>
           <div className="mb-4 flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">PC Checkup</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">Device Checkup</p>
             <span className="inline-flex min-w-0 items-center gap-2 text-sm leading-5 text-slate-300">
               <Clock3 size={14} className="shrink-0" />
               <span>{checkHistoryLabel}</span>
@@ -113,15 +113,15 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
               onClick={() => hasWarnings ? setActivePage('warningSigns') : latest ? onViewSession(latest.session_id) : setActivePage('newDiagnosis')}
               className="inline-flex items-center gap-2 rounded-lg bg-[#1fb6c9] px-5 py-3 text-sm font-bold text-[#041014] transition hover:bg-[#38c7d7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300">
               {hasWarnings ? <AlertTriangle size={18} /> : latest ? <History size={18} /> : <Stethoscope size={18} />}
-              {hasWarnings ? 'Review Alerts' : latest ? 'View Latest Result' : 'Check My PC'}
+              {hasWarnings ? 'Review Alerts' : latest ? 'View Latest Result' : 'Check My Device'}
             </button>
-            {(latest || hasWarnings) && <button type="button" onClick={() => setActivePage('newDiagnosis')} className={linkClass}>Check My PC</button>}
-            <button type="button" onClick={() => setActivePage('systemProfile')} className={linkClass}>View PC Info <ChevronRight size={16} /></button>
+            {(latest || hasWarnings) && <button type="button" onClick={() => setActivePage('newDiagnosis')} className={linkClass}>Check My Device</button>}
+            <button type="button" onClick={() => setActivePage('systemProfile')} className={linkClass}>View Device Info <ChevronRight size={16} /></button>
           </div>
         </section>
         <section className="rigmd-card-surface flex min-w-0 flex-col rounded-lg border p-6">
-          <h3 className="flex items-center gap-2 font-semibold text-white"><Server size={18} className="text-cyan-400" /> Your PC at a Glance</h3>
-          <p className="mt-2 text-sm text-slate-300">The main PC details RigMD found during the latest scan.</p>
+          <h3 className="flex items-center gap-2 font-semibold text-white"><Server size={18} className="text-cyan-400" /> Your Device at a Glance</h3>
+          <p className="mt-2 text-sm text-slate-300">The main Device details RigMD found during the latest scan.</p>
           <dl className="mt-4 grid gap-x-5 gap-y-4 sm:grid-cols-2">
             {hardwareDetails.map(([label, value]) => (
               <div key={label} className="min-w-0">

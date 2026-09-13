@@ -495,7 +495,7 @@ export default function WarningSignsView() {
     <>
       <TopHeader
         title="Warning Signs"
-        subtitle="Reference guide for observable PC warning indicators and recommended actions"
+        subtitle="Reference guide for observable Device warning indicators and recommended actions"
       />
 
       <motion.div

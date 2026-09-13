@@ -236,7 +236,7 @@ function getNextSteps(
       priority: "SOON",
       text: "Inspect cooling components",
       detail:
-        "Shut down and unplug the PC before physically inspecting fans, vents, heatsinks, and dust buildup.",
+        "Shut down and unplug the Device before physically inspecting fans, vents, heatsinks, and dust buildup.",
     });
   } else {
     base.push({

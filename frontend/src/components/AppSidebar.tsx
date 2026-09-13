@@ -275,7 +275,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={Server}
-            label="My PC Info"
+            label="My Device Info"
             collapsed={collapsed}
             active={activePage === 'systemProfile'}
             onClick={() => navigate('systemProfile')}
@@ -283,7 +283,7 @@ export default function AppSidebar({
 
           <SidebarItem
             icon={Stethoscope}
-            label="Check My PC"
+            label="Check My Device"
             collapsed={collapsed}
             active={activePage === 'newDiagnosis'}
             onClick={() => navigate('newDiagnosis')}

@@ -82,7 +82,7 @@ export default function DeleteConfirmationDialog({
               <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 p-4">
                 <p className="text-sm font-bold text-amber-100">This cannot be undone.</p>
                 <p className="mt-1 text-sm leading-relaxed text-slate-300">
-                  RigMD will only remove saved check history. It will not change your PC, Windows settings, files, or accounts.
+                  RigMD will only remove saved check history. It will not change your Device, Windows settings, files, or accounts.
                 </p>
               </div>
             </div>

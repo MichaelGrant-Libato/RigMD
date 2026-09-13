@@ -56,6 +56,16 @@ public interface IDeviceTypeProvider
     string GetDeviceType();
 }
 
+public interface IPowerProvider
+{
+    string GetActivePowerPlan();
+}
+
+public interface IDisplayProvider
+{
+    int GetConnectedDisplays();
+}
+
 public interface IWindowsSystemProfileService
 {
     HardwareProfileDto GetLiveSystemProfile();

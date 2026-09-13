@@ -11,7 +11,7 @@ interface HeaderStatusContextValue {
 }
 
 const HeaderStatusContext = createContext<HeaderStatusContextValue>({
-  deviceName: 'Detecting PC',
+  deviceName: 'Detecting Device',
   liveStatus: 'syncing',
 });
 

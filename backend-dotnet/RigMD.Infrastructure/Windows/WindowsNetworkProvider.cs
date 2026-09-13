@@ -114,6 +114,48 @@ public class WindowsNetworkProvider :
                     $"DNS resolution failed: {ex.Message}";
             }
 
+            if (activeAdapter.Adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+            {
+                result.IsWifi = true;
+                try
+                {
+                    var process = new System.Diagnostics.Process
+                    {
+                        StartInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "netsh",
+                            Arguments = "wlan show interfaces",
+                            RedirectStandardOutput = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
+
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    var signalLine = lines.FirstOrDefault(l => l.Trim().StartsWith("Signal"));
+                    if (signalLine != null)
+                    {
+                        var parts = signalLine.Split(':');
+                        if (parts.Length > 1)
+                        {
+                            var valueStr = parts[1].Trim().Replace("%", "");
+                            if (int.TryParse(valueStr, out int signal))
+                            {
+                                result.WifiSignalStrength = signal;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore
+                }
+            }
+
             return result;
         }
         catch (Exception ex)

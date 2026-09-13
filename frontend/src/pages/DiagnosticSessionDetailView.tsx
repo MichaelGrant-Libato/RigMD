@@ -1074,7 +1074,7 @@ export default function DiagnosticSessionDetailView({
                           </h3>
 
                           <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                            RigMD found something to watch, but it does not recommend changing anything on this PC right now.
+                            RigMD found something to watch, but it does not recommend changing anything on this Device right now.
                           </p>
 
                           <p className="mt-3 text-sm leading-relaxed text-slate-400">

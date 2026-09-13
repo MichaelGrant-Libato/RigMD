@@ -277,7 +277,7 @@ function getReadableAction(actionId?: string, actionName?: string) {
       'Check whether the action completed successfully.',
     ],
     mayChange: [
-      'Only the selected safe area of the PC may be changed.',
+      'Only the selected safe area of the Device may be changed.',
     ],
     willNotTouch: [
       'Personal files unless the action clearly says so.',

@@ -126,7 +126,7 @@ export default function SystemProfileView({
 
   const handleSaveProfile = async () => {
     if (!stats) {
-      setSaveMessage({ type: 'error', text: 'PC info is not loaded yet. Please wait a moment.' });
+      setSaveMessage({ type: 'error', text: 'Device info is not loaded yet. Please wait a moment.' });
       return;
     }
 
@@ -147,7 +147,7 @@ export default function SystemProfileView({
       };
 
       await saveHardwareProfile(payload);
-      setSaveMessage({ type: 'success', text: 'PC info saved successfully.' });
+      setSaveMessage({ type: 'success', text: 'Device info saved successfully.' });
       setTimeout(() => setSaveMessage(null), 5000);
     } catch (err) {
       const errorText = err instanceof Error ? err.message : 'Something went wrong while saving.';
@@ -160,7 +160,7 @@ export default function SystemProfileView({
   return (
     <>
       <TopHeader
-        title="My PC Info"
+        title="My Device Info"
         subtitle="Simple summary of what RigMD found on this computer"
       />
 
@@ -175,8 +175,8 @@ export default function SystemProfileView({
         <div className="w-full space-y-6">
           <section className="rounded-xl border border-[var(--rigmd-border)] bg-[#101821] p-6">
             <div className="min-w-0">
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">My PC Info</p>
-              <h3 className="text-2xl font-bold text-white">Your PC details, at a glance</h3>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">My Device Info</p>
+              <h3 className="text-2xl font-bold text-white">Your Device details, at a glance</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-300">Review your hardware and Windows information. Expand Technical details for more.</p>
               {stats && [stats.cpu.name, stats.ram.total_gb, stats.disk.total_gb, stats.gpu.name, stats.os_version].some(value => !isDetected(value)) && <p className="mt-2 text-sm text-amber-300">Some hardware details are unavailable.</p>}
             </div>
@@ -193,7 +193,7 @@ export default function SystemProfileView({
                 className="flex items-center gap-2 rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-[#041014] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={16} className={isRefreshingHardware ? 'animate-spin' : ''} />
-                {isRefreshingHardware ? 'Refreshing...' : 'Refresh PC Info'}
+                {isRefreshingHardware ? 'Refreshing...' : 'Refresh Device Info'}
               </motion.button>
 
               <motion.button
@@ -205,7 +205,7 @@ export default function SystemProfileView({
                 className="flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Database size={16} className={isSavingProfile ? 'animate-spin' : ''} />
-                {isSavingProfile ? 'Saving...' : 'Save Current PC Info'}
+                {isSavingProfile ? 'Saving...' : 'Save Current Device Info'}
               </motion.button>
               </div>
             </div>
@@ -213,7 +213,7 @@ export default function SystemProfileView({
 
           {error && (
             <div className="rounded-lg border border-red-500/25 bg-red-500/10 p-4 text-sm font-medium text-red-300">
-              RigMD could not read your PC info right now. Try checking again.
+              RigMD could not read your Device info right now. Try checking again.
             </div>
           )}
 
@@ -222,9 +222,9 @@ export default function SystemProfileView({
               <div className="flex items-start gap-3">
                 <Activity className="mt-0.5 animate-pulse text-cyan-300" size={18} />
                 <div>
-                  <h3 className="font-semibold text-white">PC information unavailable</h3>
+                  <h3 className="font-semibold text-white">Device information unavailable</h3>
                   <p className="mt-1 text-sm text-slate-400">
-                    Run a hardware scan to collect PC information, then reload the saved readings.
+                    Run a hardware scan to collect Device information, then reload the saved readings.
                   </p>
                 </div>
               </div>
@@ -233,7 +233,7 @@ export default function SystemProfileView({
             <>
               <section>
                 <div className="mb-4">
-                  <h3 className="text-lg font-bold text-white">Important PC Details</h3>
+                  <h3 className="text-lg font-bold text-white">Important Device Details</h3>
                   <p className="text-sm text-slate-500">These are the details most users need to understand.</p>
                 </div>
 

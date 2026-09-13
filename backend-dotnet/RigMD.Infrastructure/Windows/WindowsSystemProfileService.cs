@@ -15,6 +15,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
     private readonly INetworkProvider _networkProvider;
     private readonly IBatteryProvider _batteryProvider;
     private readonly IDeviceTypeProvider _deviceTypeProvider;
+    private readonly IPowerProvider _powerProvider;
+    private readonly IDisplayProvider _displayProvider;
 
     public WindowsSystemProfileService(
         ICpuProvider cpuProvider,
@@ -26,7 +28,9 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         IProcessProvider processProvider,
         INetworkProvider networkProvider,
         IBatteryProvider batteryProvider,
-        IDeviceTypeProvider deviceTypeProvider)
+        IDeviceTypeProvider deviceTypeProvider,
+        IPowerProvider powerProvider,
+        IDisplayProvider displayProvider)
     {
         _cpuProvider = cpuProvider;
         _gpuProvider = gpuProvider;
@@ -38,6 +42,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         _networkProvider = networkProvider;
         _batteryProvider = batteryProvider;
         _deviceTypeProvider = deviceTypeProvider;
+        _powerProvider = powerProvider;
+        _displayProvider = displayProvider;
     }
 
     public HardwareProfileDto GetLiveSystemProfile()
@@ -78,6 +84,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             SystemAge = _osProvider.GetSystemAge(),
             ChipsetDriver = _motherboardProvider.GetChipsetDriver(),
             PrimaryStorageType = _storageProvider.GetPrimaryStorageType(),
+            ActivePowerPlan = _powerProvider.GetActivePowerPlan(),
+            ConnectedDisplays = _displayProvider.GetConnectedDisplays(),
             
             Battery = _batteryProvider.GetBatteryStats(),
             

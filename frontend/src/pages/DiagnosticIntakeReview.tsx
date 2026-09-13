@@ -14,14 +14,14 @@ import {
 import { apiFetch } from "../lib/api";
 
     const STEPS = [
-    { key: "symptom_type",      label: "Symptom Type",      hint: "What is your PC doing that brought you here?" },
+    { key: "symptom_type",      label: "Symptom Type",      hint: "What is your Device doing that brought you here?" },
     { key: "affected_activity", label: "Affected Activity",  hint: "Which activity is most affected?" },
     { key: "frequency",         label: "Frequency",          hint: "How often does this happen?" },
     { key: "severity",          label: "Severity",           hint: "How badly does this affect your work?" },
     { key: "duration",          label: "Duration",           hint: "How long has this been happening?" },
     { key: "recent_changes",    label: "Recent Changes",     hint: "Did you change anything before this started?" },
-    { key: "system_state",      label: "System State",       hint: "What best describes your PC right now?" },
-    { key: "warning_signs",     label: "Warning Signs",      hint: "Have you noticed any of these on your PC?" },
+    { key: "system_state",      label: "System State",       hint: "What best describes your Device right now?" },
+    { key: "warning_signs",     label: "Warning Signs",      hint: "Have you noticed any of these on your Device?" },
     ] as const;
 
     type StepKey = typeof STEPS[number]["key"];
@@ -188,10 +188,10 @@ import { apiFetch } from "../lib/api";
                 {step.key === "symptom_type" && "The symptom type is the starting point of your diagnosis. It determines which internal system components RigMD checks against your system profile."}
                 {step.key === "affected_activity" && "Knowing which task triggers the problem helps narrow down which subsystem is under stress."}
                 {step.key === "frequency" && "Frequency helps distinguish intermittent issues from consistent failures."}
-                {step.key === "severity" && "Severity tells us how much this is affecting your ability to use your PC."}
+                {step.key === "severity" && "Severity tells us how much this is affecting your ability to use your Device."}
                 {step.key === "duration" && "Duration helps detect whether this is a new issue or a developing pattern."}
                 {step.key === "recent_changes" && "Changes made before symptoms began are often the direct cause."}
-                {step.key === "system_state" && "Knowing your PC's current state helps determine the urgency of the recommendation."}
+                {step.key === "system_state" && "Knowing your Device's current state helps determine the urgency of the recommendation."}
                 {step.key === "warning_signs" && "Observable warning signs are strong indicators of specific hardware or software conditions."}
             </div>
 

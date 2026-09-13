@@ -87,6 +87,8 @@ public class NetworkStatsDto
     public bool DnsResolutionSucceeded { get; set; }
     public string DnsTestHost { get; set; } = string.Empty;
     public string DnsResolutionMessage { get; set; } = string.Empty;
+    public bool IsWifi { get; set; }
+    public int WifiSignalStrength { get; set; }
 }
 
 public class BatteryStatsDto
@@ -106,6 +108,8 @@ public class HardwareProfileDto
     public string SystemAge { get; set; } = string.Empty;
     public string ChipsetDriver { get; set; } = string.Empty;
     public string PrimaryStorageType { get; set; } = string.Empty;
+    public string ActivePowerPlan { get; set; } = string.Empty;
+    public int ConnectedDisplays { get; set; }
     
     public CpuStatsDto Cpu { get; set; } = new();
     public GpuStatsDto Gpu { get; set; } = new();
