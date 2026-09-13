@@ -247,7 +247,7 @@ if ($LASTEXITCODE -ne 0)
 $InstallerOutput =
     Join-Path `
         $PSScriptRoot `
-        "output\RigMD-Setup-v0.1.1.exe"
+        "output\RigMD-Setup-v0.1.2.exe"
 
 if (-not (Test-Path $InstallerOutput))
 {
