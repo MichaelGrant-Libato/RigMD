@@ -664,5 +664,30 @@ SignalR WebSocket connections require `.AllowCredentials()` in the CORS policy w
 
 - Users can observe remediation progress in real time
 - The `progressReporter` callback is optional (`Action<string>?`) so all existing code paths remain unaffected
-- Fast-completing actions (FlushDns, ClearBrowserCache) intentionally do not report progress since they complete in under a second
-- The frontend dependency `@microsoft/signalr` was added
+- The frontend dependency `@microsoft/signalr` was added
+
+---
+
+## DECISION-017: Device and Battery Awareness (WMI)
+
+- **Date:** September 2026
+- **Status:** Implemented
+
+### Context
+
+The original diagnostic engine assumed a generic desktop form factor, making incorrect assumptions about thermal throttling and hardware limits when diagnosing laptops (e.g., advising users to check case fans instead of power plans or cooling pads).
+
+### Decision
+
+WMI queries were added to directly detect the chassis type (`Win32_SystemEnclosure`) and battery health/status (`Win32_Battery`).
+
+### Implementation
+
+- `WmiDeviceTypeProvider` maps `ChassisTypes` (e.g., 3=Desktop, 9=Laptop, 10=Notebook, 30=Tablet).
+- `WmiBatteryProvider` collects charge percentage, estimated run time, and real-time charging status.
+- Injected directly into the standard hardware profile DTO so the AI/Diagnostic engines automatically factor device mobility and power state into their reasoning logic.
+
+### Consequences
+
+- The diagnostic engine automatically differentiates thermal advice between laptops and desktops.
+- The engine can correlate CPU/GPU power throttling to a critically low battery state rather than a hardware defect.
