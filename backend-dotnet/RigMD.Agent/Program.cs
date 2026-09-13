@@ -56,6 +56,14 @@ builder.Services.AddScoped<
     WmiDeviceTypeProvider>();
 
 builder.Services.AddScoped<
+    IPowerProvider,
+    WmiPowerProvider>();
+
+builder.Services.AddScoped<
+    IDisplayProvider,
+    WmiDisplayProvider>();
+
+builder.Services.AddScoped<
     IWindowsSystemProfileService,
     WindowsSystemProfileService>();
 

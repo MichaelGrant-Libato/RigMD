@@ -184,8 +184,8 @@ const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
     id: 'full',
     title: 'Full System Diagnosis',
     description:
-      'Scan the complete PC and collect fresh system, hardware, storage, memory, graphics, and process evidence.',
-    action: 'Scan Entire PC',
+      'Scan the complete Device and collect fresh system, hardware, storage, memory, graphics, and process evidence.',
+    action: 'Scan Entire Device',
     icon: Stethoscope,
   },
 
@@ -193,7 +193,7 @@ const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
     id: 'component',
     title: 'Diagnose by Component',
     description:
-      'Focus the diagnosis on selected PC components while still collecting the evidence needed for correlation.',
+      'Focus the diagnosis on selected Device components while still collecting the evidence needed for correlation.',
     action: 'Choose Components',
     icon: Microchip,
   },
@@ -340,7 +340,7 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     id: 'slow-system',
     title: 'Slow System',
     description:
-      'The PC feels sluggish, freezes, or struggles during normal use.',
+      'The Device feels sluggish, freezes, or struggles during normal use.',
     icon: Gauge,
   },
 
@@ -380,7 +380,7 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     id: 'overheating-loud-fan',
     title: 'Overheating / Loud Fan',
     description:
-      'The PC feels unusually hot or fans become noticeably loud.',
+      'The Device feels unusually hot or fans become noticeably loud.',
     icon: Thermometer,
   },
 
@@ -915,7 +915,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       ? 'Creating Scan Request...'
       : diagnosisStage ===
           'scanning'
-        ? 'Scanning This PC...'
+        ? 'Scanning This Device...'
         : diagnosisStage ===
             'loading-evidence'
           ? 'Loading Evidence...'
@@ -950,7 +950,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
   const selectedScopeLabel =
     diagnosisMode === 'full'
-      ? 'Entire PC'
+      ? 'Entire Device'
       : diagnosisMode ===
           'component'
         ? selectedComponentDetails
@@ -1728,7 +1728,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
     <>
       <TopHeader
         title="New Diagnosis"
-        subtitle="Choose a diagnosis type, scan the PC, and review fresh system evidence"
+        subtitle="Choose a diagnosis type, scan the Device, and review fresh system evidence"
       />
 
       <motion.div
@@ -2905,7 +2905,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       size={15}
                       className="text-cyan-300"
                     />
-                    Entire PC
+                    Entire Device
                   </div>
                 )}
               </div>
@@ -2951,7 +2951,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         ? 'Requesting scan'
                         : diagnosisStage ===
                             'scanning'
-                          ? 'Scanning PC'
+                          ? 'Scanning Device'
                           : diagnosisStage ===
                               'loading-evidence'
                             ? 'Loading evidence'

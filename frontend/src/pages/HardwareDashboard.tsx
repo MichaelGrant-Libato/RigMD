@@ -439,7 +439,7 @@ export default function HardwareDashboard() {
     stats,
   ]);
 
-  const deviceName = stats?.device_name?.trim() || 'Detecting PC';
+  const deviceName = stats?.device_name?.trim() || 'Detecting Device';
 
   const fetchHardware = useCallback(async () => {
     if (!AGENT_ID) {

@@ -87,10 +87,10 @@ function buildReportText({
   const recentSessions = sessions.slice(0, 8);
 
   const lines = [
-    'RigMD PC Check Report',
+    'RigMD Device Check Report',
     `Created: ${formatDate(new Date())}`,
     '',
-    'PC summary',
+    'Device summary',
     `Computer: ${cleanValue(stats?.device_name)}`,
     `Processor: ${cleanValue(stats?.cpu?.name).replace(/\s+\d+-Core Processor$/i, '')}`,
     `Memory: ${stats?.ram?.total_gb ? `${stats.ram.total_gb} GB total` : 'Not available'}`,
@@ -99,7 +99,7 @@ function buildReportText({
     `Storage during last scan: ${typeof stats?.disk?.usage_percent === 'number' ? `${stats.disk.usage_percent.toFixed(1)}% in use` : 'Not available'}`,
     `Graphics: ${cleanValue(stats?.gpu?.name)}`,
     `Windows: ${cleanValue(stats?.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}`,
-    `PC info last collected: ${formatDate(hardwareUpdatedAt)}`,
+    `Device info last collected: ${formatDate(hardwareUpdatedAt)}`,
     '',
     'Latest check',
     latest
@@ -113,7 +113,7 @@ function buildReportText({
       : 'Result: Not available',
     latest
       ? `What to do: ${friendlyAction(latest.action_category)}`
-      : 'What to do: Run a PC check first',
+      : 'What to do: Run a Device check first',
     latest
       ? `Match strength: ${cleanValue(latest.confidence_label)}`
       : 'Match strength: Not available',
@@ -136,7 +136,7 @@ function buildReportText({
       : 'No saved checks yet.',
     '',
     'Note',
-    'RigMD provides PC checkup guidance only. It does not replace professional hardware inspection.',
+    'RigMD provides Device checkup guidance only. It does not replace professional hardware inspection.',
   ];
 
   return lines.join('\n');
@@ -203,7 +203,7 @@ export default function ShareReportView({
   );
 
   const latestSession = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
-  const reportFileName = `RigMD-PC-Report-${new Date().toISOString().slice(0, 10)}.txt`;
+  const reportFileName = `RigMD-Device-Report-${new Date().toISOString().slice(0, 10)}.txt`;
 
   const handleCopy = async () => {
     try {
@@ -220,7 +220,7 @@ export default function ShareReportView({
   };
 
   const handleEmailDraft = () => {
-    const subject = encodeURIComponent('RigMD PC Check Report');
+    const subject = encodeURIComponent('RigMD Device Check Report');
     const body = encodeURIComponent(reportText);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
@@ -233,7 +233,7 @@ export default function ShareReportView({
     <>
       <TopHeader
         title="Share Report"
-        subtitle="Create a simple PC check report for support or repair help"
+        subtitle="Create a simple Device check report for support or repair help"
       />
 
       <motion.div
@@ -266,7 +266,7 @@ export default function ShareReportView({
               <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">Report Preview</p>
               <h3 className="text-2xl font-bold text-white">Ready to share with support</h3>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-                This report uses your saved PC information and recent checks. It does not include passwords, personal files, or account details.
+                This report uses your saved Device information and recent checks. It does not include passwords, personal files, or account details.
               </p>
 
               <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -378,7 +378,7 @@ export default function ShareReportView({
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-slate-400">
                 <li>Review the report content first.</li>
                 <li>Send it only to someone you trust.</li>
-                <li>Run a new check if the PC changed since the last scan.</li>
+                <li>Run a new check if the Device changed since the last scan.</li>
               </ul>
 
               {sessions.length === 0 && onStartNewDiagnosis && (

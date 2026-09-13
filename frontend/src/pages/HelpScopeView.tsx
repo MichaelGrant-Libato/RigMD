@@ -51,7 +51,7 @@ const supportedItems = [
 const unsupportedItems = [
   {
     title: 'Physically Inspect Hardware',
-    description: 'RigMD cannot see, touch, test, reseat, or visually inspect physical PC components.',
+    description: 'RigMD cannot see, touch, test, reseat, or visually inspect physical Device components.',
   },
   {
     title: 'Measure Voltage or Power',
@@ -112,7 +112,7 @@ const faqs = [
   {
     question: 'What should I do if my result says Escalate?',
     answer:
-      'Treat Escalate as a caution flag. Back up important files, stop risky troubleshooting, and consider a qualified technician if the PC shows power, storage, heat, or display failure symptoms.',
+      'Treat Escalate as a caution flag. Back up important files, stop risky troubleshooting, and consider a qualified technician if the Device shows power, storage, heat, or display failure symptoms.',
   },
   {
     question: 'Can I use RigMD without completing a System Profile?',
@@ -186,7 +186,7 @@ export default function HelpScopeView() {
               <Info size={18} className="mt-0.5 shrink-0 text-cyan-400" />
               <p className="text-sm leading-relaxed text-slate-400">
                 RigMD is a <span className="font-bold text-white">symptom-guided diagnostic decision support tool</span>. It helps you
-                understand probable causes of observable Windows PC symptoms and recommends one of four action categories:
+                understand probable causes of observable Windows Device symptoms and recommends one of four action categories:
                 Monitor, Maintain, Troubleshoot, or Escalate.
               </p>
             </div>
@@ -285,7 +285,7 @@ export default function HelpScopeView() {
           </section>
 
           <p className="pb-4 text-center text-xs text-slate-600">
-            RigMD v1.0.0 - Guided PC Diagnostic Decision Support - For Windows desktop users
+            RigMD v1.0.0 - Guided Device Diagnostic Decision Support - For Windows desktop users
           </p>
         </div>
       </motion.div>
