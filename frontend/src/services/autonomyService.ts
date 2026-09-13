@@ -101,6 +101,26 @@ export interface AutonomyRequest {
   userConsentProvided?: boolean;
 }
 
+export interface MemoryAppCandidate {
+  id: string;
+  name: string;
+  displayName: string;
+  appKind: string;
+  detail: string;
+  closeWarning: string;
+  processCount: number;
+  memoryMb: number;
+}
+
+interface MemoryAppsResponse {
+  apps?: MemoryAppCandidate[];
+}
+
+interface CloseSelectedAppRequest {
+  processNames: string[];
+  confirmed: boolean;
+}
+
 const AGENT_ID =
   import.meta.env.VITE_AGENT_ID;
 
@@ -177,6 +197,29 @@ export async function runAutonomyExecution({
       sessionId,
       diagnosedCategory,
       userConsentProvided,
+    },
+  );
+
+  return response.data;
+}
+
+export async function getMemoryAppCandidates() {
+  const response = await apiGet<MemoryAppsResponse>(
+    '/api/autonomy/memory-apps',
+  );
+
+  return response.data.apps ?? [];
+}
+
+export async function closeSelectedApp({
+  processNames,
+  confirmed,
+}: CloseSelectedAppRequest) {
+  const response = await apiPost<AutonomyResult>(
+    '/api/autonomy/close-selected-app',
+    {
+      processNames,
+      confirmed,
     },
   );
 

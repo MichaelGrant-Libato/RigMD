@@ -88,6 +88,13 @@ interface Props {
 }
 
 function shouldShowSafeActions(session: SessionDetail) {
+  if (
+    session.resolution_status?.trim().toLowerCase() ===
+    'resolved'
+  ) {
+    return false;
+  }
+
   const actionCategory =
     session.action_category?.trim().toLowerCase();
 
@@ -145,6 +152,66 @@ function getResolutionStyle(
   }
 
   return 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300';
+}
+
+function getResolutionPanelStyle(
+  status?: string,
+) {
+  if (status === 'resolved') {
+    return 'border-emerald-500/35 bg-emerald-500/[0.06]';
+  }
+
+  if (status === 'still_active') {
+    return 'border-red-500/35 bg-red-500/[0.06]';
+  }
+
+  if (status === 'needs_recheck') {
+    return 'border-orange-500/35 bg-orange-500/[0.06]';
+  }
+
+  return 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]';
+}
+
+function getProofItemView(
+  status?: string,
+) {
+  const value =
+    status?.trim().toLowerCase() ?? '';
+
+  if (value.includes('normal')) {
+    return {
+      label: 'Normal Now',
+      className:
+        'border-emerald-500/35 bg-emerald-500/[0.07]',
+      badgeClassName:
+        'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+      textClassName: 'text-emerald-200',
+    };
+  }
+
+  if (
+    value.includes('attention') ||
+    value.includes('active') ||
+    value.includes('still')
+  ) {
+    return {
+      label: 'Still Needs Attention',
+      className:
+        'border-red-500/35 bg-red-500/[0.07]',
+      badgeClassName:
+        'border-red-500/40 bg-red-500/10 text-red-300',
+      textClassName: 'text-red-100',
+    };
+  }
+
+  return {
+    label: status || 'Checked',
+    className:
+      'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)]',
+    badgeClassName:
+      'border-slate-500/35 bg-slate-500/10 text-slate-300',
+    textClassName: 'text-white',
+  };
 }
 
 function isNoActiveIssue(
@@ -394,9 +461,49 @@ export default function DiagnosticSessionDetailView({
                 }
               : prev,
         );
+
+        const resolutionResponse =
+          await apiFetch(
+            `/api/diagnosis/${sessionId}/check-resolution`,
+            {
+              method: 'POST',
+            },
+          );
+
+        if (
+          !resolutionResponse.ok
+        ) {
+          throw new Error(
+            `Server returned status ${resolutionResponse.status}`,
+          );
+        }
+
+        const resolutionData =
+          await resolutionResponse.json();
+
+        setSession(
+          (prev) =>
+            prev
+              ? {
+                  ...prev,
+
+                  resolution_status:
+                    resolutionData.resolution_status,
+
+                  resolution_checked_at:
+                    resolutionData.resolution_checked_at,
+
+                  resolution_summary:
+                    resolutionData.resolution_summary,
+
+                  resolution_proof:
+                    resolutionData.resolution_proof,
+                }
+              : prev,
+        );
       } catch {
         setError(
-          'RigMD completed the autonomy action, but could not mark this session for follow-up verification.',
+          'RigMD completed the safe action, but could not recheck whether the issue is fixed yet.',
         );
       }
     };
@@ -738,7 +845,9 @@ export default function DiagnosticSessionDetailView({
                       transition={
                         cardTransition
                       }
-                      className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+                      className={`rounded-2xl border p-6 ${getResolutionPanelStyle(
+                        session.resolution_status,
+                      )}`}
                     >
                       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
@@ -789,32 +898,51 @@ export default function DiagnosticSessionDetailView({
                             {session.resolution_proof.map(
                               (
                                 item,
-                              ) => (
-                                <div
-                                  key={
-                                    item.label
-                                  }
-                                  className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4"
-                                >
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                                    {
+                              ) => {
+                                const proofView =
+                                  getProofItemView(
+                                    item.status,
+                                  );
+
+                                return (
+                                  <div
+                                    key={
                                       item.label
                                     }
-                                  </p>
+                                    className={`rounded-xl border p-4 ${proofView.className}`}
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        {
+                                          item.label
+                                        }
+                                      </p>
 
-                                  <p className="mt-1 text-sm font-bold text-white">
-                                    {
-                                      item.value
-                                    }
-                                  </p>
+                                      <span
+                                        className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${proofView.badgeClassName}`}
+                                      >
+                                        {
+                                          proofView.label
+                                        }
+                                      </span>
+                                    </div>
 
-                                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                                    {
-                                      item.meaning
-                                    }
-                                  </p>
-                                </div>
-                              ),
+                                    <p
+                                      className={`mt-2 text-sm font-bold ${proofView.textClassName}`}
+                                    >
+                                      {
+                                        item.value
+                                      }
+                                    </p>
+
+                                    <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                                      {
+                                        item.meaning
+                                      }
+                                    </p>
+                                  </div>
+                                );
+                              },
                             )}
                           </div>
                         )}

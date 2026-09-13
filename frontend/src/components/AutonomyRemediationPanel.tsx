@@ -22,6 +22,9 @@ import {
   type AutonomyExecution,
   type AutonomyResult,
   type AgentRemediationActionId,
+  type MemoryAppCandidate,
+  closeSelectedApp,
+  getMemoryAppCandidates,
   getBackendErrorMessage,
   runAgentRemediation,
   runAutonomyExecution,
@@ -62,27 +65,58 @@ const VERIFICATION_STATUS_LABELS: Record<number, string> = {
   3: 'Could not confirm',
 };
 
-const ACTION_COPY: Record<
-  string,
-  {
-    title: string;
-    plainDescription: string;
-    willDo: string[];
-    mayChange: string[];
-    willNotTouch: string[];
-    options?: Array<{
-      id: string;
-      label: string;
-      description: string;
-      defaultChecked: boolean;
-    }>;
-  }
-> = {
+type ActionReviewCopy = {
+  title: string;
+  plainDescription: string;
+  willDo: string[];
+  mayChange: string[];
+  willNotTouch: string[];
+  beforeRun?: string[];
+  afterRun?: string[];
+  options?: Array<{
+    id: string;
+    label: string;
+    description: string;
+    defaultChecked: boolean;
+  }>;
+};
+
+const ACTION_COPY: Record<string, ActionReviewCopy> = {
+  close_selected_app: {
+    title: 'Close selected app',
+    plainDescription:
+      'RigMD will close only the app you choose. This can reduce memory pressure when one app is using a large amount of memory.',
+    willDo: [
+      'Show memory-heavy apps found in the latest live scan.',
+      'Close only the app you select.',
+      'Run Check if Fixed after the app closes.',
+    ],
+    mayChange: [
+      'The selected app may close open windows or tabs.',
+      'Unsaved work, active downloads, forms, or private windows in that app may be lost.',
+      'Memory use may drop after Windows finishes closing the app.',
+    ],
+    willNotTouch: [
+      'Apps you do not select.',
+      'Personal files saved on disk.',
+      'Passwords, accounts, or unrelated Windows settings.',
+    ],
+    beforeRun: [
+      'Choose the app you are ready to close.',
+      'Save important work in that app before continuing.',
+    ],
+    afterRun: [
+      'RigMD will recheck the saved diagnosis automatically.',
+      'If memory pressure is normal after the app closes, the saved check can become resolved.',
+    ],
+  },
+
   clear_user_temp_files: {
     title: 'Clean temporary files',
     plainDescription:
       'RigMD will remove safe temporary files that Windows and apps no longer need.',
     willDo: [
+      'Show this review before removing anything.',
       'Look for temporary files created by Windows and apps.',
       'Remove files that are safe to delete.',
       'Check the result after the cleanup finishes.',
@@ -95,6 +129,14 @@ const ACTION_COPY: Record<
       'Your documents, pictures, downloads, and desktop files.',
       'Your saved passwords or personal accounts.',
       'Installed apps.',
+    ],
+    beforeRun: [
+      'RigMD targets the current Windows user temporary folders.',
+      'This is not a scan of Documents, Pictures, Downloads, or Desktop.',
+    ],
+    afterRun: [
+      'RigMD will report whether the cleanup completed.',
+      'If proof is available, RigMD will show what was checked after the action.',
     ],
     options: [
       {
@@ -111,6 +153,7 @@ const ACTION_COPY: Record<
     plainDescription:
       'RigMD will reset the Windows DNS cache. This can help when websites or network connections act strangely.',
     willDo: [
+      'Show this review before changing the DNS cache.',
       'Clear saved website lookup records from Windows.',
       'Let Windows rebuild fresh lookup records automatically.',
       'Check the result after the reset finishes.',
@@ -123,6 +166,14 @@ const ACTION_COPY: Record<
       'Your browser history.',
       'Your Wi-Fi password or network settings.',
     ],
+    beforeRun: [
+      'RigMD targets the Windows DNS resolver cache only.',
+      'This is normally used when websites or network lookups behave incorrectly.',
+    ],
+    afterRun: [
+      'Windows will create fresh lookup records as websites are visited again.',
+      'RigMD will report whether the command completed.',
+    ],
   },
 
   clear_browser_cache: {
@@ -130,6 +181,7 @@ const ACTION_COPY: Record<
     plainDescription:
       'RigMD may clear cached browser files that can be rebuilt later.',
     willDo: [
+      'Show this review before clearing browser cache.',
       'Remove saved temporary website files.',
       'Keep the action limited to cache cleanup.',
     ],
@@ -141,6 +193,14 @@ const ACTION_COPY: Record<
       'Saved passwords.',
       'Personal files.',
     ],
+    beforeRun: [
+      'RigMD targets cached website files only.',
+      'Cache files are copies that browsers can download again later.',
+    ],
+    afterRun: [
+      'Some websites may rebuild their cache the next time they are opened.',
+      'RigMD will not sign you out intentionally or remove bookmarks.',
+    ],
   },
 
   run_disk_cleanup: {
@@ -148,6 +208,7 @@ const ACTION_COPY: Record<
     plainDescription:
       'RigMD may start a Windows cleanup task to remove system-safe temporary files.',
     willDo: [
+      'Show this review before starting Windows cleanup.',
       'Use Windows cleanup tools.',
       'Remove safe temporary files selected by Windows.',
     ],
@@ -158,8 +219,259 @@ const ACTION_COPY: Record<
       'Personal files.',
       'Installed applications.',
     ],
+    beforeRun: [
+      'RigMD uses the built-in Windows cleanup path.',
+      'Windows decides which system-safe temporary files are eligible.',
+    ],
+    afterRun: [
+      'RigMD will report whether Windows cleanup started or completed.',
+      'Available storage may improve if Windows removed temporary files.',
+    ],
+  },
+
+  restart_explorer: {
+    title: 'Restart Windows Explorer',
+    plainDescription:
+      'RigMD may restart the Windows shell. This can help when the desktop, taskbar, or File Explorer is stuck.',
+    willDo: [
+      'Show this review before restarting Windows Explorer.',
+      'Close and reopen the Windows Explorer process.',
+      'Check whether the action completed.',
+    ],
+    mayChange: [
+      'The taskbar, desktop icons, and open File Explorer windows may briefly disappear and return.',
+      'Unsaved work inside File Explorer windows may be interrupted.',
+    ],
+    willNotTouch: [
+      'Documents, pictures, downloads, or desktop files.',
+      'Passwords or accounts.',
+      'Installed apps.',
+    ],
+    beforeRun: [
+      'This targets the Windows desktop shell, not your personal files.',
+      'Open apps should stay open, but File Explorer windows may refresh.',
+    ],
+    afterRun: [
+      'The taskbar and desktop should return automatically.',
+      'RigMD will report whether the restart completed.',
+    ],
+  },
+
+  clear_windows_update_cache: {
+    title: 'Clear Windows Update cache',
+    plainDescription:
+      'RigMD may remove downloaded Windows Update files so Windows can download fresh copies later.',
+    willDo: [
+      'Show this review before touching update cache files.',
+      'Target downloaded Windows Update cache files.',
+      'Let Windows recreate the cache when updates run again.',
+    ],
+    mayChange: [
+      'Windows Update may need to download update files again.',
+      'A later update check may take longer than usual.',
+    ],
+    willNotTouch: [
+      'Personal files.',
+      'Passwords or accounts.',
+      'Installed apps outside Windows Update cache files.',
+    ],
+    beforeRun: [
+      'This targets Windows Update download cache, not user folders.',
+      'This is usually used when update downloads are stuck or corrupted.',
+    ],
+    afterRun: [
+      'Windows Update should be able to rebuild fresh update files.',
+      'RigMD will report whether the cache action completed.',
+    ],
+  },
+
+  run_sfc_scan: {
+    title: 'Run Windows system file check',
+    plainDescription:
+      'RigMD may run the built-in Windows System File Checker to inspect and repair protected Windows system files.',
+    willDo: [
+      'Show this review before starting the Windows system file check.',
+      'Run the official Windows SFC tool.',
+      'Report whether Windows found or repaired protected system file problems.',
+    ],
+    mayChange: [
+      'Windows may repair protected system files if corruption is found.',
+      'The check may take several minutes.',
+    ],
+    willNotTouch: [
+      'Personal documents, pictures, downloads, or desktop files.',
+      'Passwords or accounts.',
+      'Third-party app settings unless Windows itself changes a protected system file.',
+    ],
+    beforeRun: [
+      'This targets protected Windows system files only.',
+      'It is meant for Windows stability issues, not personal file cleanup.',
+    ],
+    afterRun: [
+      'RigMD will show whether the scan completed.',
+      'If Windows reports repairs, RigMD will show that result when available.',
+    ],
   },
 };
+
+function getFallbackActionCopy(
+  actionName?: string,
+  diagnosedCategory?: string,
+): ActionReviewCopy {
+  const category = (diagnosedCategory || '').toLowerCase();
+  const readableName = actionName || 'Safe action';
+
+  if (category.includes('memory') || category.includes('resource')) {
+    return {
+      title: readableName,
+      plainDescription:
+        'RigMD will check the part of the device related to high memory or resource use before it tries anything.',
+      willDo: [
+        'Review the current diagnosis and approved safe action.',
+        'Apply only the action connected to memory or system resource usage.',
+        'Check whether the action completed or needs another look.',
+      ],
+      mayChange: [
+        'Temporary app activity may be reduced or refreshed.',
+        'Windows may have more breathing room if the action clears temporary workload data.',
+      ],
+      willNotTouch: [
+        'Documents, pictures, downloads, or desktop files.',
+        'Passwords or accounts.',
+        'Unrelated Windows settings.',
+      ],
+      beforeRun: [
+        'Affected concept: active memory pressure, which means apps and Windows are using a large share of available RAM.',
+        'Affected concept: running workload data, such as temporary app activity RigMD uses to decide if the device is under strain.',
+      ],
+      afterRun: [
+        'Possible change: the device may feel less strained if temporary workload data is cleared or refreshed.',
+        'Possible change: RigMD may still say monitoring is needed if memory use remains high after the action.',
+      ],
+    };
+  }
+
+  if (category.includes('storage') || category.includes('disk')) {
+    return {
+      title: readableName,
+      plainDescription:
+        'RigMD will focus on storage-related cleanup or checks, not personal files.',
+      willDo: [
+        'Review the storage-related safe action before running it.',
+        'Apply only the approved storage action.',
+        'Check whether the action completed or needs another look.',
+      ],
+      mayChange: [
+        'Temporary files or cached update files may be removed.',
+        'Available storage space may increase if safe cleanup files are found.',
+      ],
+      willNotTouch: [
+        'Documents, pictures, downloads, or desktop files.',
+        'Passwords or accounts.',
+        'Installed apps.',
+      ],
+      beforeRun: [
+        'Affected concept: temporary storage, which means files Windows or apps can recreate later.',
+        'Affected concept: available space, which means how much room is left on the drive for updates, apps, and normal use.',
+      ],
+      afterRun: [
+        'Possible change: the drive may have more free space.',
+        'Possible change: Windows or apps may recreate needed temporary files later.',
+      ],
+    };
+  }
+
+  if (category.includes('network') || category.includes('internet')) {
+    return {
+      title: readableName,
+      plainDescription:
+        'RigMD will focus on Windows network lookup data, not your Wi-Fi password or account.',
+      willDo: [
+        'Review the network-related safe action before running it.',
+        'Apply only the approved network action.',
+        'Check whether the action completed or needs another look.',
+      ],
+      mayChange: [
+        'Windows may forget old website lookup records.',
+        'The next website visit may take a moment while Windows creates fresh lookup records.',
+      ],
+      willNotTouch: [
+        'Personal files.',
+        'Browser history.',
+        'Wi-Fi passwords or account passwords.',
+      ],
+      beforeRun: [
+        'Affected concept: website lookup cache, which helps Windows remember where websites are located.',
+        'Affected concept: network name lookup, not your saved Wi-Fi network or router settings.',
+      ],
+      afterRun: [
+        'Possible change: websites may be looked up fresh the next time you open them.',
+        'Possible change: a connection issue caused by stale lookup records may improve.',
+      ],
+    };
+  }
+
+  if (
+    category.includes('os') ||
+    category.includes('windows') ||
+    category.includes('performance')
+  ) {
+    return {
+      title: readableName,
+      plainDescription:
+        'RigMD will focus on the Windows area related to the diagnosis and avoid personal files.',
+      willDo: [
+        'Review the Windows-related safe action before running it.',
+        'Apply only the approved Windows action.',
+        'Check whether the action completed or needs another look.',
+      ],
+      mayChange: [
+        'A Windows tool or setting screen may open.',
+        'A Windows background component may refresh if the selected action requires it.',
+      ],
+      willNotTouch: [
+        'Documents, pictures, downloads, or desktop files.',
+        'Passwords or accounts.',
+        'Unrelated Windows settings.',
+      ],
+      beforeRun: [
+        'Affected concept: Windows behavior related to this diagnosis, such as startup, desktop, or system stability.',
+        'Affected concept: the specific safe action shown here, not the whole computer.',
+      ],
+      afterRun: [
+        'Possible change: a Windows tool may open or a Windows component may refresh.',
+        'Possible change: RigMD may ask you to check again if it cannot prove the issue improved.',
+      ],
+    };
+  }
+
+  return {
+    title: readableName,
+    plainDescription:
+      'RigMD found a safe action that may help with this diagnosis.',
+    willDo: [
+      'Show this review before running anything.',
+      'Run only the approved action for this diagnosis.',
+      'Check whether the action completed successfully.',
+    ],
+    mayChange: [
+      `Only the part related to "${readableName}" may be changed.`,
+    ],
+    willNotTouch: [
+      'Personal files unless the action clearly says so.',
+      'Passwords or accounts.',
+      'Unrelated Windows settings.',
+    ],
+    beforeRun: [
+      'Affected concept: the specific safe action shown in this popup.',
+      'If the affected area is unclear, cancel and do not continue.',
+    ],
+    afterRun: [
+      'Possible change: RigMD will show whether the action completed or failed.',
+      'If it cannot confirm success, it will say so instead of pretending it worked.',
+    ],
+  };
+}
 
 function getLatestAttempt(result?: AutonomyResult | null) {
   return result?.attempts?.[result.attempts.length - 1] ?? null;
@@ -263,28 +575,30 @@ function getPrimaryAction(result?: AutonomyResult | null) {
   return result?.plan?.plannedActions?.[0] ?? null;
 }
 
-function getReadableAction(actionId?: string, actionName?: string) {
+function getReadableAction(
+  actionId?: string,
+  actionName?: string,
+  diagnosedCategory?: string,
+) {
   if (actionId && ACTION_COPY[actionId]) {
     return ACTION_COPY[actionId];
   }
 
-  return {
-    title: actionName || 'Safe action',
-    plainDescription:
-      'RigMD found a safe action that may help with this diagnosis.',
-    willDo: [
-      'Run only the approved action for this diagnosis.',
-      'Check whether the action completed successfully.',
-    ],
-    mayChange: [
-      'Only the selected safe area of the Device may be changed.',
-    ],
-    willNotTouch: [
-      'Personal files unless the action clearly says so.',
-      'Passwords or accounts.',
-      'Unrelated Windows settings.',
-    ],
-  };
+  return getFallbackActionCopy(actionName, diagnosedCategory);
+}
+
+function shouldUseCloseSelectedAppFlow(diagnosedCategory: string) {
+  const category = diagnosedCategory.toLowerCase();
+
+  return category.includes('memory');
+}
+
+function formatMemory(memoryMb: number) {
+  if (memoryMb >= 1024) {
+    return `${(memoryMb / 1024).toFixed(1)} GB`;
+  }
+
+  return `${Math.round(memoryMb)} MB`;
 }
 
 function ProofList({ execution }: { execution?: AutonomyExecution }) {
@@ -388,13 +702,23 @@ export default function AutonomyRemediationPanel({
   const [selectedOptions, setSelectedOptions] =
     useState<Record<string, boolean>>({});
 
+  const [memoryApps, setMemoryApps] =
+    useState<MemoryAppCandidate[]>([]);
+
+  const [selectedProcessNames, setSelectedProcessNames] =
+    useState<string[]>([]);
+
   const requestActive = isPreviewLoading || isExecuteLoading;
+
+  const closeSelectedAppFlow =
+    shouldUseCloseSelectedAppFlow(diagnosedCategory);
 
   const primaryAction = getPrimaryAction(previewResult);
 
   const actionCopy = getReadableAction(
-    primaryAction?.id,
+    closeSelectedAppFlow ? 'close_selected_app' : primaryAction?.id,
     primaryAction?.name,
+    diagnosedCategory,
   );
 
   const plannedActionIds =
@@ -413,9 +737,15 @@ export default function AutonomyRemediationPanel({
 
   const canProceed =
     Boolean(previewResult) &&
-    Boolean(primaryAction) &&
     userConsentProvided &&
-    !requestActive;
+    !requestActive &&
+    (!closeSelectedAppFlow || selectedProcessNames.length > 0);
+
+  const selectedMemoryApps =
+    memoryApps.filter((app) => selectedProcessNames.includes(app.name));
+
+  const selectedAppNames =
+    selectedMemoryApps.map((app) => app.displayName || app.name);
 
   const selectedOptionLabels = useMemo(() => {
     return (actionCopy.options ?? [])
@@ -433,8 +763,44 @@ export default function AutonomyRemediationPanel({
     setExecuteError(null);
     setExecutionResult(null);
     setUserConsentProvided(false);
+    setSelectedProcessNames([]);
+    setMemoryApps([]);
 
     try {
+      if (closeSelectedAppFlow) {
+        const apps = await getMemoryAppCandidates();
+
+        setMemoryApps(apps);
+        setPreviewResult({
+          plan: {
+            sessionId,
+            plannedActions: [
+              {
+                id: 'close_selected_app',
+                name: 'Close selected app',
+                description:
+                  'Close only the memory-heavy app selected by the user.',
+                category: 'Troubleshoot',
+                riskLevel: 'User-confirmed',
+                isReversible: false,
+                requiresUserConfirmation: true,
+              },
+            ],
+          },
+          safety: {
+            isApproved: true,
+            requiresUserConfirmation: true,
+            warnings: [
+              'The selected app may close open windows, tabs, downloads, or unsaved work.',
+            ],
+          },
+        });
+
+        setSelectedOptions({});
+        setReviewOpen(true);
+        return;
+      }
+
       const result = await runAutonomyPreview({
         sessionId,
         diagnosedCategory,
@@ -443,7 +809,11 @@ export default function AutonomyRemediationPanel({
       setPreviewResult(result);
 
       const action = getPrimaryAction(result);
-      const readable = getReadableAction(action?.id, action?.name);
+      const readable = getReadableAction(
+        action?.id,
+        action?.name,
+        diagnosedCategory,
+      );
 
       const defaultOptions: Record<string, boolean> = {};
       readable.options?.forEach((option) => {
@@ -473,7 +843,12 @@ export default function AutonomyRemediationPanel({
 
     try {
       const result =
-        shouldExecuteThroughAgent && agentActionId
+        closeSelectedAppFlow
+          ? await closeSelectedApp({
+              processNames: selectedProcessNames,
+              confirmed: true,
+            })
+          : shouldExecuteThroughAgent && agentActionId
           ? await runAgentRemediation(agentActionId)
           : await runAutonomyExecution({
               sessionId,
@@ -625,7 +1000,134 @@ export default function AutonomyRemediationPanel({
                   ))}
                 </ul>
               </div>
+
+              {(actionCopy.beforeRun || actionCopy.afterRun) && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {actionCopy.beforeRun && (
+                    <div className="rounded-xl border border-slate-400/20 bg-slate-400/[0.04] p-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                        Before it runs
+                      </h4>
+
+                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                        {actionCopy.beforeRun.map((item) => (
+                          <li key={item}>- {item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {actionCopy.afterRun && (
+                    <div className="rounded-xl border border-slate-400/20 bg-slate-400/[0.04] p-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                        After it runs
+                      </h4>
+
+                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                        {actionCopy.afterRun.map((item) => (
+                          <li key={item}>- {item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+
+            {closeSelectedAppFlow && (
+              <div className="mt-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                  Choose apps to close
+                </h4>
+
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  Pick only apps you are ready to close. RigMD hides Windows,
+                  RigMD, and background helper processes from this list.
+                </p>
+
+                {memoryApps.length === 0 ? (
+                  <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-3 text-xs leading-relaxed text-amber-100">
+                    RigMD does not see a memory-heavy app that is safe to close
+                    right now. Close apps manually if needed, then use Check if
+                    Fixed.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {memoryApps.map((app) => {
+                      const selected =
+                        selectedProcessNames.includes(app.name);
+
+                      return (
+                        <label
+                          key={app.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition ${
+                            selected
+                              ? 'border-cyan-400/60 bg-cyan-400/[0.08] text-cyan-100'
+                              : 'border-[var(--rigmd-border)] bg-black/10 text-slate-300 hover:border-cyan-400/30'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            name="memory-app"
+                            checked={selected}
+                            onChange={() =>
+                              setSelectedProcessNames((prev) =>
+                                selected
+                                  ? prev.filter((name) => name !== app.name)
+                                  : [...prev, app.name],
+                              )
+                            }
+                            className="mt-1"
+                          />
+
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-white">
+                                {app.displayName || app.name}
+                              </span>
+
+                              <span className="rounded-full border border-slate-400/25 bg-slate-400/10 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-300">
+                                {app.appKind || 'App'}
+                              </span>
+
+                              <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold uppercase text-cyan-200">
+                                {formatMemory(app.memoryMb)}
+                              </span>
+                            </span>
+
+                            <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                              {app.processCount} related process
+                              {app.processCount === 1 ? '' : 'es'} will be
+                              closed if Windows allows it.
+                            </span>
+
+                            {app.detail && (
+                              <span className="mt-2 block text-xs leading-relaxed text-slate-400">
+                                {app.detail}
+                              </span>
+                            )}
+
+                            {selected && app.closeWarning && (
+                              <span className="mt-2 block rounded-md border border-amber-400/20 bg-amber-400/[0.05] p-2 text-xs leading-relaxed text-amber-100">
+                                {app.closeWarning}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {selectedMemoryApps.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-red-400/25 bg-red-400/[0.06] p-3 text-xs leading-relaxed text-red-100">
+                    You selected {selectedAppNames.join(', ')}. RigMD will try
+                    to close only these apps, then recheck whether memory
+                    pressure improved.
+                  </div>
+                )}
+              </div>
+            )}
 
             {actionCopy.options && actionCopy.options.length > 0 && (
               <div className="mt-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
@@ -672,7 +1174,7 @@ export default function AutonomyRemediationPanel({
               </div>
             )}
 
-            <label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] p-4 text-sm text-amber-100">
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] p-4 text-sm text-amber-100">
               <input
                 type="checkbox"
                 checked={userConsentProvided}
@@ -684,6 +1186,9 @@ export default function AutonomyRemediationPanel({
 
               <span>
                 I understand what RigMD is about to do and want to continue.
+                <span className="mt-1 block text-xs text-amber-100/70">
+                  This box must be checked before the Proceed button becomes active.
+                </span>
               </span>
             </label>
 
@@ -709,7 +1214,13 @@ export default function AutonomyRemediationPanel({
                   <Play size={16} />
                 )}
 
-                {isExecuteLoading ? 'Running...' : 'Proceed'}
+                {isExecuteLoading
+                  ? 'Running...'
+                  : closeSelectedAppFlow && selectedProcessNames.length === 0
+                    ? 'Choose at least one app'
+                    : userConsentProvided
+                    ? 'Proceed'
+                    : 'Check the box to proceed'}
               </motion.button>
             </div>
           </motion.div>

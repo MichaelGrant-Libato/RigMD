@@ -547,6 +547,18 @@ function getProofCardStyle(
   const statusValue =
     (status ?? '').toLowerCase();
 
+  if (statusValue.includes('normal')) {
+    return 'border-emerald-500/35 bg-emerald-500/[0.07]';
+  }
+
+  if (
+    statusValue.includes('attention') ||
+    statusValue.includes('active') ||
+    statusValue.includes('still')
+  ) {
+    return 'border-red-500/35 bg-red-500/[0.07]';
+  }
+
   if (
     normalizeActionCategory(action) ===
       'Escalate' ||
@@ -596,9 +608,9 @@ function getResolutionView(
     value === 'unresolved'
   ) {
     return {
-      label: 'Unresolved',
+      label: 'Still Active',
       className:
-        'border-amber-500/30 bg-amber-500/5 text-amber-300',
+        'border-red-500/35 bg-red-500/[0.08] text-red-300',
       fallback:
         'The issue is still detected after checking the latest live scan.',
     };
