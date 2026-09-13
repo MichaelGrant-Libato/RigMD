@@ -46,6 +46,15 @@ public interface INetworkProvider
     NetworkStatsDto GetNetworkStats();
 }
 
+public interface IBatteryProvider
+{
+    BatteryStatsDto? GetBatteryStats();
+}
+
+public interface IDeviceTypeProvider
+{
+    string GetDeviceType();
+}
 
 public interface IWindowsSystemProfileService
 {

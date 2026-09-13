@@ -89,9 +89,19 @@ public class NetworkStatsDto
     public string DnsResolutionMessage { get; set; } = string.Empty;
 }
 
+public class BatteryStatsDto
+{
+    public bool HasBattery { get; set; }
+    public int EstimatedChargeRemaining { get; set; }
+    public int BatteryStatus { get; set; }
+    public string StatusDescription { get; set; } = string.Empty;
+    public int EstimatedRunTime { get; set; }
+}
+
 public class HardwareProfileDto
 {
     public string DeviceName { get; set; } = string.Empty;
+    public string DeviceType { get; set; } = "Unknown";
     public string OsVersion { get; set; } = string.Empty;
     public string SystemAge { get; set; } = string.Empty;
     public string ChipsetDriver { get; set; } = string.Empty;
@@ -102,6 +112,7 @@ public class HardwareProfileDto
     public MemoryStatsDto Ram { get; set; } = new();
 
     public NetworkStatsDto Network { get; set; } = new();
+    public BatteryStatsDto? Battery { get; set; }
     
     public List<StorageDriveDto> StorageDrives { get; set; } = new();
     public List<DiskVolumeDto> AllDisks { get; set; } = new();

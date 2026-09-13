@@ -48,6 +48,14 @@ builder.Services.AddScoped<
     ProcessProvider>();
 
 builder.Services.AddScoped<
+    IBatteryProvider,
+    WmiBatteryProvider>();
+
+builder.Services.AddScoped<
+    IDeviceTypeProvider,
+    WmiDeviceTypeProvider>();
+
+builder.Services.AddScoped<
     IWindowsSystemProfileService,
     WindowsSystemProfileService>();
 
