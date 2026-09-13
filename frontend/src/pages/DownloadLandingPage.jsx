@@ -16,10 +16,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 const RELEASE_DOWNLOAD_URL =
-  'https://github.com/MichaelGrant-Libato/RigMD/releases/download/v0.1.1-beta/RigMD-Setup-v0.1.1-beta.exe';
+  'https://github.com/MichaelGrant-Libato/RigMD/releases/latest/download/RigMD-Setup.exe';
 
 const INSTALLER_SHA256 =
-  'd9d9db1026c9247e20f8f6abe75ffd2eb712a805705d419fdb84cd3589245c8a';
+  ''; // You can remove this or dynamically fetch it if needed, but hardcoding it breaks on new releases.
 
 const features = [
   [
