@@ -262,6 +262,7 @@ const COMPONENT_GROUPS: {
         icon: Activity,
       },
 
+      /*
       {
         id: 'startup',
         title: 'Startup / Boot',
@@ -269,6 +270,7 @@ const COMPONENT_GROUPS: {
           'Startup-related system evidence and configuration.',
         icon: Power,
       },
+      */
 
       {
         id: 'drivers',
@@ -278,6 +280,7 @@ const COMPONENT_GROUPS: {
         icon: AlertTriangle,
       },
 
+      /*
       {
         id: 'thermal',
         title: 'Thermals / Fan',
@@ -285,6 +288,7 @@ const COMPONENT_GROUPS: {
           'Available thermal and workload-related evidence.',
         icon: Fan,
       },
+      */
 
       {
         id: 'battery',
@@ -316,6 +320,7 @@ const COMPONENT_GROUPS: {
         icon: Monitor,
       },
 
+      /*
       {
         id: 'peripherals',
         title: 'USB / Peripherals',
@@ -323,7 +328,9 @@ const COMPONENT_GROUPS: {
           'Connected device and peripheral-related information.',
         icon: Usb,
       },
+      */
 
+      /*
       {
         id: 'audio',
         title: 'Audio',
@@ -331,6 +338,7 @@ const COMPONENT_GROUPS: {
           'Audio-device and related driver evidence.',
         icon: Volume2,
       },
+      */
     ],
   },
 ];
