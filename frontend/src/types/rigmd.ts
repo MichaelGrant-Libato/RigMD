@@ -12,6 +12,20 @@ export interface AgentStatus {
 
 export interface AgentHardwareSnapshot {
   deviceName: string;
+  deviceType?: string;
+  activePowerPlan?: string;
+  connectedDisplays?: number;
+  battery?: {
+    isCharging: boolean;
+    chargePercent: number;
+    healthStatus: string;
+  } | null;
+  network?: {
+    isWifi: boolean;
+    wifiSignalStrength: number | null;
+    macAddress: string;
+    ipAddress: string;
+  } | null;
   osVersion: string;
   systemAge: string;
   chipsetDriver: string;
@@ -103,6 +117,20 @@ export type AutomaticScanStage =
 
 export interface HardwareStats {
   device_name: string;
+  device_type?: string;
+  active_power_plan?: string;
+  connected_displays?: number;
+  battery?: {
+    is_charging: boolean;
+    charge_percent: number;
+    health_status: string;
+  } | null;
+  network?: {
+    is_wifi: boolean;
+    wifi_signal_strength: number | null;
+    mac_address: string;
+    ip_address: string;
+  } | null;
   os_version: string;
   system_age: string;
   chipset_driver: string;

@@ -9,6 +9,10 @@ import {
   Monitor,
   RefreshCw,
   Terminal,
+  Battery,
+  BatteryCharging,
+  Wifi,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -294,12 +298,61 @@ export default function SystemProfileView({
                 </motion.div>
               </section>
 
+              {(stats.device_type === 'Laptop' || stats.device_type === 'Notebook') && (
+                <section className="mt-2">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-bold text-white">Laptop Health</h3>
+                    <p className="text-sm text-slate-500">Live battery and network details for this portable device.</p>
+                  </div>
+
+                  <motion.div
+                    variants={cardFadeUp}
+                    initial="hidden"
+                    animate="visible"
+                    transition={cardTransition}
+                    className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+                  >
+                    {stats.battery && (
+                      <FriendlyInfoCard
+                        icon={stats.battery.is_charging ? BatteryCharging : Battery}
+                        title="Battery"
+                        value={`${stats.battery.charge_percent}%`}
+                        helper={`Health: ${stats.battery.health_status}`}
+                        tone={stats.battery.charge_percent <= 20 && !stats.battery.is_charging ? 'danger' : 'good'}
+                        warningLabel={stats.battery.charge_percent <= 20 && !stats.battery.is_charging ? 'Low battery' : ''}
+                      />
+                    )}
+                    {stats.network && (
+                      <FriendlyInfoCard
+                        icon={stats.network.is_wifi ? Wifi : Activity}
+                        title="Network"
+                        value={stats.network.is_wifi ? 'Wi-Fi Connected' : 'Ethernet Connected'}
+                        helper={stats.network.is_wifi && stats.network.wifi_signal_strength ? `Signal: ${stats.network.wifi_signal_strength}%` : ''}
+                        tone={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'watch' : 'good'}
+                        warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'Weak signal' : ''}
+                      />
+                    )}
+                    {stats.active_power_plan && (
+                      <FriendlyInfoCard
+                        icon={Zap}
+                        title="Power Plan"
+                        value={stats.active_power_plan}
+                        tone="neutral"
+                      />
+                    )}
+                  </motion.div>
+                </section>
+              )}
+
               <details className="rounded-xl border border-[var(--rigmd-border)] bg-[#101821] p-5">
                 <summary className="cursor-pointer rounded font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">Technical details</summary>
                 <dl className="mt-4 divide-y divide-slate-700/50">
                   {[
                     ['Processor model', cleanValue(stats.cpu.name)],
+                    ['Total Storage Space', stats.storage_drives?.map(d => `${d.model} (${formatStorageSize(d.size_gb)})`).join(', ') || 'Not available'],
+                    ['System Storage Breakdown', stats.storage_drives?.flatMap(d => d.volumes?.map(v => `${v.drive} (${formatStorageSize(v.total_gb)})`)).join(', ') || 'Not available'],
                     ['Windows version', cleanValue(stats.os_version)],
+                    ['Connected displays', stats.connected_displays ? `${stats.connected_displays}` : '1'],
                     ['Graphics driver', cleanValue(stats.gpu.driver)],
                     ['Motherboard model', stats.chipset_driver === 'Standard/Auto-Managed' ? 'Not available' : cleanValue(stats.chipset_driver).replace(/\s*\(Auto-Managed\)$/, '')],
                     ['Time since Windows installation (estimate)', cleanValue(stats.system_age).replace(/^~/, 'About ').replace(/\b1 years\b/, '1 year')],

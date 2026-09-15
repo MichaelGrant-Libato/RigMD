@@ -73,12 +73,28 @@ public class HardwareController : ControllerBase
                     used_gb = profile.Ram.UsedGb,
                     usage_percent = profile.Ram.UsagePercent
                 },
+                device_type = profile.DeviceType,
+                active_power_plan = profile.ActivePowerPlan,
+                connected_displays = profile.ConnectedDisplays,
+                battery = profile.Battery != null ? new
+                {
+                    is_charging = profile.Battery.IsCharging,
+                    charge_percent = profile.Battery.ChargePercent,
+                    health_status = profile.Battery.HealthStatus
+                } : null,
+                network = profile.Network != null ? new
+                {
+                    is_wifi = profile.Network.IsWifi,
+                    wifi_signal_strength = profile.Network.WifiSignalStrength,
+                    mac_address = profile.Network.MacAddress,
+                    ip_address = profile.Network.IpAddress
+                } : null,
                 disk = new
                 {
-                    total_gb = profile.AllDisks.Sum(d => d.TotalGb),
-                    used_gb = profile.AllDisks.Sum(d => d.UsedGb),
-                    usage_percent = profile.AllDisks.Any()
-                        ? Math.Round(profile.AllDisks.Sum(d => d.UsedGb) / Math.Max(profile.AllDisks.Sum(d => d.TotalGb), 1) * 100, 1)
+                    total_gb = profile.StorageDrives.Sum(d => d.SizeGb),
+                    used_gb = profile.StorageDrives.Sum(d => d.UsedGb ?? 0),
+                    usage_percent = profile.StorageDrives.Any()
+                        ? Math.Round(profile.StorageDrives.Sum(d => d.UsedGb ?? 0) / Math.Max(profile.StorageDrives.Sum(d => d.SizeGb), 1) * 100, 1)
                         : 0
                 },
                 all_disks = profile.AllDisks.Select(d => new
