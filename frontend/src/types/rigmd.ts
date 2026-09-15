@@ -25,7 +25,20 @@ export interface AgentHardwareSnapshot {
     wifiSignalStrength: number | null;
     macAddress: string;
     ipAddress: string;
+    pingLatencyMs?: number | null;
+    packetLossPercent?: number | null;
   } | null;
+  displays?: Array<{
+    name: string;
+    resolution: string;
+    refreshRate: number;
+  }>;
+  deviceErrors?: Array<{
+    name: string;
+    deviceId: string;
+    errorCode: number;
+    description: string;
+  }>;
   osVersion: string;
   systemAge: string;
   chipsetDriver: string;
@@ -130,7 +143,20 @@ export interface HardwareStats {
     wifi_signal_strength: number | null;
     mac_address: string;
     ip_address: string;
+    ping_latency_ms?: number | null;
+    packet_loss_percent?: number | null;
   } | null;
+  displays?: Array<{
+    name: string;
+    resolution: string;
+    refresh_rate: number;
+  }>;
+  device_errors?: Array<{
+    name: string;
+    device_id: string;
+    error_code: number;
+    description: string;
+  }>;
   os_version: string;
   system_age: string;
   chipset_driver: string;

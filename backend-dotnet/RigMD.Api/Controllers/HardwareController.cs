@@ -87,7 +87,9 @@ public class HardwareController : ControllerBase
                     is_wifi = profile.Network.IsWifi,
                     wifi_signal_strength = profile.Network.WifiSignalStrength,
                     mac_address = profile.Network.MacAddress,
-                    ip_address = profile.Network.IpAddress
+                    ip_address = profile.Network.IpAddress,
+                    ping_latency_ms = profile.Network.PingLatencyMs,
+                    packet_loss_percent = profile.Network.PacketLossPercent
                 } : null,
                 disk = new
                 {
@@ -121,7 +123,20 @@ public class HardwareController : ControllerBase
                         process_count = a.ProcessCount,
                         memory_mb = a.MemoryMb
                     })
-                }
+                },
+                displays = profile.Displays.Select(d => new
+                {
+                    name = d.Name,
+                    resolution = d.Resolution,
+                    refresh_rate = d.RefreshRate
+                }),
+                device_errors = profile.DeviceErrors.Select(e => new
+                {
+                    name = e.Name,
+                    device_id = e.DeviceId,
+                    error_code = e.ErrorCode,
+                    description = e.Description
+                })
             });
         }
         catch (Exception ex)

@@ -89,6 +89,10 @@ public class NetworkStatsDto
     public string DnsResolutionMessage { get; set; } = string.Empty;
     public bool IsWifi { get; set; }
     public int WifiSignalStrength { get; set; }
+    public long? PingLatencyMs { get; set; }
+    public double? PacketLossPercent { get; set; }
+    public string MacAddress { get; set; } = string.Empty;
+    public string IpAddress { get; set; } = string.Empty;
 }
 
 public class BatteryStatsDto
@@ -98,6 +102,26 @@ public class BatteryStatsDto
     public int BatteryStatus { get; set; }
     public string StatusDescription { get; set; } = string.Empty;
     public int EstimatedRunTime { get; set; }
+    
+    // Laptop UI Properties
+    public bool IsCharging { get; set; }
+    public int ChargePercent { get; set; }
+    public string HealthStatus { get; set; } = "Good";
+}
+
+public class DisplayStatsDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Resolution { get; set; } = string.Empty;
+    public int RefreshRate { get; set; }
+}
+
+public class DeviceErrorDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string DeviceId { get; set; } = string.Empty;
+    public uint ErrorCode { get; set; }
+    public string Description { get; set; } = string.Empty;
 }
 
 public class HardwareProfileDto
@@ -110,6 +134,9 @@ public class HardwareProfileDto
     public string PrimaryStorageType { get; set; } = string.Empty;
     public string ActivePowerPlan { get; set; } = string.Empty;
     public int ConnectedDisplays { get; set; }
+    
+    public List<DisplayStatsDto> Displays { get; set; } = new();
+    public List<DeviceErrorDto> DeviceErrors { get; set; } = new();
     
     public CpuStatsDto Cpu { get; set; } = new();
     public GpuStatsDto Gpu { get; set; } = new();

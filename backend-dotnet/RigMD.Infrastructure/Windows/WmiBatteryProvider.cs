@@ -44,13 +44,18 @@ public class WmiBatteryProvider : IBatteryProvider
                     _ => "Unknown"
                 };
 
+                bool isCharging = status == 2 || status == 6 || status == 7 || status == 8 || status == 9;
+
                 return new BatteryStatsDto
                 {
                     HasBattery = true,
                     EstimatedChargeRemaining = charge,
                     BatteryStatus = status,
                     StatusDescription = description,
-                    EstimatedRunTime = runTime == 71582788 ? 0 : runTime // 71582788 usually means calculating
+                    EstimatedRunTime = runTime == 71582788 ? 0 : runTime, // 71582788 usually means calculating
+                    IsCharging = isCharging,
+                    ChargePercent = charge,
+                    HealthStatus = "Good" // WMI doesn't easily expose health wear without deeper queries, default to Good for now
                 };
             }
         }

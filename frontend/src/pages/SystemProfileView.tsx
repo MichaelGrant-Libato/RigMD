@@ -221,6 +221,17 @@ export default function SystemProfileView({
             </div>
           )}
 
+          {stats?.device_errors && stats.device_errors.length > 0 && (
+            <div className="rounded-lg border border-red-500/25 bg-red-500/10 p-4 text-sm font-medium text-red-300">
+              <h4 className="mb-1 font-bold">Warning: Hardware Errors Detected</h4>
+              <ul className="list-disc pl-5">
+                {stats.device_errors.map(err => (
+                  <li key={err.device_id}>{err.name} (Code {err.error_code})</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {!stats ? (
             <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6">
               <div className="flex items-start gap-3">
@@ -279,6 +290,7 @@ export default function SystemProfileView({
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
+                    helper={stats.displays && stats.displays.length > 0 ? stats.displays.map(d => `${d.resolution} @ ${d.refresh_rate}Hz`).join(' / ') : undefined}
                     tone="neutral"
                   />
 
@@ -327,8 +339,18 @@ export default function SystemProfileView({
                         icon={stats.network.is_wifi ? Wifi : Activity}
                         title="Network"
                         value={stats.network.is_wifi ? 'Wi-Fi Connected' : 'Ethernet Connected'}
-                        helper={stats.network.is_wifi && stats.network.wifi_signal_strength ? `Signal: ${stats.network.wifi_signal_strength}%` : ''}
-                        tone={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'watch' : 'good'}
+                        helper={
+                          [
+                            stats.network.is_wifi && stats.network.wifi_signal_strength ? `Signal: ${stats.network.wifi_signal_strength}%` : '',
+                            stats.network.ping_latency_ms ? `Ping: ${stats.network.ping_latency_ms}ms` : ''
+                          ].filter(Boolean).join(' | ') || undefined
+                        }
+                        tone={
+                          (stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50) ||
+                          (stats.network.ping_latency_ms && stats.network.ping_latency_ms > 150)
+                            ? 'watch'
+                            : 'good'
+                        }
                         warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'Weak signal' : ''}
                       />
                     )}
