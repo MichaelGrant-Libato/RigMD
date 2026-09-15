@@ -64,6 +64,7 @@ public interface IPowerProvider
 public interface IDisplayProvider
 {
     int GetConnectedDisplays();
+    List<DisplayStatsDto> GetDisplays();
 }
 
 public interface IWindowsSystemProfileService

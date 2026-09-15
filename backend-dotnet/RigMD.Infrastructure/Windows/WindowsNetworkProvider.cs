@@ -104,6 +104,40 @@ public class WindowsNetworkProvider :
                     result.DnsResolutionSucceeded
                         ? $"DNS resolution for {DnsTestHost} succeeded."
                         : $"DNS resolution for {DnsTestHost} returned no addresses.";
+                        
+                // Add Ping Test to 8.8.8.8
+                if (result.HasActiveAdapter)
+                {
+                    try
+                    {
+                        using var ping = new Ping();
+                        var buffer = new byte[32];
+                        int timeout = 1000;
+                        int successfulPings = 0;
+                        long totalRoundtripTime = 0;
+                        int pingCount = 4;
+                        
+                        for (int i = 0; i < pingCount; i++)
+                        {
+                            var reply = ping.Send("8.8.8.8", timeout, buffer);
+                            if (reply.Status == IPStatus.Success)
+                            {
+                                successfulPings++;
+                                totalRoundtripTime += reply.RoundtripTime;
+                            }
+                        }
+                        
+                        if (successfulPings > 0)
+                        {
+                            result.PingLatencyMs = totalRoundtripTime / successfulPings;
+                        }
+                        result.PacketLossPercent = ((double)(pingCount - successfulPings) / pingCount) * 100;
+                    }
+                    catch
+                    {
+                        // Ignore ping errors (e.g. ICMP blocked)
+                    }
+                }
             }
             catch (Exception ex)
             {

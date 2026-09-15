@@ -77,10 +77,19 @@ function agentSnapshotToHardwareStats(
 
   return {
     device_name: hardware.deviceName,
+    device_type: hardware.deviceType,
     os_version: hardware.osVersion,
     system_age: hardware.systemAge,
     chipset_driver: hardware.chipsetDriver,
     storage_type: hardware.primaryStorageType,
+
+    connected_displays: hardware.connectedDisplays,
+    active_power_plan: hardware.activePowerPlan,
+    battery: hardware.battery ? {
+      is_charging: hardware.battery.isCharging,
+      charge_percent: hardware.battery.chargePercent,
+      health_status: hardware.battery.healthStatus,
+    } : null,
 
     cpu: {
       name: hardware.cpu.name,
@@ -108,6 +117,28 @@ function agentSnapshotToHardwareStats(
       used_gb: primaryDisk?.usedGb ?? 0,
       usage_percent: primaryDisk?.usagePercent ?? 0,
     },
+
+    network: hardware.network ? {
+      is_wifi: hardware.network.isWifi,
+      wifi_signal_strength: hardware.network.wifiSignalStrength,
+      mac_address: hardware.network.macAddress,
+      ip_address: hardware.network.ipAddress,
+      ping_latency_ms: hardware.network.pingLatencyMs,
+      packet_loss_percent: hardware.network.packetLossPercent,
+    } : null,
+
+    displays: hardware.displays?.map(d => ({
+      name: d.name,
+      resolution: d.resolution,
+      refresh_rate: d.refreshRate
+    })),
+
+    device_errors: hardware.deviceErrors?.map(e => ({
+      name: e.name,
+      device_id: e.deviceId,
+      error_code: e.errorCode,
+      description: e.description
+    })),
 
     storage_drives: (hardware.storageDrives ?? []).map((drive) => ({
       model: drive.model,

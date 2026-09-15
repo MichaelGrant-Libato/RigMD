@@ -86,6 +86,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             PrimaryStorageType = _storageProvider.GetPrimaryStorageType(),
             ActivePowerPlan = _powerProvider.GetActivePowerPlan(),
             ConnectedDisplays = _displayProvider.GetConnectedDisplays(),
+            Displays = _displayProvider.GetDisplays(),
+            DeviceErrors = GetDeviceErrors(),
             
             Battery = _batteryProvider.GetBatteryStats(),
             
@@ -99,5 +101,34 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             
             ProcessInsights = _processProvider.GetProcessInsights()
         };
+    }
+
+    private List<DeviceErrorDto> GetDeviceErrors()
+    {
+        var errors = new List<DeviceErrorDto>();
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher("SELECT Name, DeviceID, ConfigManagerErrorCode, Status FROM Win32_PnPEntity WHERE ConfigManagerErrorCode <> 0");
+            foreach (var obj in searcher.Get())
+            {
+                var name = obj["Name"]?.ToString() ?? "Unknown Device";
+                var deviceId = obj["DeviceID"]?.ToString() ?? "";
+                var errorCode = obj["ConfigManagerErrorCode"] != null ? Convert.ToUInt32(obj["ConfigManagerErrorCode"]) : 0;
+                var status = obj["Status"]?.ToString() ?? "";
+
+                errors.Add(new DeviceErrorDto
+                {
+                    Name = name,
+                    DeviceId = deviceId,
+                    ErrorCode = errorCode,
+                    Description = $"Device reported error code {errorCode}. Status: {status}"
+                });
+            }
+        }
+        catch
+        {
+            // Ignore
+        }
+        return errors;
     }
 }
