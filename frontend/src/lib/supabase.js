@@ -1,14 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? '';
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? '';
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? '';
 
 const isDatabaseConnectionString =
   /^postgres(?:ql)?:\/\//i.test(supabaseUrl);
 
 export const supabaseConfigError = (() => {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!supabaseUrl || !supabaseKey) {
     return 'Supabase authentication is not configured yet.';
   }
 
@@ -26,7 +25,7 @@ export const supabaseConfigError = (() => {
 export const hasSupabaseConfig = !supabaseConfigError;
 
 export const supabase = hasSupabaseConfig
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseKey)
   : null;
 
 export function isEmailVerified(user) {
