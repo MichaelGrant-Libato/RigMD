@@ -57,12 +57,25 @@ export interface AgentHardwareSnapshot {
     type: string;
     driver: string;
     vramGb: number;
+    dedicatedMemoryGb?: number;
+    sharedMemoryGb?: number;
+    driverDate?: string;
+    directxVersion?: string;
+    physicalLocation?: string;
+    temperatureCelsius?: number;
   };
 
   ram: {
     usedGb: number;
     totalGb: number;
     usagePercent: number;
+    speedMtps?: number;
+    slotsUsed?: number;
+    slotsTotal?: number;
+    formFactor?: string;
+    hardwareReservedMb?: number;
+    committedGb?: number;
+    cachedGb?: number;
   };
 
   storageDrives: Array<{
@@ -188,17 +201,39 @@ export interface HardwareStats {
     cores: number;
     threads: number;
     frequency_mhz: number;
+    max_frequency_mhz?: number;
+    sockets?: number;
+    virtualization_enabled?: boolean;
+    l1_cache_kb?: number;
+    l2_cache_mb?: number;
+    l3_cache_mb?: number;
+    processes?: number;
+    handles?: number;
+    temperature_celsius?: number;
   };
   gpu: {
     name: string;
     driver: string;
     type: string;
     vram_gb: number;
+    dedicated_memory_gb?: number;
+    shared_memory_gb?: number;
+    driver_date?: string;
+    directx_version?: string;
+    physical_location?: string;
+    temperature_celsius?: number;
   };
   ram: {
     total_gb: number;
     used_gb: number;
     usage_percent: number;
+    speed_mtps?: number;
+    slots_used?: number;
+    slots_total?: number;
+    form_factor?: string;
+    hardware_reserved_mb?: number;
+    committed_gb?: number;
+    cached_gb?: number;
   };
   disk: {
     total_gb: number;

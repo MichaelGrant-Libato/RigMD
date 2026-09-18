@@ -97,6 +97,15 @@ function agentSnapshotToHardwareStats(
       cores: hardware.cpu.cores,
       threads: hardware.cpu.threads,
       frequency_mhz: hardware.cpu.frequencyMhz,
+      max_frequency_mhz: (hardware.cpu as any).maxFrequencyMhz,
+      sockets: (hardware.cpu as any).sockets,
+      virtualization_enabled: (hardware.cpu as any).virtualizationEnabled,
+      l1_cache_kb: (hardware.cpu as any).l1CacheKb,
+      l2_cache_mb: (hardware.cpu as any).l2CacheMb,
+      l3_cache_mb: (hardware.cpu as any).l3CacheMb,
+      processes: (hardware.cpu as any).processes,
+      handles: (hardware.cpu as any).handles,
+      temperature_celsius: (hardware.cpu as any).temperatureCelsius,
     },
 
     gpu: {
@@ -104,12 +113,25 @@ function agentSnapshotToHardwareStats(
       driver: hardware.gpu.driver,
       type: hardware.gpu.type,
       vram_gb: hardware.gpu.vramGb,
+      dedicated_memory_gb: hardware.gpu.dedicatedMemoryGb,
+      shared_memory_gb: hardware.gpu.sharedMemoryGb,
+      driver_date: hardware.gpu.driverDate,
+      directx_version: hardware.gpu.directxVersion,
+      physical_location: hardware.gpu.physicalLocation,
+      temperature_celsius: hardware.gpu.temperatureCelsius,
     },
 
     ram: {
       total_gb: hardware.ram.totalGb,
       used_gb: hardware.ram.usedGb,
       usage_percent: hardware.ram.usagePercent,
+      speed_mtps: hardware.ram.speedMtps,
+      slots_used: hardware.ram.slotsUsed,
+      slots_total: hardware.ram.slotsTotal,
+      form_factor: hardware.ram.formFactor,
+      hardware_reserved_mb: hardware.ram.hardwareReservedMb,
+      committed_gb: hardware.ram.committedGb,
+      cached_gb: hardware.ram.cachedGb,
     },
 
     disk: {

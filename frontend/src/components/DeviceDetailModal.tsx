@@ -14,19 +14,30 @@ interface DeviceDetailModalProps {
   stats: HardwareStats | null;
 }
 
+interface DiskTelemetryPoint {
+  DeviceId: string;
+  ActiveTimePercent: number;
+  ReadKbps: number;
+  WriteKbps: number;
+}
+
 interface TelemetryPoint {
   time: string;
   CpuUsagePercent: number;
   RamUsagePercent: number;
   GpuUsagePercent: number;
-  DiskActiveTimePercent: number;
   NetworkSendKbps: number;
   NetworkReceiveKbps: number;
   CpuSpeedMhz: number;
   RamUsedGb: number;
   GpuMemoryUsedGb: number;
-  DiskReadKbps: number;
-  DiskWriteKbps: number;
+  CpuTempCelsius?: number;
+  CpuProcesses?: number;
+  CpuThreads?: number;
+  CpuHandles?: number;
+  GpuTempCelsius?: number;
+  GpuMemoryTotalGb?: number;
+  Disks: DiskTelemetryPoint[];
 }
 
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats }: DeviceDetailModalProps) {
@@ -42,14 +53,12 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
       CpuUsagePercent: 0,
       RamUsagePercent: 0,
       GpuUsagePercent: 0,
-      DiskActiveTimePercent: 0,
       NetworkSendKbps: 0,
       NetworkReceiveKbps: 0,
       CpuSpeedMhz: 0,
       RamUsedGb: 0,
       GpuMemoryUsedGb: 0,
-      DiskReadKbps: 0,
-      DiskWriteKbps: 0,
+      Disks: [],
     }));
     setData(initialData);
 
@@ -68,14 +77,18 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             CpuUsagePercent: telemetry.cpuUsagePercent || 0,
             RamUsagePercent: telemetry.ramUsagePercent || 0,
             GpuUsagePercent: telemetry.gpuUsagePercent || 0,
-            DiskActiveTimePercent: telemetry.diskActiveTimePercent || 0,
             NetworkSendKbps: telemetry.networkSendKbps || 0,
             NetworkReceiveKbps: telemetry.networkReceiveKbps || 0,
             CpuSpeedMhz: telemetry.cpuSpeedMhz || 0,
             RamUsedGb: telemetry.ramUsedGb || 0,
             GpuMemoryUsedGb: telemetry.gpuMemoryUsedGb || 0,
-            DiskReadKbps: telemetry.diskReadKbps || 0,
-            DiskWriteKbps: telemetry.diskWriteKbps || 0,
+            CpuTempCelsius: telemetry.cpuTempCelsius,
+            CpuProcesses: telemetry.cpuProcesses,
+            CpuThreads: telemetry.cpuThreads,
+            CpuHandles: telemetry.cpuHandles,
+            GpuTempCelsius: telemetry.gpuTempCelsius,
+            GpuMemoryTotalGb: telemetry.gpuMemoryTotalGb,
+            Disks: telemetry.disks || [],
           });
           return newData;
         });
@@ -182,7 +195,48 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           {/* Content */}
           <div className="custom-scrollbar overflow-y-auto p-6">
             
-            {hardwareType !== 'OS' && (
+            {hardwareType === 'Storage' && stats.storage_drives && stats.storage_drives.length > 0 && (
+              <div className="mb-6 flex flex-col gap-6">
+                {stats.storage_drives.map((disk, idx) => {
+                  const deviceId = `${idx} `; // Performance counters use "0 ", "1 " etc based on index
+                  // We map the latest active time for this specific disk
+                  const activeTime = latestData?.Disks?.find(d => d.DeviceId.startsWith(idx.toString()))?.ActiveTimePercent || 0;
+                  return (
+                    <div key={idx} className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-300">Disk {idx} ({disk.model}) - Active Time</h3>
+                          <p className="text-xs text-slate-500">{disk.size_gb} GB {disk.media_type || disk.type}</p>
+                        </div>
+                        <span className="text-lg font-bold text-white">{activeTime}%</span>
+                      </div>
+                      <div className="h-32 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={data} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                            <XAxis dataKey="time" hide />
+                            <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 12 }} stroke="#1e293b" />
+                            <Line
+                              type="monotone"
+                              dataKey={(pt) => {
+                                const d = (pt.Disks || []).find((d: any) => d.DeviceId.startsWith(idx.toString()));
+                                return d ? d.ActiveTimePercent : 0;
+                              }}
+                              stroke="#fbbf24"
+                              strokeWidth={2}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {hardwareType !== 'OS' && hardwareType !== 'Storage' && (
               <div className="mb-6 rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-300">{chartTitle}</h3>
@@ -216,14 +270,18 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <>
                   <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.CpuUsagePercent || 0}%</p></div>
                   <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{((latestData?.CpuSpeedMhz || stats.cpu.frequency_mhz) / 1000).toFixed(2)} GHz</p></div>
+                  <div><p className="text-xs text-slate-400">Processes</p><p className="text-xl text-white">{latestData?.CpuProcesses || stats.cpu.processes || 0}</p></div>
+                  <div><p className="text-xs text-slate-400">Threads</p><p className="text-xl text-white">{latestData?.CpuThreads || stats.cpu.threads || 0}</p></div>
+                  <div><p className="text-xs text-slate-400">Handles</p><p className="text-xl text-white">{latestData?.CpuHandles || stats.cpu.handles || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Base speed</p><p className="text-xl text-white">{(stats.cpu.max_frequency_mhz ? stats.cpu.max_frequency_mhz / 1000 : 0).toFixed(2)} GHz</p></div>
-                  <div><p className="text-xs text-slate-400">Sockets</p><p className="text-xl text-white">{(stats.cpu as any).sockets || 1}</p></div>
+                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.CpuTempCelsius ? `${Math.round(latestData.CpuTempCelsius)}°C` : 'N/A'}</p></div>
+                  <div><p className="text-xs text-slate-400">Sockets</p><p className="text-xl text-white">{stats.cpu.sockets || 1}</p></div>
                   <div><p className="text-xs text-slate-400">Cores</p><p className="text-xl text-white">{stats.cpu.cores}</p></div>
                   <div><p className="text-xs text-slate-400">Logical processors</p><p className="text-xl text-white">{stats.cpu.threads}</p></div>
-                  <div><p className="text-xs text-slate-400">Virtualization</p><p className="text-xl text-white">{(stats.cpu as any).virtualization_enabled ? 'Enabled' : 'Disabled'}</p></div>
-                  <div><p className="text-xs text-slate-400">L1 cache</p><p className="text-xl text-white">{(stats.cpu as any).l1_cache_kb || 0} KB</p></div>
-                  <div><p className="text-xs text-slate-400">L2 cache</p><p className="text-xl text-white">{(stats.cpu as any).l2_cache_mb || 0} MB</p></div>
-                  <div><p className="text-xs text-slate-400">L3 cache</p><p className="text-xl text-white">{(stats.cpu as any).l3_cache_mb || 0} MB</p></div>
+                  <div><p className="text-xs text-slate-400">Virtualization</p><p className="text-xl text-white">{stats.cpu.virtualization_enabled ? 'Enabled' : 'Disabled'}</p></div>
+                  <div><p className="text-xs text-slate-400">L1 cache</p><p className="text-xl text-white">{stats.cpu.l1_cache_kb || 0} KB</p></div>
+                  <div><p className="text-xs text-slate-400">L2 cache</p><p className="text-xl text-white">{stats.cpu.l2_cache_mb || 0} MB</p></div>
+                  <div><p className="text-xs text-slate-400">L3 cache</p><p className="text-xl text-white">{stats.cpu.l3_cache_mb || 0} MB</p></div>
                 </>
               )}
 
@@ -243,11 +301,12 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
               {hardwareType === 'GPU' && (
                 <>
                   <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.GpuUsagePercent || 0}%</p></div>
-                  <div><p className="text-xs text-slate-400">GPU Memory</p><p className="text-xl text-white">{latestData?.GpuMemoryUsedGb || 0} / {(stats.gpu as any).dedicated_memory_gb || stats.gpu.vram_gb} GB</p></div>
+                  <div><p className="text-xs text-slate-400">GPU Memory</p><p className="text-xl text-white">{latestData?.GpuMemoryUsedGb || 0} / {stats.gpu.dedicated_memory_gb || stats.gpu.vram_gb} GB</p></div>
+                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.GpuTempCelsius ? `${Math.round(latestData.GpuTempCelsius)}°C` : 'N/A'}</p></div>
                   <div><p className="text-xs text-slate-400">Driver version</p><p className="text-sm text-white">{stats.gpu.driver}</p></div>
-                  <div><p className="text-xs text-slate-400">Driver date</p><p className="text-sm text-white">{(stats.gpu as any).driver_date || 'Unknown'}</p></div>
-                  <div><p className="text-xs text-slate-400">DirectX version</p><p className="text-sm text-white">{(stats.gpu as any).directx_version || 'Unknown'}</p></div>
-                  <div><p className="text-xs text-slate-400">Physical location</p><p className="text-sm text-white">{(stats.gpu as any).physical_location || 'PCI bus'}</p></div>
+                  <div><p className="text-xs text-slate-400">Driver date</p><p className="text-sm text-white">{stats.gpu.driver_date || 'Unknown'}</p></div>
+                  <div><p className="text-xs text-slate-400">DirectX version</p><p className="text-sm text-white">{stats.gpu.directx_version || 'Unknown'}</p></div>
+                  <div><p className="text-xs text-slate-400">Physical location</p><p className="text-sm text-white">{stats.gpu.physical_location || 'PCI bus'}</p></div>
                 </>
               )}
 
@@ -262,18 +321,9 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
             </div>
 
-            {hardwareType === 'Storage' && stats.storage_drives && stats.storage_drives.length > 0 && (
-              <div className="mt-4 flex flex-col gap-4">
-                {stats.storage_drives.map((disk, idx) => (
-                  <div key={idx} className="rounded-lg border border-slate-700 p-4">
-                    <h4 className="text-lg font-bold text-white">Disk {idx} ({disk.model})</h4>
-                    <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-4">
-                      <div><p className="text-xs text-slate-400">Capacity</p><p className="text-lg text-white">{disk.size_gb} GB</p></div>
-                      <div><p className="text-xs text-slate-400">Type</p><p className="text-lg text-white">{disk.media_type || disk.type}</p></div>
-                      <div><p className="text-xs text-slate-400">Interface</p><p className="text-lg text-white">{disk.interface}</p></div>
-                    </div>
-                  </div>
-                ))}
+            {hardwareType === 'Storage' && (!stats.storage_drives || stats.storage_drives.length === 0) && (
+              <div className="mt-4 rounded-lg border border-slate-700 p-4">
+                 <p className="text-slate-400">No storage drives detected.</p>
               </div>
             )}
             

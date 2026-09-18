@@ -44,7 +44,8 @@ public class WmiGpuProvider : IGpuProvider
                     dto.PhysicalLocation = "PCI bus"; // Simplified
                 }
                 
-                dto.DirectXVersion = "12 (FL 12.2)"; // WMI doesn't easily expose DirectX version, mocked for UI demonstration.
+                var dxVersion = Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\DirectX", "Version", null) as string;
+                dto.DirectXVersion = !string.IsNullOrEmpty(dxVersion) ? dxVersion : "Unknown";
                 dto.SharedMemoryGb = Math.Round(dto.VramGb > 0 ? dto.VramGb * 0.5 : 8.0, 1); // Mocked shared memory
                 
                 var lowerName = name.ToLowerInvariant();
