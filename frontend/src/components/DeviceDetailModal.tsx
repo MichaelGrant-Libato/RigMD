@@ -89,7 +89,12 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             CpuHandles: telemetry.cpuHandles,
             GpuTempCelsius: telemetry.gpuTempCelsius,
             GpuMemoryTotalGb: telemetry.gpuMemoryTotalGb,
-            Disks: telemetry.disks || [],
+            Disks: (telemetry.disks || []).map((d: any) => ({
+              DeviceId: d.deviceId,
+              ActiveTimePercent: d.activeTimePercent,
+              ReadKbps: d.readKbps,
+              WriteKbps: d.writeKbps
+            })),
           });
           return newData;
         });
