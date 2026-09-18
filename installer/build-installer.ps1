@@ -244,8 +244,8 @@ if ($LASTEXITCODE -ne 0)
     throw "Inno Setup compilation failed."
 }
 
-    $InstallerOutput = Get-ChildItem -Path (Join-Path $PSScriptRoot "output") -Filter "RigMD-Setup*.exe" | Select-Object -First 1 -ExpandProperty FullName
-
+    $InstallerOutput = Join-Path $PSScriptRoot "output\RigMD-Setup.exe"
+    
 if (-not $InstallerOutput -or -not (Test-Path $InstallerOutput))
 {
     throw "RigMD setup executable was not created in output directory."
