@@ -20,6 +20,7 @@ import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
+import DeviceDetailModal, { HardwareType } from '../components/DeviceDetailModal';
 
 interface SystemProfileViewProps {
   stats: HardwareStats | null;
@@ -36,6 +37,7 @@ interface FriendlyInfoCardProps {
   helper?: string;
   warningLabel?: string;
   tone?: 'good' | 'watch' | 'danger' | 'neutral';
+  onClick?: () => void;
 }
 
 function cleanValue(value: string | number | null | undefined) {
@@ -86,12 +88,20 @@ function usageLabel(value: number | null | undefined) {
     : 'Usage unavailable';
 }
 
-function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone = 'neutral' }: FriendlyInfoCardProps) {
+function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone = 'neutral', onClick }: FriendlyInfoCardProps) {
+  const Component = onClick ? motion.button : motion.section;
+  const interactiveProps = onClick ? {
+    whileHover: { scale: 1.02, backgroundColor: 'rgba(255,255,255,0.02)' },
+    whileTap: { scale: 0.98 },
+    onClick: onClick
+  } : {};
+
   return (
-    <motion.section
+    <Component
       variants={cardFadeUp}
       transition={cardTransition}
-      className="flex flex-col rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-5"
+      {...interactiveProps}
+      className={`flex flex-col text-left rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-5 ${onClick ? 'cursor-pointer hover:border-cyan-500/50' : ''}`}
     >
       <div className="mb-4 flex items-start gap-4">
         <div className={`shrink-0 rounded-lg border p-3 ${getToneClasses()}`}>
@@ -114,7 +124,7 @@ function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone
           )}
         </div>
       )}
-    </motion.section>
+    </Component>
   );
 }
 
@@ -127,6 +137,14 @@ export default function SystemProfileView({
 }: SystemProfileViewProps) {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  
+  const [selectedHardwareType, setSelectedHardwareType] = useState<HardwareType | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleCardClick = (type: HardwareType) => {
+    setSelectedHardwareType(type);
+    setIsModalOpen(true);
+  };
 
   const handleSaveProfile = async () => {
     if (!stats) {
@@ -266,6 +284,7 @@ export default function SystemProfileView({
                     helper={usageLabel(stats.cpu.usage_percent)}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
+                    onClick={() => handleCardClick('CPU')}
                   />
 
                   <FriendlyInfoCard
@@ -275,6 +294,7 @@ export default function SystemProfileView({
                     helper={usageLabel(stats.ram.usage_percent)}
                     tone={getUsageTone(stats.ram.usage_percent)}
                     warningLabel={stats.ram.usage_percent >= 90 ? 'Memory was very high' : 'Memory was high'}
+                    onClick={() => handleCardClick('Memory')}
                   />
 
                   <FriendlyInfoCard
@@ -284,6 +304,7 @@ export default function SystemProfileView({
                     helper={usageLabel(stats.disk.usage_percent)}
                     tone={getUsageTone(stats.disk.usage_percent)}
                     warningLabel={stats.disk.usage_percent >= 90 ? 'Storage is almost full' : 'Storage is getting full'}
+                    onClick={() => handleCardClick('Storage')}
                   />
 
                   <FriendlyInfoCard
@@ -292,6 +313,7 @@ export default function SystemProfileView({
                     value={cleanValue(stats.gpu.name)}
                     helper={stats.displays && stats.displays.length > 0 ? stats.displays.map(d => `${d.resolution} @ ${d.refresh_rate}Hz`).join(' / ') : undefined}
                     tone="neutral"
+                    onClick={() => handleCardClick('GPU')}
                   />
 
                   <FriendlyInfoCard
@@ -299,6 +321,7 @@ export default function SystemProfileView({
                     title="Windows"
                     value={cleanValue(stats.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}
                     tone="neutral"
+                    onClick={() => handleCardClick('OS')}
                   />
 
                   <FriendlyInfoCard
@@ -352,6 +375,7 @@ export default function SystemProfileView({
                             : 'good'
                         }
                         warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'Weak signal' : ''}
+                        onClick={() => handleCardClick('Network')}
                       />
                     )}
                     {stats.active_power_plan && (
@@ -402,6 +426,13 @@ export default function SystemProfileView({
           )}
         </div>
       </motion.div>
+
+      <DeviceDetailModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        hardwareType={selectedHardwareType}
+        stats={stats}
+      />
     </>
   );
 }

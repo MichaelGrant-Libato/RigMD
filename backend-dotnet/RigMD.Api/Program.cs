@@ -100,6 +100,7 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrche
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRollbackManager,        RigMD.Infrastructure.Remediation.RollbackManager>();
 
+builder.Services.AddHostedService<RigMD.Api.Services.TelemetryBackgroundService>();
 
 builder.Services.AddScoped<DatabaseSyncService>();
 builder.Services.AddScoped<LocalDatabaseSchemaUpgradeService>();
@@ -139,6 +140,7 @@ app.UseStaticFiles();
 app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
 app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");
+app.MapHub<RigMD.Api.Hubs.TelemetryHub>("/hubs/telemetry");
 app.MapFallbackToFile("index.html");
 
 app.Run();
