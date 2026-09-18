@@ -137,7 +137,6 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     title = 'GPU';
     subtitle = stats.gpu.name;
   } else if (hardwareType === 'Storage') {
-    dataKey = 'DiskActiveTimePercent';
     strokeColor = '#fbbf24'; // amber-400
     Icon = HardDrive;
     title = 'Storage';
@@ -198,9 +197,16 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             {hardwareType === 'Storage' && stats.storage_drives && stats.storage_drives.length > 0 && (
               <div className="mb-6 flex flex-col gap-6">
                 {stats.storage_drives.map((disk, idx) => {
-                  const deviceId = `${idx} `; // Performance counters use "0 ", "1 " etc based on index
                   // We map the latest active time for this specific disk
-                  const activeTime = latestData?.Disks?.find(d => d.DeviceId.startsWith(idx.toString()))?.ActiveTimePercent || 0;
+                  const latestDisk = latestData?.Disks?.find((d: DiskTelemetryPoint) => d.DeviceId.startsWith(idx.toString()));
+                  const activeTime = latestDisk?.ActiveTimePercent || 0;
+                  // Use a simple string key so Recharts can read it
+                  const diskDataKey = `disk_${idx}_active`;
+                  // Build chart-friendly data with a flat key per disk
+                  const diskData = data.map(pt => ({
+                    time: pt.time,
+                    [diskDataKey]: (pt.Disks || []).find((d: DiskTelemetryPoint) => d.DeviceId.startsWith(idx.toString()))?.ActiveTimePercent ?? 0,
+                  }));
                   return (
                     <div key={idx} className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
                       <div className="mb-2 flex items-center justify-between">
@@ -212,16 +218,13 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                       </div>
                       <div className="h-32 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={data} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                          <LineChart data={diskData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                             <XAxis dataKey="time" hide />
                             <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 12 }} stroke="#1e293b" />
                             <Line
                               type="monotone"
-                              dataKey={(pt) => {
-                                const d = (pt.Disks || []).find((d: any) => d.DeviceId.startsWith(idx.toString()));
-                                return d ? d.ActiveTimePercent : 0;
-                              }}
+                              dataKey={diskDataKey}
                               stroke="#fbbf24"
                               strokeWidth={2}
                               dot={false}
