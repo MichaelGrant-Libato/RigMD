@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-RigMD.Agent-0fe27352-6d33-44b4-9dd5-da3f49ca8108</UserSecretsId>
+    <DeleteExistingFiles>true</DeleteExistingFiles>
   </PropertyGroup>
 
   <ItemGroup>
