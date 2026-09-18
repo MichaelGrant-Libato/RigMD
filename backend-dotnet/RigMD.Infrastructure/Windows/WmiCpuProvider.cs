@@ -28,12 +28,16 @@ public class WmiCpuProvider : ICpuProvider
     {
         using var searcher =
             new ManagementObjectSearcher(
-                "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, CurrentClockSpeed, MaxClockSpeed FROM Win32_Processor");
+                "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, CurrentClockSpeed, MaxClockSpeed, VirtualizationFirmwareEnabled, SocketDesignation FROM Win32_Processor");
 
+        int sockets = 0;
         foreach (
             ManagementObject obj
             in searcher.Get())
         {
+            sockets++;
+            if (sockets > 1) continue;
+            
             dto.Name =
                 obj["Name"]
                     ?.ToString()
@@ -60,8 +64,30 @@ public class WmiCpuProvider : ICpuProvider
                     obj["MaxClockSpeed"]
                     ?? 0);
 
-            break;
+            if (obj["VirtualizationFirmwareEnabled"] != null && bool.TryParse(obj["VirtualizationFirmwareEnabled"].ToString(), out var virt))
+            {
+                dto.VirtualizationEnabled = virt;
+            }
         }
+        
+        dto.Sockets = sockets > 0 ? sockets : 1;
+
+        try
+        {
+            using var cacheSearcher = new ManagementObjectSearcher("SELECT Level, MaxCacheSize FROM Win32_CacheMemory");
+            foreach (ManagementObject obj in cacheSearcher.Get())
+            {
+                if (obj["Level"] != null && obj["MaxCacheSize"] != null &&
+                    int.TryParse(obj["Level"].ToString(), out var level) &&
+                    double.TryParse(obj["MaxCacheSize"].ToString(), out var sizeKb))
+                {
+                    if (level == 3) dto.L1CacheKb += sizeKb; // WMI Levels are 3=L1, 4=L2, 5=L3 usually
+                    else if (level == 4) dto.L2CacheMb += sizeKb / 1024.0;
+                    else if (level == 5) dto.L3CacheMb += sizeKb / 1024.0;
+                }
+            }
+        }
+        catch { }
     }
 
     private static void LoadLiveCpuInfo(

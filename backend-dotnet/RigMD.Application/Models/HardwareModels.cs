@@ -9,6 +9,11 @@ public class CpuStatsDto
     public double FrequencyMhz { get; set; }
     public double MaxFrequencyMhz { get; set; }
     public bool IsThermallyThrottling { get; set; }
+    public int Sockets { get; set; } = 1;
+    public bool VirtualizationEnabled { get; set; }
+    public double L1CacheKb { get; set; }
+    public double L2CacheMb { get; set; }
+    public double L3CacheMb { get; set; }
 }
 
 public class GpuStatsDto
@@ -17,6 +22,11 @@ public class GpuStatsDto
     public string Driver { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty; // Dedicated / Integrated
     public double VramGb { get; set; }
+    public double DedicatedMemoryGb { get; set; }
+    public double SharedMemoryGb { get; set; }
+    public string DriverDate { get; set; } = string.Empty;
+    public string DirectXVersion { get; set; } = string.Empty;
+    public string PhysicalLocation { get; set; } = string.Empty;
 }
 
 public class MemoryStatsDto
@@ -24,6 +34,13 @@ public class MemoryStatsDto
     public double TotalGb { get; set; }
     public double UsedGb { get; set; }
     public double UsagePercent { get; set; }
+    public double SpeedMtps { get; set; }
+    public int SlotsUsed { get; set; }
+    public int SlotsTotal { get; set; }
+    public string FormFactor { get; set; } = string.Empty;
+    public double HardwareReservedMb { get; set; }
+    public double CommittedGb { get; set; }
+    public double CachedGb { get; set; }
 }
 
 public class StorageDriveDto
