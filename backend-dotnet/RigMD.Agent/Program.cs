@@ -4,6 +4,9 @@ using RigMD.Agent.Tools;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Infrastructure.Windows;
 using RigMD.Infrastructure.Remediation.Actions;
+using System.IO;
+
+Directory.SetCurrentDirectory(AppContext.BaseDirectory);
 
 var builder =
     Host.CreateApplicationBuilder(args);
