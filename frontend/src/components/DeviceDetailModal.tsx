@@ -42,6 +42,7 @@ interface TelemetryPoint {
 
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats }: DeviceDetailModalProps) {
   const [data, setData] = useState<TelemetryPoint[]>([]);
+  const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
 
   useEffect(() => {
@@ -196,13 +197,42 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             
             {hardwareType === 'Storage' && stats.storage_drives && stats.storage_drives.length > 0 && (
               <div className="mb-6 flex flex-col gap-4">
-                {stats.storage_drives.map((disk, idx) => {
+                {/* Disk Selector Tabs */}
+                {stats.storage_drives.length > 1 && (
+                  <div className="flex flex-wrap gap-2 mb-2 border-b border-[var(--rigmd-border)] pb-4">
+                    {stats.storage_drives.map((disk, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedDiskIndex(idx)}
+                        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                          selectedDiskIndex === idx 
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50' 
+                            : 'bg-slate-800 text-slate-400 border border-transparent hover:bg-slate-700'
+                        }`}
+                      >
+                        Disk {idx}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Selected Disk Chart and Details */}
+                {(() => {
+                  const idx = selectedDiskIndex < stats.storage_drives.length ? selectedDiskIndex : 0;
+                  const disk = stats.storage_drives[idx];
                   const latestDisk = latestData?.Disks?.find((d: DiskTelemetryPoint) => d.DeviceId.startsWith(idx.toString()));
                   const activeTime = latestDisk?.ActiveTimePercent ?? 0;
                   const readKbps = latestDisk?.ReadKbps ?? 0;
                   const writeKbps = latestDisk?.WriteKbps ?? 0;
+                  
+                  const diskDataKey = `disk_${idx}_active`;
+                  const diskData = data.map(pt => ({
+                    time: pt.time,
+                    [diskDataKey]: (pt.Disks || []).find((d: DiskTelemetryPoint) => d.DeviceId.startsWith(idx.toString()))?.ActiveTimePercent ?? 0,
+                  }));
+
                   return (
-                    <div key={idx} className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
+                    <div className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
                       <div className="mb-3 flex items-center justify-between">
                         <div>
                           <h3 className="text-sm font-semibold text-white">Disk {idx} ({disk.model})</h3>
@@ -210,13 +240,25 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                         </div>
                         <span className="text-lg font-bold text-white">{activeTime}%<span className="ml-1 text-xs font-normal text-slate-400">active</span></span>
                       </div>
-                      {/* Active time bar */}
-                      <div className="mb-3 h-2 w-full overflow-hidden rounded-full bg-slate-700">
-                        <div
-                          className="h-full rounded-full bg-amber-400 transition-all duration-500"
-                          style={{ width: `${Math.min(activeTime, 100)}%` }}
-                        />
+                      
+                      <div className="h-48 w-full mb-6 mt-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={diskData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                            <XAxis dataKey="time" hide />
+                            <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 12 }} stroke="#1e293b" />
+                            <Line
+                              type="monotone"
+                              dataKey={diskDataKey}
+                              stroke="#fbbf24"
+                              strokeWidth={2}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
                       </div>
+
                       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                         <div><p className="text-xs text-slate-400">Capacity</p><p className="text-lg text-white">{disk.size_gb} GB</p></div>
                         <div><p className="text-xs text-slate-400">Type</p><p className="text-lg text-white">{disk.media_type || disk.type}</p></div>
@@ -228,7 +270,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                       </div>
                     </div>
                   );
-                })}
+                })()}
               </div>
             )}
 
