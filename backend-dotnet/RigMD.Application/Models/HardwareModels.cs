@@ -14,6 +14,9 @@ public class CpuStatsDto
     public double L1CacheKb { get; set; }
     public double L2CacheMb { get; set; }
     public double L3CacheMb { get; set; }
+    public int Processes { get; set; }
+    public int Handles { get; set; }
+    public double? TemperatureCelsius { get; set; }
 }
 
 public class GpuStatsDto
@@ -27,6 +30,7 @@ public class GpuStatsDto
     public string DriverDate { get; set; } = string.Empty;
     public string DirectXVersion { get; set; } = string.Empty;
     public string PhysicalLocation { get; set; } = string.Empty;
+    public double? TemperatureCelsius { get; set; }
 }
 
 public class MemoryStatsDto
