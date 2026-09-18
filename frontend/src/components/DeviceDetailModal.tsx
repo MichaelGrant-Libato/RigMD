@@ -224,12 +224,6 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   const activeTime = latestDisk?.ActiveTimePercent ?? 0;
                   const readKbps = latestDisk?.ReadKbps ?? 0;
                   const writeKbps = latestDisk?.WriteKbps ?? 0;
-                  
-                  const diskDataKey = `disk_${idx}_active`;
-                  const diskData = data.map(pt => ({
-                    time: pt.time,
-                    [diskDataKey]: (pt.Disks || []).find((d: DiskTelemetryPoint) => d.DeviceId.startsWith(idx.toString()))?.ActiveTimePercent ?? 0,
-                  }));
 
                   return (
                     <div className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
@@ -241,25 +235,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                         <span className="text-lg font-bold text-white">{activeTime}%<span className="ml-1 text-xs font-normal text-slate-400">active</span></span>
                       </div>
                       
-                      <div className="h-48 w-full mb-6 mt-2">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={diskData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis dataKey="time" hide />
-                            <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 12 }} stroke="#1e293b" />
-                            <Line
-                              type="monotone"
-                              dataKey={diskDataKey}
-                              stroke="#fbbf24"
-                              strokeWidth={2}
-                              dot={false}
-                              isAnimationActive={false}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 mt-6">
                         <div><p className="text-xs text-slate-400">Capacity</p><p className="text-lg text-white">{disk.size_gb} GB</p></div>
                         <div><p className="text-xs text-slate-400">Type</p><p className="text-lg text-white">{disk.media_type || disk.type}</p></div>
                         <div><p className="text-xs text-slate-400">Interface</p><p className="text-lg text-white">{disk.interface || 'Unknown'}</p></div>
