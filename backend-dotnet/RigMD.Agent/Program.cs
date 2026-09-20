@@ -70,6 +70,10 @@ builder.Services.AddScoped<
     IWindowsSystemProfileService,
     WindowsSystemProfileService>();
 
+builder.Services.AddSingleton<
+    RigMD.Infrastructure.Windows.IHardwareMonitorService,
+    RigMD.Infrastructure.Windows.HardwareMonitorService>();
+
 builder.Services.AddScoped<
     IAgentTool,
     CpuScanTool>();

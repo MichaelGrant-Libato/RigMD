@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import * as signalR from '@microsoft/signalr';
 import { motion } from 'motion/react';
 import {
   Activity,
@@ -114,16 +115,16 @@ function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone
         </div>
       </div>
 
-      {helper && (
-        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="text-sm leading-relaxed text-slate-300">{helper}</p>
-          {warningLabel && (tone === 'watch' || tone === 'danger') && (
-            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getToneClasses(tone)}`}>
-              {warningLabel}
-            </span>
-          )}
-        </div>
-      )}
+      <div className="mt-auto">
+        {helper && (
+          <p className="text-sm font-medium text-slate-300 mb-1">{helper}</p>
+        )}
+        {warningLabel && tone !== 'neutral' && tone !== 'good' && (
+          <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider opacity-90">
+            {warningLabel}
+          </p>
+        )}
+      </div>
     </Component>
   );
 }
@@ -135,6 +136,45 @@ export default function SystemProfileView({
   isRefreshingHardware,
   onRefreshHardware,
 }: SystemProfileViewProps) {
+  const [selectedDevice, setSelectedDevice] = useState<HardwareType | null>(null);
+  const [liveCpuTemp, setLiveCpuTemp] = useState<number | null>(null);
+  const [liveGpuTemp, setLiveGpuTemp] = useState<number | null>(null);
+  const connectionRef = useRef<signalR.HubConnection | null>(null);
+
+  useEffect(() => {
+    if (!stats) return;
+
+    const connectSignalR = async () => {
+      const hubUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5273'}/hubs/telemetry`;
+      
+      const connection = new signalR.HubConnectionBuilder()
+        .withUrl(hubUrl)
+        .withAutomaticReconnect()
+        .build();
+
+      connection.on('ReceiveTelemetry', (telemetry: any) => {
+        if (telemetry.cpuTempCelsius !== undefined) setLiveCpuTemp(telemetry.cpuTempCelsius);
+        if (telemetry.gpuTempCelsius !== undefined) setLiveGpuTemp(telemetry.gpuTempCelsius);
+      });
+
+      try {
+        await connection.start();
+        connectionRef.current = connection;
+      } catch (err) {
+        console.error('SignalR Connection Error (SystemProfile): ', err);
+      }
+    };
+
+    connectSignalR();
+
+    return () => {
+      if (connectionRef.current) {
+        connectionRef.current.stop();
+        connectionRef.current = null;
+      }
+    };
+  }, [stats]);
+
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
@@ -281,7 +321,7 @@ export default function SystemProfileView({
                     icon={Cpu}
                     title="Processor"
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
-                    helper={usageLabel(stats.cpu.usage_percent)}
+                    helper={liveCpuTemp != null ? `Temperature: ${Math.round(liveCpuTemp)}°C` : (stats.cpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.cpu.temperature_celsius)}°C` : 'Temp Unavailable (Requires Admin)')}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}
@@ -311,7 +351,7 @@ export default function SystemProfileView({
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
-                    helper={stats.displays && stats.displays.length > 0 ? stats.displays.map(d => `${d.resolution} @ ${d.refresh_rate}Hz`).join(' / ') : undefined}
+                    helper={liveGpuTemp != null ? `Temperature: ${Math.round(liveGpuTemp)}°C` : (stats.gpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.gpu.temperature_celsius)}°C` : 'Temp Unavailable (Requires Admin)')}
                     tone="neutral"
                     onClick={() => handleCardClick('GPU')}
                   />
