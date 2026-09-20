@@ -30,12 +30,14 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
             IsGpuEnabled = true,
             IsMemoryEnabled = true,
             IsMotherboardEnabled = true,
+            IsControllerEnabled = true,
             IsStorageEnabled = true
         };
         
         try 
         {
             _computer.Open();
+            Tick(); // Initial tick to read sensors immediately
         }
         catch (Exception ex)
         {
@@ -50,6 +52,10 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
             foreach (var hardware in _computer.Hardware)
             {
                 hardware.Update();
+                foreach (var subHardware in hardware.SubHardware)
+                {
+                    subHardware.Update();
+                }
             }
         }
         catch { }
@@ -57,24 +63,54 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     public double? GetCpuTemperature()
     {
+        // 1. Check direct CPU temperature sensors
         foreach (var hardware in _computer.Hardware)
         {
             if (hardware.HardwareType == HardwareType.Cpu)
             {
+                // Prefer Tctl/Tdie, Package, or Core Average / Core temperatures
                 foreach (var sensor in hardware.Sensors)
                 {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Name.Contains("Core Average", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value;
+                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                    {
+                        if (sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase) ||
+                            sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
+                            sensor.Name.Contains("Average", StringComparison.OrdinalIgnoreCase) ||
+                            sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return Math.Round(sensor.Value.Value, 1);
+                        }
+                    }
                 }
                 
-                // Fallback to first temperature sensor if Core Average isn't found
+                // Fallback to first valid temperature sensor on CPU
                 foreach (var sensor in hardware.Sensors)
                 {
-                    if (sensor.SensorType == SensorType.Temperature)
-                        return sensor.Value;
+                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                        return Math.Round(sensor.Value.Value, 1);
                 }
             }
         }
+
+        // 2. Fallback to motherboard/SuperIO sensors if CPU sensors are missing
+        foreach (var hardware in _computer.Hardware)
+        {
+            if (hardware.HardwareType == HardwareType.Motherboard)
+            {
+                foreach (var subHardware in hardware.SubHardware)
+                {
+                    foreach (var sensor in subHardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && 
+                            (sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase) || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return Math.Round(sensor.Value.Value, 1);
+                        }
+                    }
+                }
+            }
+        }
+
         return null;
     }
 
@@ -84,10 +120,18 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
         {
             if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
             {
+                // Prefer Core or Hot Spot
                 foreach (var sensor in hardware.Sensors)
                 {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value;
+                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
+                        return Math.Round(sensor.Value.Value, 1);
+                }
+
+                // Fallback to any valid temperature on GPU
+                foreach (var sensor in hardware.Sensors)
+                {
+                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                        return Math.Round(sensor.Value.Value, 1);
                 }
             }
         }

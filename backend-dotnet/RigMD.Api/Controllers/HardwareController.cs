@@ -58,14 +58,16 @@ public class HardwareController : ControllerBase
                     usage_percent = profile.Cpu.UsagePercent,
                     cores = profile.Cpu.Cores,
                     threads = profile.Cpu.Threads,
-                    frequency_mhz = profile.Cpu.FrequencyMhz
+                    frequency_mhz = profile.Cpu.FrequencyMhz,
+                    temperature_celsius = profile.Cpu.TemperatureCelsius
                 },
                 gpu = new
                 {
                     name = profile.Gpu.Name,
                     driver = profile.Gpu.Driver,
                     type = profile.Gpu.Type,
-                    vram_gb = profile.Gpu.VramGb
+                    vram_gb = profile.Gpu.VramGb,
+                    temperature_celsius = profile.Gpu.TemperatureCelsius
                 },
                 ram = new
                 {

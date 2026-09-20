@@ -317,7 +317,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   <div><p className="text-xs text-slate-400">Threads</p><p className="text-xl text-white">{latestData?.CpuThreads || stats.cpu.threads || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Handles</p><p className="text-xl text-white">{latestData?.CpuHandles || stats.cpu.handles || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Base speed</p><p className="text-xl text-white">{(stats.cpu.max_frequency_mhz ? stats.cpu.max_frequency_mhz / 1000 : 0).toFixed(2)} GHz</p></div>
-                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.CpuTempCelsius ? `${Math.round(latestData.CpuTempCelsius)}°C` : 'N/A'}</p></div>
+                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.CpuTempCelsius ? `${Math.round(latestData.CpuTempCelsius)}°C` : (stats.cpu.temperature_celsius ? `${Math.round(stats.cpu.temperature_celsius)}°C` : 'N/A')}</p></div>
                   <div><p className="text-xs text-slate-400">Sockets</p><p className="text-xl text-white">{stats.cpu.sockets || 1}</p></div>
                   <div><p className="text-xs text-slate-400">Cores</p><p className="text-xl text-white">{stats.cpu.cores}</p></div>
                   <div><p className="text-xs text-slate-400">Logical processors</p><p className="text-xl text-white">{stats.cpu.threads}</p></div>
@@ -345,7 +345,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <>
                   <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.GpuUsagePercent || 0}%</p></div>
                   <div><p className="text-xs text-slate-400">GPU Memory</p><p className="text-xl text-white">{latestData?.GpuMemoryUsedGb || 0} / {stats.gpu.dedicated_memory_gb || stats.gpu.vram_gb} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.GpuTempCelsius ? `${Math.round(latestData.GpuTempCelsius)}°C` : 'N/A'}</p></div>
+                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.GpuTempCelsius ? `${Math.round(latestData.GpuTempCelsius)}°C` : (stats.gpu.temperature_celsius ? `${Math.round(stats.gpu.temperature_celsius)}°C` : 'N/A')}</p></div>
                   <div><p className="text-xs text-slate-400">Driver version</p><p className="text-sm text-white">{stats.gpu.driver}</p></div>
                   <div><p className="text-xs text-slate-400">Driver date</p><p className="text-sm text-white">{stats.gpu.driver_date || 'Unknown'}</p></div>
                   <div><p className="text-xs text-slate-400">DirectX version</p><p className="text-sm text-white">{stats.gpu.directx_version || 'Unknown'}</p></div>

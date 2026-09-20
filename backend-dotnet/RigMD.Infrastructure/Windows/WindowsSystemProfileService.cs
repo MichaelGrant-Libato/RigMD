@@ -17,6 +17,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
     private readonly IDeviceTypeProvider _deviceTypeProvider;
     private readonly IPowerProvider _powerProvider;
     private readonly IDisplayProvider _displayProvider;
+    private readonly IHardwareMonitorService? _hardwareMonitor;
 
     public WindowsSystemProfileService(
         ICpuProvider cpuProvider,
@@ -30,7 +31,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         IBatteryProvider batteryProvider,
         IDeviceTypeProvider deviceTypeProvider,
         IPowerProvider powerProvider,
-        IDisplayProvider displayProvider)
+        IDisplayProvider displayProvider,
+        IHardwareMonitorService? hardwareMonitor = null)
     {
         _cpuProvider = cpuProvider;
         _gpuProvider = gpuProvider;
@@ -44,6 +46,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         _deviceTypeProvider = deviceTypeProvider;
         _powerProvider = powerProvider;
         _displayProvider = displayProvider;
+        _hardwareMonitor = hardwareMonitor;
     }
 
     public HardwareProfileDto GetLiveSystemProfile()
@@ -76,6 +79,20 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             }
         }
 
+        var cpuStats = _cpuProvider.GetCpuStats();
+        var gpuStats = _gpuProvider.GetGpuStats();
+
+        if (_hardwareMonitor != null)
+        {
+            try
+            {
+                _hardwareMonitor.Tick();
+                cpuStats.TemperatureCelsius = _hardwareMonitor.GetCpuTemperature();
+                gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature();
+            }
+            catch { }
+        }
+
         return new HardwareProfileDto
         {
             DeviceName = _osProvider.GetDeviceName(),
@@ -91,8 +108,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             
             Battery = _batteryProvider.GetBatteryStats(),
             
-            Cpu = _cpuProvider.GetCpuStats(),
-            Gpu = _gpuProvider.GetGpuStats(),
+            Cpu = cpuStats,
+            Gpu = gpuStats,
             Ram = _memoryProvider.GetMemoryStats(),
             Network = _networkProvider.GetNetworkStats(),
             
