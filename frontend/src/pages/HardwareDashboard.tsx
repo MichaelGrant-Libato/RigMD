@@ -536,11 +536,15 @@ export default function HardwareDashboard() {
 
       setError(null);
     } catch {
-      setAgentStatus(null);
-
-      setError(
-        'Unable to retrieve Windows Agent telemetry.'
-      );
+      try {
+        const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
+        setStats(liveResponse.data);
+        setHardwareUpdatedAt(new Date());
+        setError(null);
+      } catch {
+        setAgentStatus(null);
+        setError('Unable to retrieve Windows Agent telemetry.');
+      }
     }
   }, []);
 

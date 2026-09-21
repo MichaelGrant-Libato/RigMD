@@ -69,6 +69,25 @@ function formatStorageSize(sizeGb: number | null | undefined) {
   return sizeGb >= 1000 ? `${(sizeGb / 1024).toFixed(1)} TB` : `${sizeGb} GB`;
 }
 
+function formatStorageDisplay(stats: HardwareStats): string {
+  const sizeStr = formatStorageSize(stats.disk?.total_gb);
+  const drives = stats.storage_drives ?? [];
+  const driveCount = drives.length > 0 ? drives.length : 1;
+  const rawType = stats.storage_type?.trim();
+  const hasKnownType =
+    rawType &&
+    rawType.toLowerCase() !== 'unknown' &&
+    rawType.toLowerCase() !== 'not available';
+
+  if (driveCount > 1) {
+    return hasKnownType
+      ? `${sizeStr} (${driveCount} Storage Drives • ${rawType})`
+      : `${sizeStr} (${driveCount} Storage Drives)`;
+  }
+
+  return hasKnownType ? `${sizeStr} ${rawType}` : `${sizeStr} Total`;
+}
+
 function getUsageTone(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'neutral';
   if (value >= 90) return 'danger';
@@ -340,7 +359,7 @@ export default function SystemProfileView({
                   <FriendlyInfoCard
                     icon={HardDrive}
                     title="Storage"
-                    value={`${formatStorageSize(stats.disk.total_gb)} ${cleanValue(stats.storage_type)}`}
+                    value={formatStorageDisplay(stats)}
                     helper={usageLabel(stats.disk.usage_percent)}
                     tone={getUsageTone(stats.disk.usage_percent)}
                     warningLabel={stats.disk.usage_percent >= 90 ? 'Storage is almost full' : 'Storage is getting full'}
