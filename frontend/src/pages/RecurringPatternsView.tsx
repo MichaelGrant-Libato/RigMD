@@ -8,7 +8,6 @@ import {
   ChevronUp,
   Eye,
   FileText,
-  Info,
   RefreshCw,
   Search,
   Trash2,
@@ -16,10 +15,11 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import FilterDropdown from '../components/FilterDropdown';
 import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog';
 import { accordionReveal, buttonTap, cardFadeUp, cardTransition, hoverLift, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiDelete, apiGet } from '../lib/api';
-import type { PageKey } from '../types/rigmd';
+import type { PageKey, SessionSummary } from '../types/rigmd';
 
 interface RecurringMetrics {
   recurring_issues: number;
@@ -179,28 +179,12 @@ function getFriendlyConfidence(confidence: string) {
   return 'Needs more checks';
 }
 
-function getPatternMeaning(pattern: RecurringPattern) {
-  if (pattern.status.toLowerCase().includes('worsening')) {
-    return 'This has shown up more than once and may need attention soon.';
-  }
-
-  if (pattern.action_escalated) {
-    return 'RigMD thinks this repeated problem may need outside help.';
-  }
-
-  if (pattern.updated_action.toLowerCase().includes('monitor')) {
-    return 'This has repeated, but RigMD does not recommend changing anything yet.';
-  }
-
-  return 'This repeated enough times that RigMD recommends a next step.';
-}
-
 function getSummaryCardTone(value: number, activeTone: 'cyan' | 'red' | 'orange') {
   if (value <= 0) {
     return {
       borderColor: 'border-slate-500/25',
       valueColor: 'text-slate-400',
-      iconColor: 'text-slate-500',
+      iconColor: 'text-slate-400',
     };
   }
 
@@ -295,29 +279,6 @@ function getPatternBorder(status: string) {
   return 'border-l-slate-600';
 }
 
-function groupTimelineOccurrencesByDate(timeline: PatternTimelineDot[]) {
-  const grouped = new Map<string, { label: string; count: number; sessionIds: string[] }>();
-
-  timeline.forEach((item) => {
-    const key = item.full_date || item.date;
-    const existing = grouped.get(key);
-
-    if (existing) {
-      existing.count += 1;
-      existing.sessionIds.push(item.session_id);
-      return;
-    }
-
-    grouped.set(key, {
-      label: item.date,
-      count: 1,
-      sessionIds: [item.session_id],
-    });
-  });
-
-  return Array.from(grouped.values());
-}
-
 function getRecommendedNextStep(pattern: RecurringPattern) {
   if (pattern.recommended_next_step) {
     return pattern.recommended_next_step;
@@ -330,16 +291,33 @@ function getRecommendedNextStep(pattern: RecurringPattern) {
   return `Recommended next step: ${getFriendlyAction(pattern.updated_action).toLowerCase()} for ${pattern.probable_cause || pattern.symptom}.`;
 }
 
-function isNoIssueResult(value: string | null | undefined) {
-  return (value ?? '').trim().toLowerCase() === 'no active issue detected';
+function isActionablePattern(pattern: RecurringPattern) {
+  // A repeated symptom should remain visible even when the latest check is
+  // healthy. The dashboard counts repeated symptoms, so hiding healthy
+  // repeats here made the two views disagree.
+  return Boolean(pattern.symptom?.trim());
 }
 
-function isActionablePattern(pattern: RecurringPattern) {
-  return !isNoIssueResult(pattern.probable_cause) && !isNoIssueResult(pattern.symptom);
-}
+type SessionTimestampMap = Record<string, string>;
 
 function isActionableTimelineRow(row: PatternTimelineRow) {
-  return !isNoIssueResult(row.probable_cause) && !isNoIssueResult(row.symptom);
+  return Boolean(row.symptom?.trim());
+}
+
+function isIncompletePattern(pattern: RecurringPattern) {
+  return pattern.symptom.trim().toLowerCase() === 'repeated symptom';
+}
+
+function formatLocalTimestamp(rawValue: string | undefined, fallbackDate: string, fallbackTime: string) {
+  if (!rawValue) return { date: fallbackDate, time: fallbackTime };
+
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return { date: fallbackDate, time: fallbackTime };
+
+  return {
+    date: date.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' }),
+    time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  };
 }
 
 function filterPatterns(patterns: RecurringPattern[], filter: string, search: string) {
@@ -389,14 +367,14 @@ function MetricCard({
   valueColor: string;
 }) {
   return (
-    <motion.section variants={cardFadeUp} transition={cardTransition} className={`flex h-full min-h-[104px] items-center rounded-2xl border bg-[var(--rigmd-card)] p-5 ${borderColor}`}>
-      <div className="flex items-center gap-4">
+    <motion.section variants={cardFadeUp} transition={cardTransition} className={`flex h-full min-h-[112px] w-full min-w-0 items-center rounded-2xl border bg-[var(--rigmd-card)] p-5 ${borderColor}`}>
+      <div className="flex min-w-0 items-center gap-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card-soft)]">
           {icon}
         </div>
 
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">{label}</p>
           <h3 className={`text-3xl font-bold ${valueColor}`}>{value}</h3>
         </div>
       </div>
@@ -406,7 +384,7 @@ function MetricCard({
 
 function ActionBadge({ action }: { action: string }) {
   return (
-    <span className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-bold ${getActionStyle(action)}`}>
+    <span className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-bold ${getActionStyle(action)}`}>
       {getFriendlyAction(action)}
     </span>
   );
@@ -423,43 +401,15 @@ function StatusBadge({ status }: { status: string }) {
 
 function ConfidenceBadge({ confidence }: { confidence: string }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${getConfidenceStyle(confidence)}`}>
+    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${getConfidenceStyle(confidence)}`}>
       {getFriendlyConfidence(confidence)}
     </span>
   );
 }
 
-function PatternDots({ pattern }: { pattern: RecurringPattern }) {
-  const groupedTimeline = groupTimelineOccurrencesByDate(pattern.timeline);
-
-  return (
-    <div className="mt-4 flex items-start gap-0 overflow-x-auto pb-1">
-      {groupedTimeline.map((item, index) => (
-        <motion.div
-          key={`${item.label}-${index}`}
-          variants={cardFadeUp}
-          transition={{ ...cardTransition, delay: index * 0.04 }}
-          className="flex min-w-[96px] flex-1 items-start"
-        >
-          <div className="relative flex flex-col items-center">
-            <span className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
-            <span className="mt-2 text-xs font-semibold text-white">{item.label}</span>
-            {item.count > 1 && (
-              <span className="mt-0.5 text-[11px] font-medium text-slate-500">
-                {item.count} checks
-              </span>
-            )}
-          </div>
-
-          {index < groupedTimeline.length - 1 && <div className="mx-2 mt-1.5 h-px flex-1 bg-[var(--rigmd-border)]" />}
-        </motion.div>
-      ))}
-    </div>
-  );
-}
-
 function PatternCard({
   pattern,
+  sessionTimestamps,
   expanded,
   onToggle,
   onViewHistory,
@@ -467,6 +417,7 @@ function PatternCard({
   deleting,
 }: {
   pattern: RecurringPattern;
+  sessionTimestamps: SessionTimestampMap;
   expanded: boolean;
   onToggle: () => void;
   onViewHistory?: () => void;
@@ -474,6 +425,8 @@ function PatternCard({
   deleting?: boolean;
 }) {
   const [visibleOccurrences, setVisibleOccurrences] = useState(DEFAULT_VISIBLE_OCCURRENCES);
+  const occurrences = pattern.occurrences ?? [];
+  const incompletePattern = isIncompletePattern(pattern);
 
   useEffect(() => {
     if (!expanded) {
@@ -481,8 +434,8 @@ function PatternCard({
     }
   }, [expanded, pattern.id]);
 
-  const shownOccurrences = pattern.occurrences.slice(0, visibleOccurrences);
-  const hasMoreOccurrences = shownOccurrences.length < pattern.occurrences.length;
+  const shownOccurrences = occurrences.slice(0, visibleOccurrences);
+  const hasMoreOccurrences = shownOccurrences.length < occurrences.length;
 
   return (
     <motion.section
@@ -495,16 +448,18 @@ function PatternCard({
           : `border-[var(--rigmd-border)] bg-[var(--rigmd-card)] ${getPatternBorder(pattern.status)}`
       }`}
     >
-      <motion.button type="button" onClick={onToggle} whileTap={buttonTap} className="w-full px-5 py-5 text-left transition hover:bg-[var(--rigmd-card-hover)]">
-        <div className="grid grid-cols-[64px_minmax(0,1fr)_260px_170px] items-center gap-5">
+      <motion.button type="button" aria-expanded={expanded} onClick={onToggle} whileTap={buttonTap} className="w-full px-5 py-5 text-left transition hover:bg-[var(--rigmd-card-hover)]">
+        <div className="grid grid-cols-1 sm:grid-cols-[64px_minmax(0,1fr)] xl:grid-cols-[64px_minmax(0,1fr)_210px] items-center gap-5">
           <div className="flex h-14 w-14 flex-col items-center justify-center rounded-full bg-[var(--rigmd-card-soft)]">
             <span className="text-xl font-bold text-cyan-400">{pattern.occurrence_count}</span>
-            <span className="text-[11px] text-slate-500">checks</span>
+            <span className="text-xs text-slate-400">checks</span>
           </div>
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-lg font-bold text-white">This keeps showing up</h3>
+              <h3 className="text-lg font-bold text-white">
+                {incompletePattern ? 'Repeated checks need more details' : pattern.symptom}
+              </h3>
               <StatusBadge status={pattern.status} />
 
               {pattern.action_escalated && (
@@ -515,25 +470,18 @@ function PatternCard({
               )}
             </div>
 
-            <p className="mt-1 text-sm font-semibold text-slate-200">{pattern.probable_cause}</p>
-            <p className="mt-1 text-sm text-slate-500">{getPatternMeaning(pattern)}</p>
-
-            <div className="mt-3 flex flex-wrap items-center gap-5 text-xs text-slate-500">
-              <span>First noticed: {pattern.first_detected}</span>
-              <span>Last seen: {pattern.latest_detected}</span>
-            </div>
-
-            <PatternDots pattern={pattern} />
-          </div>
-
-          <div className="flex items-center justify-center gap-3">
-            <ActionBadge action={pattern.updated_action} />
+            <p className="mt-1 text-sm text-slate-400">
+              {incompletePattern ? 'The symptom was not saved for these checks.' : `Possible cause: ${pattern.probable_cause || 'No cause identified yet'}.`}
+            </p>
+            <p className="mt-2 text-xs font-semibold text-cyan-300">
+              Next step: {getFriendlyAction(pattern.updated_action)}
+            </p>
           </div>
 
           <div className="flex justify-end">
             <span className="inline-flex min-w-[144px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2 text-xs font-semibold text-slate-400">
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {expanded ? 'Hide details' : 'Why repeated?'}
+              {expanded ? 'Hide details' : 'View details and next step'}
             </span>
           </div>
         </div>
@@ -553,7 +501,7 @@ function PatternCard({
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4">
               <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
                   What to do next
                 </p>
                 <p className="text-sm leading-relaxed text-white">{getRecommendedNextStep(pattern)}</p>
@@ -561,24 +509,35 @@ function PatternCard({
 
               <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Checks included</p>
-                  <span className="text-xs font-semibold text-cyan-400">{pattern.occurrences.length} related checks</span>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Checks included</p>
+                  <span className="text-xs font-semibold text-cyan-400">{occurrences.length} related checks</span>
                 </div>
 
                 <div className="space-y-2">
-                  {shownOccurrences.map((occurrence) => (
+                  {shownOccurrences.length > 0 ? shownOccurrences.map((occurrence) => (
                     <div
                       key={occurrence.id}
-                      className="grid grid-cols-[120px_minmax(0,1fr)_160px_160px] items-center gap-4 rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] px-4 py-3"
+                      className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[120px_minmax(0,1fr)_160px_160px] items-center gap-4 rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] px-4 py-3"
                     >
                       <div>
-                        <p className="text-sm font-bold text-white">{occurrence.display_date}</p>
-                        <p className="text-xs text-slate-500">{occurrence.display_time}</p>
+                        {(() => {
+                          const timestamp = formatLocalTimestamp(
+                            sessionTimestamps[occurrence.id],
+                            occurrence.display_date,
+                            occurrence.display_time,
+                          );
+                          return (
+                            <>
+                              <p className="text-sm font-bold text-white">{timestamp.date}</p>
+                              <p className="text-xs text-slate-400">{timestamp.time}</p>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-white">{occurrence.symptom}</p>
-                        <p className="truncate text-sm text-slate-500">{occurrence.probable_cause}</p>
+                        <p className="truncate text-sm text-slate-400">{occurrence.probable_cause}</p>
                       </div>
 
                       <div className="flex justify-center">
@@ -589,17 +548,32 @@ function PatternCard({
                         <ConfidenceBadge confidence={occurrence.confidence_label} />
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="rounded-lg border border-dashed border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-4 py-6 text-center">
+                      <p className="text-sm font-semibold text-slate-200">Related checks are not available yet.</p>
+                      <p className="mt-1 text-sm leading-relaxed text-slate-400">
+                        This repeated problem was reported, but its saved check details could not be loaded.
+                      </p>
+                      <motion.button
+                        type="button"
+                        onClick={onViewHistory}
+                        whileTap={buttonTap}
+                        className="mt-4 inline-flex items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-bold text-cyan-300 transition hover:border-cyan-300/60 hover:bg-cyan-400/15"
+                      >
+                        Open Past Checks
+                      </motion.button>
+                    </div>
+                  )}
                 </div>
 
-                {pattern.occurrences.length > DEFAULT_VISIBLE_OCCURRENCES && (
+                {occurrences.length > DEFAULT_VISIBLE_OCCURRENCES && (
                   <div className="mt-4 flex items-center justify-center">
                     {hasMoreOccurrences ? (
                       <motion.button
                         type="button"
                         onClick={() =>
                           setVisibleOccurrences((current) =>
-                            Math.min(current + OCCURRENCE_INCREMENT, pattern.occurrences.length)
+                            Math.min(current + OCCURRENCE_INCREMENT, occurrences.length)
                           )
                         }
                         whileTap={buttonTap}
@@ -608,7 +582,7 @@ function PatternCard({
                         Show more checks
                       </motion.button>
                     ) : (
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                         All checks shown
                       </p>
                     )}
@@ -619,28 +593,28 @@ function PatternCard({
 
             <aside className="space-y-4">
               <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
                   Simple summary
                 </p>
 
                 <div className="space-y-3 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Before</span>
+                    <span className="text-slate-400">Before</span>
                     <ActionBadge action={pattern.previous_action} />
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Now</span>
+                    <span className="text-slate-400">Now</span>
                     <ActionBadge action={pattern.updated_action} />
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Trend</span>
+                    <span className="text-slate-400">Trend</span>
                     <StatusBadge status={pattern.status} />
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Repeated checks</span>
+                    <span className="text-slate-400">Repeated checks</span>
                     <span className="font-bold text-white">{pattern.occurrence_count}</span>
                   </div>
                 </div>
@@ -697,12 +671,12 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
           <Zap size={15} className="text-cyan-400" />
           <h3 className="font-bold uppercase tracking-wider text-white">Checks that make up these repeats</h3>
         </div>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-slate-400">
           These are the past checks RigMD used to spot repeated problems.
         </p>
       </div>
 
-      <div className="grid grid-cols-[150px_minmax(170px,1fr)_minmax(220px,1fr)_180px_190px_150px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+      <div className="grid grid-cols-[150px_minmax(170px,1fr)_minmax(220px,1fr)_180px_190px_150px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
         <div>Date</div>
         <div>What happened</div>
         <div className="text-center">What RigMD found</div>
@@ -715,7 +689,7 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
         <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
           <FileText size={42} className="mb-4 text-slate-600" />
           <h3 className="text-lg font-bold text-white">No repeated-check timeline yet</h3>
-          <p className="mt-2 max-w-md text-sm text-slate-500">
+          <p className="mt-2 max-w-md text-sm text-slate-400">
             This will appear after RigMD sees the same kind of issue in more than one check.
           </p>
         </div>
@@ -752,6 +726,7 @@ export default function RecurringPatternsView({
   setActivePage?: (page: PageKey) => void;
 }) {
   const [data, setData] = useState<RecurringResponse>(emptyRecurring);
+  const [sessionTimestamps, setSessionTimestamps] = useState<SessionTimestampMap>({});
   const [expandedPatternId, setExpandedPatternId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -765,8 +740,27 @@ export default function RecurringPatternsView({
     setIsLoading(true);
 
     try {
-      const response = await apiGet<RecurringResponse>('/api/recurring/patterns');
-      setData(response.data);
+      const [patternResult, sessionResult] = await Promise.allSettled([
+        apiGet<RecurringResponse>('/api/recurring/patterns'),
+        apiGet<SessionSummary[] | { sessions?: SessionSummary[] }>('/api/diagnosis/sessions'),
+      ]);
+
+      if (patternResult.status === 'rejected') {
+        throw patternResult.reason;
+      }
+
+      setData(patternResult.value.data);
+
+      if (sessionResult.status === 'fulfilled') {
+        const payload = sessionResult.value.data;
+        const sessions = Array.isArray(payload) ? payload : payload.sessions ?? [];
+        setSessionTimestamps(sessions.reduce<SessionTimestampMap>((map, session) => {
+          if (session.session_id && session.created_at) {
+            map[session.session_id] = session.created_at;
+          }
+          return map;
+        }, {}));
+      }
       setLoadError(null);
     } catch {
       setData(emptyRecurring);
@@ -860,8 +854,6 @@ export default function RecurringPatternsView({
   };
 
   const recurringTone = getSummaryCardTone(visibleMetrics.recurring_issues, 'cyan');
-  const worseningTone = getSummaryCardTone(visibleMetrics.worsening_trends, 'red');
-  const escalatedTone = getSummaryCardTone(visibleMetrics.action_escalated, 'orange');
   const occurrencesTone = getSummaryCardTone(visibleMetrics.total_occurrences, 'cyan');
 
   return (
@@ -886,99 +878,59 @@ export default function RecurringPatternsView({
             </div>
           )}
 
-          <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2">
             <MetricCard
               icon={<RefreshCw size={20} className={recurringTone.iconColor} />}
-              label="Things Repeated"
+              label="Repeated problems"
               value={visibleMetrics.recurring_issues}
               borderColor={recurringTone.borderColor}
               valueColor={recurringTone.valueColor}
             />
 
             <MetricCard
-              icon={<AlertTriangle size={20} className={worseningTone.iconColor} />}
-              label="Getting Worse"
-              value={visibleMetrics.worsening_trends}
-              borderColor={worseningTone.borderColor}
-              valueColor={worseningTone.valueColor}
-            />
-
-            <MetricCard
-              icon={<AlertCircle size={20} className={escalatedTone.iconColor} />}
-              label="Needs Help"
-              value={visibleMetrics.action_escalated}
-              borderColor={escalatedTone.borderColor}
-              valueColor={escalatedTone.valueColor}
-            />
-
-            <MetricCard
               icon={<BarChart3 size={20} className={occurrencesTone.iconColor} />}
-              label="Total Matches"
+              label="Times Seen"
               value={visibleMetrics.total_occurrences}
               borderColor={occurrencesTone.borderColor}
               valueColor={occurrencesTone.valueColor}
             />
           </motion.div>
 
-          <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-5">
-            <div className="flex gap-3">
-              <Info size={18} className="mt-0.5 shrink-0 text-cyan-400" />
-
-              <div>
-                <h3 className="font-bold text-white">What this page means</h3>
-                <p className="mt-1 text-sm leading-relaxed text-slate-400">
-                  RigMD groups checks that keep showing the same kind of problem. If something is only being watched,
-                  no fix is needed yet. If it keeps getting worse, RigMD will make the next step clearer.
-                </p>
-              </div>
-            </div>
-          </section>
-
           <section>
             <div className="mb-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex flex-1 items-center gap-3">
                   <RefreshCw size={15} className={isLoading ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
-                  <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-white">Problems seen more than once</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-white">Repeated check patterns</h3>
                   <div className="h-px flex-1 bg-[var(--rigmd-border)]" />
                 </div>
 
-                <p className="ml-4 text-xs text-slate-500">
+                <p className="ml-4 text-xs text-slate-400">
                   {filteredPatterns.length} of {visiblePatterns.length} shown
                 </p>
               </div>
 
               {visiblePatterns.length > 0 && (
                 <div className="flex flex-col gap-3 rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="flex flex-wrap gap-2">
-                    {patternFilters.map((item) => (
-                      <motion.button
-                        key={item}
-                        type="button"
-                        onClick={() => setFilter(item)}
-                        whileTap={buttonTap}
-                        className={`rounded-full border px-3.5 py-2 text-xs font-bold uppercase transition ${
-                          filter === item
-                            ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
-                            : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
-                        }`}
-                      >
-                        {getFilterLabel(item)}
-                      </motion.button>
-                    ))}
-                  </div>
+                  <FilterDropdown
+                label="Filter"
+                value={filter}
+                onChange={setFilter}
+                options={patternFilters.map((item) => ({ value: item, label: getFilterLabel(item) }))}
+              />
 
-                  <label className="relative block">
+                  <label className="rigmd-search-field relative block rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] transition-colors">
                     <Search
                       size={16}
-                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
                     />
 
                     <input
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                       placeholder="Search what RigMD found..."
-                      className="h-10 w-full rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500/50 xl:w-[340px]"
+                      aria-label="Search repeated problems"
+                      className="h-10 min-w-0 w-full rounded-xl bg-transparent pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-400 xl:w-[340px]"
                     />
                   </label>
                 </div>
@@ -995,7 +947,7 @@ export default function RecurringPatternsView({
               <div className="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-6 py-12 text-center">
                 <FileText size={42} className="mb-4 text-slate-600" />
                 <h3 className="text-lg font-bold text-white">No repeated problems that need attention yet.</h3>
-                <p className="mt-2 max-w-md text-sm text-slate-500">
+                <p className="mt-2 max-w-md text-sm text-slate-400">
                   Healthy results are saved in Past Checks, but this page only shows repeated issues that may matter.
                 </p>
                 {setActivePage && (
@@ -1013,7 +965,7 @@ export default function RecurringPatternsView({
               <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-6 py-12 text-center">
                 <FileText size={42} className="mb-4 text-slate-600" />
                 <h3 className="text-lg font-bold text-white">Nothing matches that filter.</h3>
-                <p className="mt-2 max-w-md text-sm text-slate-500">
+                <p className="mt-2 max-w-md text-sm text-slate-400">
                   Try clearing the search or showing all repeated problems.
                 </p>
                 <motion.button
@@ -1031,6 +983,7 @@ export default function RecurringPatternsView({
                   <PatternCard
                     key={pattern.id}
                     pattern={pattern}
+                    sessionTimestamps={sessionTimestamps}
                     expanded={expandedPatternId === pattern.id}
                     onViewHistory={() => setActivePage?.('diagnosticHistory')}
                     onDeletePattern={() => setPatternPendingDelete(pattern)}
@@ -1044,7 +997,10 @@ export default function RecurringPatternsView({
             )}
           </section>
 
-          <PatternTimelineTable rows={visibleTimeline} />
+          {visibleTimeline.length > 0 && <details className="rounded-xl border border-[var(--rigmd-border)] p-5">
+            <summary className="font-semibold text-slate-200">View related check history ({visibleTimeline.length})</summary>
+            <div className="mt-4"><PatternTimelineTable rows={visibleTimeline} /></div>
+          </details>}
         </div>
       </motion.div>
 
@@ -1067,16 +1023,16 @@ export default function RecurringPatternsView({
         details={
           patternPendingDelete ? (
             <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
-              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
                 Repeated problem
               </p>
               <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <p className="text-slate-500">What RigMD found</p>
+                  <p className="text-slate-400">What RigMD found</p>
                   <p className="font-bold text-white">{patternPendingDelete.probable_cause}</p>
                 </div>
                 <div>
-                  <p className="text-slate-500">Saved checks affected</p>
+                  <p className="text-slate-400">Saved checks affected</p>
                   <p className="font-bold text-white">
                     {patternPendingDelete.occurrences.length} check
                     {patternPendingDelete.occurrences.length === 1 ? '' : 's'}

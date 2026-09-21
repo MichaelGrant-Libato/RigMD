@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   AlertTriangle,
+  ChevronDown,
   FileText,
   Info,
   Search,
@@ -9,7 +10,8 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
-import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
+import FilterDropdown from '../components/FilterDropdown';
+import { hoverLift, buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiGet } from '../lib/api';
 
 interface WarningSummary {
@@ -69,7 +71,7 @@ function getActionStyle(action: string) {
   return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
 
-function getCategoryStyle(_category?: string) {
+function getCategoryStyle() {
   return 'border-slate-500/25 bg-slate-500/10 text-slate-400';
 }
 
@@ -174,28 +176,6 @@ function getObservedLabelClass(action: string) {
   if (severity === 'maintain') return 'text-emerald-300/85';
 
   return 'text-cyan-300/80';
-}
-
-function getRowSeverityClass(row: WarningSignRow) {
-  if (!row.observed) {
-    return 'border-l-transparent bg-[var(--rigmd-card)] hover:border-l-cyan-400/25 hover:bg-[var(--rigmd-card-hover)]';
-  }
-
-  const severity = getActionSeverity(row.action);
-
-  if (severity === 'escalate') {
-    return 'border-l-red-400 bg-red-400/[0.055] hover:bg-red-400/[0.075]';
-  }
-
-  if (severity === 'troubleshoot') {
-    return 'border-l-amber-400 bg-amber-400/[0.045] hover:bg-amber-400/[0.065]';
-  }
-
-  if (severity === 'maintain') {
-    return 'border-l-emerald-400 bg-emerald-400/[0.035] hover:bg-emerald-400/[0.055]';
-  }
-
-  return 'border-l-cyan-400 bg-cyan-400/[0.035] hover:bg-cyan-400/[0.055]';
 }
 
 function getPriorityScore(row: WarningSignRow) {
@@ -329,31 +309,6 @@ function SeverityBreakdown({ counts }: { counts: ReturnType<typeof getSeverityCo
   );
 }
 
-function CategoryButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      whileTap={buttonTap}
-      className={`shrink-0 rounded-full border px-3.5 py-2 text-[11px] font-bold uppercase transition ${
-        active
-          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
-      }`}
-    >
-      {label}
-    </motion.button>
-  );
-}
-
 function ObservedToggle({
   checked,
   onChange,
@@ -393,26 +348,14 @@ function ObservedToggle({
   );
 }
 
-function WarningRowSkeleton() {
-  return (
-    <div className="grid grid-cols-[minmax(240px,1fr)_minmax(300px,1.4fr)_minmax(220px,1fr)_170px_170px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="flex justify-center">
-          <div className="h-4 w-28 animate-pulse rounded border border-[#263241] bg-[#1c2733]" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ActionBadge({ action }: { action: string }) {
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getActionStyle(
+      className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold ${getActionStyle(
         action
       )}`}
     >
-      {action}
+      {friendlyAction(action)}
     </span>
   );
 }
@@ -420,12 +363,78 @@ function ActionBadge({ action }: { action: string }) {
 function CategoryBadge({ category }: { category: string }) {
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getCategoryStyle(
-        category
-      )}`}
+      className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getCategoryStyle()}`}
     >
       {category}
     </span>
+  );
+}
+
+function friendlyAction(action: string) {
+  const value = action.toLowerCase();
+  if (value.includes('escalate')) return 'Get help';
+  if (value.includes('troubleshoot')) return 'Try a fix';
+  if (value.includes('maintain')) return 'Care tips';
+  if (value.includes('monitor')) return 'Watch for now';
+  return action;
+}
+
+function WarningSignCard({ row }: { row: WarningSignRow }) {
+  const [expanded, setExpanded] = useState(false);
+  const reducedMotion = useReducedMotion();
+
+  return (
+    <motion.button
+      type="button"
+      variants={cardFadeUp}
+      whileHover={hoverLift}
+      transition={{ duration: 0.18 }}
+      aria-expanded={expanded}
+      onClick={() => setExpanded(!expanded)}
+      className={`row-span-2 grid h-full w-full grid-rows-subgrid gap-0 overflow-hidden rounded-xl border bg-[var(--rigmd-card)] text-left transition-colors duration-200 hover:border-cyan-400/50 hover:bg-[var(--rigmd-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 ${expanded ? 'border-cyan-400/50' : 'border-[var(--rigmd-border)]'}`}
+    >
+      <span className="flex min-h-[184px] w-full flex-col p-5">
+        <span className="flex min-h-8 items-start justify-between gap-3">
+          <span className="min-w-0 text-base font-bold text-white">{row.warning_sign}</span>
+          <ActionBadge action={row.action} />
+        </span>
+        <span className="mt-3 text-sm leading-relaxed text-slate-400">{row.meaning}</span>
+        {row.observed && (
+          <span className={`mt-2 text-xs font-semibold ${getObservedLabelClass(row.action)}`}>
+            Found in saved checks{row.observed_count > 1 ? ` (${row.observed_count} times)` : ''}
+          </span>
+        )}
+        <span className="mt-auto flex items-center justify-between gap-3 pt-4">
+          <CategoryBadge category={row.category} />
+          <span className="inline-flex shrink-0 items-center gap-2 text-xs font-semibold text-cyan-300">
+            {expanded ? 'Hide details' : 'View details'}
+            <ChevronDown size={16} className={`transition-transform duration-300 motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} />
+          </span>
+        </span>
+      </span>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.span
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: reducedMotion ? 0 : 0.25, ease: 'easeOut' }}
+            className="block w-full overflow-hidden"
+          >
+            <span className="grid gap-4 border-t border-[var(--rigmd-border)] px-5 py-4 text-sm leading-relaxed">
+              <span className="grid gap-1">
+                <span className="font-semibold text-slate-200">What to look for</span>
+                <span className="text-slate-400">{row.threshold}</span>
+              </span>
+              <span className="grid gap-1">
+                <span className="font-semibold text-slate-200">Next step</span>
+                <span className="text-slate-400">{friendlyAction(row.action)}</span>
+              </span>
+            </span>
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </motion.button>
   );
 }
 
@@ -516,12 +525,16 @@ export default function WarningSignsView() {
             <SeverityBreakdown counts={severityCounts} />
           </AlertCard>
 
-          <AlertCard
-            icon={<Info size={18} className="text-cyan-400" />}
-            tone="info"
-            title="Warning signs are advisory indicators"
-            description="Warning signs are observable indicators that may suggest a hardware or software issue. They are not final diagnoses. Use them to guide the recommended action."
-          />
+          <details className="group rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] px-5 py-4">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-slate-300 marker:hidden">
+              <Info size={16} className="text-cyan-400" />
+              About warning signs
+              <ChevronDown size={16} className="ml-auto shrink-0 self-center text-slate-400 transition-transform duration-300 group-open:rotate-180 motion-reduce:transition-none" />
+            </summary>
+            <p className="mt-3 pl-6 text-sm leading-relaxed text-slate-400">
+              Warning signs suggest a possible problem. Follow the suggested step and check again if it continues.
+            </p>
+          </details>
 
           {(data.database_warning || loadError) && (
             <AlertCard
@@ -533,25 +546,21 @@ export default function WarningSignsView() {
           )}
 
           <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                {categories.map((category) => (
-                  <CategoryButton
-                    key={category}
-                    label={category === 'all' ? 'All' : category}
-                    active={activeCategory === category}
-                    onClick={() => setActiveCategory(category)}
-                  />
-                ))}
-              </div>
-
-              <div className="flex w-full items-center gap-2 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2.5 xl:w-[260px]">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <FilterDropdown
+                label="Filter by type"
+                value={activeCategory}
+                onChange={setActiveCategory}
+                options={categories.map((category) => ({ value: category, label: category === 'all' ? 'All warning signs' : category }))}
+              />
+              <div className="rigmd-search-field flex w-full items-center gap-2 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-2.5 transition-colors xl:w-[260px]">
                 <Search size={16} className="shrink-0 text-slate-500" />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search warning signs..."
-                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                  aria-label="Search warning signs"
+                  className="min-w-0 w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
                 />
               </div>
             </div>
@@ -580,19 +589,9 @@ export default function WarningSignsView() {
               </div>
             </div>
 
-            <div className="grid grid-cols-[minmax(240px,1fr)_minmax(300px,1.4fr)_minmax(220px,1fr)_170px_170px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              <div>Warning Sign</div>
-              <div>Meaning</div>
-              <div>Threshold</div>
-              <div className="text-center">Action</div>
-              <div className="text-center">Category</div>
-            </div>
-
             {isLoading ? (
-              <div>
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <WarningRowSkeleton key={index} />
-                ))}
+              <div className="grid gap-3 p-4 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-36 animate-pulse rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]" />)}
               </div>
             ) : visibleWarningSigns.length === 0 ? (
               <AnimatePresence mode="wait">
@@ -627,56 +626,8 @@ export default function WarningSignsView() {
                 </motion.div>
               </AnimatePresence>
             ) : (
-              <motion.div variants={staggerContainer} initial="hidden" animate="visible">
-                {visibleWarningSigns.map((row) => (
-                <motion.div
-                  key={row.id}
-                  variants={cardFadeUp}
-                  whileHover={row.observed ? { y: -1 } : undefined}
-                  transition={{ duration: 0.18 }}
-                  className={`grid grid-cols-[minmax(240px,1fr)_minmax(300px,1.4fr)_minmax(220px,1fr)_170px_170px] items-center border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${getRowSeverityClass(row)}`}
-                >
-                  <div className="flex min-w-0 items-start gap-2">
-                    {row.observed && (
-                      <AlertTriangle size={15} className={`mt-0.5 shrink-0 ${getObservedLabelClass(row.action)}`} />
-                    )}
-
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-white">
-                        {row.warning_sign}
-                      </p>
-
-                      {row.observed && (
-                        <>
-                          <p className={`mt-1 text-xs font-semibold ${getObservedLabelClass(row.action)}`}>
-                            Observed recently
-                            {row.observed_count > 1 ? ` - ${row.observed_count} times` : ''}
-                          </p>
-
-                        <p className="hidden">
-                          Observed recently
-                          {row.observed_count > 1 ? ` · ${row.observed_count} times` : ''}
-                        </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="text-sm leading-relaxed text-slate-400">
-                    {row.meaning}
-                  </div>
-
-                  <div className="text-sm text-slate-400">{row.threshold}</div>
-
-                  <div className="flex justify-center">
-                    <ActionBadge action={row.action} />
-                  </div>
-
-                  <div className="flex justify-center">
-                    <CategoryBadge category={row.category} />
-                  </div>
-                </motion.div>
-                ))}
+              <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid gap-3 p-4 sm:grid-cols-2">
+                {visibleWarningSigns.map((row) => <WarningSignCard key={row.id} row={row} />)}
               </motion.div>
             )}
           </section>

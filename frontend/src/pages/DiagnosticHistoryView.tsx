@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import FilterDropdown from '../components/FilterDropdown';
 import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiDelete, apiFetch } from '../lib/api';
@@ -50,6 +51,13 @@ function normalizeAction(action: string): string {
   if (value.includes('maintain')) return 'Maintain';
 
   return 'Monitor';
+}
+
+function getPlainActionLabel(action: string) {
+  if (action === 'Escalate') return 'Get help';
+  if (action === 'Troubleshoot') return 'Fix a problem';
+  if (action === 'Maintain') return 'Keep maintained';
+  return 'Watch for now';
 }
 
 function isCurrentMonth(value: string | null) {
@@ -162,6 +170,22 @@ function formatSessionTime(createdAt?: string | null) {
   });
 }
 
+function getSessionSymptom(session: SessionSummary) {
+  const alternateSymptom = (session as SessionSummary & { symptom?: string | null }).symptom;
+  const symptom = session.symptom_type?.trim() || alternateSymptom?.trim();
+  return symptom || 'Symptom not recorded';
+}
+
+function getSessionScope(session: SessionSummary) {
+  const record = session as SessionSummary & {
+    check_scope?: string | null;
+    scope?: string | null;
+    diagnostic_scope?: string | null;
+  };
+  const scope = record.check_scope || record.scope || record.diagnostic_scope;
+  return scope?.trim() || null;
+}
+
 function MetricCard({
   icon,
   label,
@@ -195,31 +219,6 @@ function MetricCard({
         </div>
       </div>
     </motion.section>
-  );
-}
-
-function FilterButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      whileTap={buttonTap}
-      className={`rounded-full border px-4 py-2 text-xs font-bold uppercase transition ${
-        active
-          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-500 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
-      }`}
-    >
-      {label}
-    </motion.button>
   );
 }
 
@@ -283,8 +282,12 @@ function SessionRow({
 
       <div className="min-w-0">
         <p className="truncate font-semibold text-white">
-          {session.symptom_type || 'Unknown symptom'}
+          {getSessionSymptom(session)}
         </p>
+
+        {getSessionScope(session) && (
+          <p className="mt-1 text-xs text-slate-500">Checked: {getSessionScope(session)}</p>
+        )}
 
         {session.is_recurring && (
           <span className="mt-1 inline-flex rounded-full border border-amber-400/25 bg-amber-400/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-300">
@@ -303,7 +306,7 @@ function SessionRow({
             action
           )}`}
         >
-          {action}
+          {getPlainActionLabel(action)}
         </span>
       </div>
 
@@ -496,9 +499,7 @@ export default function DiagnosticHistoryView({
           }
 
           return (
-            session.symptom_type
-              ?.toLowerCase()
-              .includes(query) ||
+            getSessionSymptom(session).toLowerCase().includes(query) ||
             session.diagnosed_category
               ?.toLowerCase()
               .includes(query)
@@ -620,7 +621,7 @@ export default function DiagnosticHistoryView({
                   className="text-blue-400"
                 />
               }
-              label="Total Sessions"
+              label="Total checks"
               value={totalSessions}
               borderColor="border-blue-500/30"
             />
@@ -632,7 +633,7 @@ export default function DiagnosticHistoryView({
                   className="text-orange-400"
                 />
               }
-              label="Recurring Issues"
+              label="Repeated patterns"
               value={recurringCount}
               borderColor="border-orange-500/30"
             />
@@ -644,7 +645,7 @@ export default function DiagnosticHistoryView({
                   className="text-red-400"
                 />
               }
-              label="Escalated"
+              label="Need help"
               value={escalatedCount}
               borderColor="border-red-500/30"
             />
@@ -663,26 +664,16 @@ export default function DiagnosticHistoryView({
           </motion.div>
 
           <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {filters.map(
-                  (item) => (
-                    <FilterButton
-                      key={item}
-                      label={item}
-                      active={
-                        filter === item
-                      }
-                      onClick={() =>
-                        setFilter(item)
-                      }
-                    />
-                  )
-                )}
-              </div>
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <FilterDropdown
+                label="Filter"
+                value={filter}
+                onChange={setFilter}
+                options={filters.map((item) => ({ value: item, label: item === 'All Sessions' ? 'All checks' : item === 'Recurring Only' ? 'Repeated checks' : getPlainActionLabel(item) }))}
+              />
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <label className="relative block">
+                <label className="rigmd-search-field relative block rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] transition-colors">
                   <Search
                     size={16}
                     className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
@@ -696,7 +687,8 @@ export default function DiagnosticHistoryView({
                       )
                     }
                     placeholder="Search symptom or cause..."
-                    className="h-10 w-full rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500/50 sm:w-[300px]"
+                    aria-label="Search past checks by symptom or cause"
+                    className="h-10 min-w-0 w-full rounded-xl bg-transparent pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 sm:w-[300px]"
                   />
                 </label>
 
