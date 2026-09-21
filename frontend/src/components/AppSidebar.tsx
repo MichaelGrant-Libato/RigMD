@@ -61,6 +61,8 @@ function SidebarItem({
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
       title={collapsed ? label : undefined}
       className={`relative mb-1 flex w-full items-center transition-colors ${
         collapsed ? 'h-10 justify-center px-0' : 'justify-between px-4 py-2.5 text-left'
