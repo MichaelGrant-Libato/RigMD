@@ -94,10 +94,10 @@ function getLiveStatusView(status: LiveDataStatus) {
   }
 
   return {
-      label: 'Live Data',
-      className: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
-      iconClassName: 'text-emerald-300',
-      dotClassName: 'bg-emerald-400',
+    label: 'Live Data',
+    className: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
+    iconClassName: 'text-emerald-300',
+    dotClassName: 'bg-emerald-400',
   };
 }
 
