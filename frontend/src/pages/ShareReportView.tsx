@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
+import { createPortal } from 'react-dom';
 import {
   Clipboard,
   Download,
@@ -200,11 +201,13 @@ function buildReportText({
   dashboard,
   hardwareUpdatedAt,
   sessions,
+  historyUnavailable,
 }: {
   stats: HardwareStats | null;
   dashboard: DashboardSummary;
   hardwareUpdatedAt: Date | null;
   sessions: SessionSummary[];
+  historyUnavailable: boolean;
 }) {
   const latest = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
   const recentSessions = sessions.slice(0, 8);
@@ -391,6 +394,7 @@ function buildReportText({
     '                           RigMD Device Check Report',
     divider,
     kv('Generated', formatDate(new Date())),
+    ...(historyUnavailable ? ['Check history could not be loaded. This report may be incomplete.'] : []),
     kv('System Name', cleanValue(stats?.device_name)),
     kv('Operating System', osString),
     kv('Hardware Scan Time', formatDate(hardwareUpdatedAt)),
@@ -490,8 +494,9 @@ export default function ShareReportView({
         dashboard,
         hardwareUpdatedAt,
         sessions,
+        historyUnavailable: Boolean(loadError),
       }),
-    [dashboard, hardwareUpdatedAt, sessions, stats]
+    [dashboard, hardwareUpdatedAt, sessions, stats, loadError]
   );
 
   const latestSession = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
@@ -523,9 +528,10 @@ export default function ShareReportView({
 
   return (
     <>
+      {createPortal(<article className="rigmd-print-report" aria-label="Device check report"><h1>RigMD Device Check Report</h1><pre>{reportText.split('\n').slice(1).join('\n')}</pre></article>, document.body)}
       <TopHeader
         title="Share Report"
-        subtitle="Create a simple Device check report for support or repair help"
+        subtitle="Review your results, then print or share them"
       />
 
       <motion.div
@@ -540,6 +546,7 @@ export default function ShareReportView({
           <div className="space-y-5">
             {(loadError || message) && (
               <div
+                role="status"
                 className={`rounded-xl border px-4 py-3 text-sm ${
                   message?.type === 'success'
                     ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
@@ -556,24 +563,24 @@ export default function ShareReportView({
               className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6"
             >
               <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">Report Preview</p>
-              <h3 className="text-2xl font-bold text-white">Ready to share with support</h3>
+              <h3 className="text-2xl font-bold text-white">Your device report</h3>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-                This report uses your saved Device information and recent checks. It does not include passwords, personal files, or account details.
+                Includes your computer name, device information, and recent checks. Review it before sharing.
               </p>
 
               <div className="mt-5 grid gap-4 md:grid-cols-3">
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Latest result</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Latest result</p>
                   <p className="mt-2 break-words font-bold text-white">{friendlyResult(latestSession?.diagnosed_category)}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">What to do</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">What to do</p>
                   <p className="mt-2 font-bold text-white">{friendlyAction(latestSession?.action_category)}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Saved checks</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Saved checks</p>
                   <p className="mt-2 font-bold text-white">{dashboard.totals.total_sessions || sessions.length}</p>
                 </div>
               </div>
@@ -601,7 +608,7 @@ export default function ShareReportView({
                 </button>
               </div>
 
-              <pre className="font-mono max-h-[560px] overflow-auto whitespace-pre-wrap p-5 text-xs sm:text-sm leading-relaxed text-slate-200">
+              <pre tabIndex={0} aria-label="Report preview" className="font-sans max-h-[560px] overflow-auto whitespace-pre-wrap p-5 text-sm leading-relaxed text-slate-200">
                 {reportText}
               </pre>
             </motion.section>
@@ -621,16 +628,18 @@ export default function ShareReportView({
               <div className="mt-5 space-y-3">
                 <motion.button
                   type="button"
+                  disabled={isLoading}
                   onClick={handleCopy}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-bold text-[#041014] transition hover:bg-cyan-300"
                 >
                   <Clipboard size={16} />
-                  Copy Report
+                  {isLoading ? 'Loading report...' : 'Copy Report'}
                 </motion.button>
 
                 <motion.button
                   type="button"
+                  disabled={isLoading}
                   onClick={handleDownload}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-300 transition hover:bg-cyan-400/15"
@@ -641,6 +650,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
+                  disabled={isLoading}
                   onClick={handlePrint}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"
@@ -651,6 +661,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
+                  disabled={isLoading}
                   onClick={handleEmailDraft}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"
