@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as signalR from '@microsoft/signalr';
 import { HardwareStats } from '../types/rigmd';
 
@@ -40,6 +40,29 @@ interface TelemetryPoint {
   Disks: DiskTelemetryPoint[];
 }
 
+interface RawTelemetryPayload {
+  cpuUsagePercent?: number;
+  ramUsagePercent?: number;
+  gpuUsagePercent?: number;
+  networkSendKbps?: number;
+  networkReceiveKbps?: number;
+  cpuSpeedMhz?: number;
+  ramUsedGb?: number;
+  gpuMemoryUsedGb?: number;
+  cpuTempCelsius?: number;
+  cpuProcesses?: number;
+  cpuThreads?: number;
+  cpuHandles?: number;
+  gpuTempCelsius?: number;
+  gpuMemoryTotalGb?: number;
+  disks?: Array<{
+    deviceId: string;
+    activeTimePercent: number;
+    readKbps: number;
+    writeKbps: number;
+  }>;
+}
+
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats }: DeviceDetailModalProps) {
   const [data, setData] = useState<TelemetryPoint[]>([]);
   const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
@@ -70,7 +93,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
         .withAutomaticReconnect()
         .build();
 
-      connection.on('ReceiveTelemetry', (telemetry: any) => {
+      connection.on('ReceiveTelemetry', (telemetry: RawTelemetryPayload) => {
         setData((prevData) => {
           const newData = [...prevData.slice(1)];
           newData.push({
@@ -89,7 +112,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             CpuHandles: telemetry.cpuHandles,
             GpuTempCelsius: telemetry.gpuTempCelsius,
             GpuMemoryTotalGb: telemetry.gpuMemoryTotalGb,
-            Disks: (telemetry.disks || []).map((d: any) => ({
+            Disks: (telemetry.disks || []).map((d) => ({
               DeviceId: d.deviceId,
               ActiveTimePercent: d.activeTimePercent,
               ReadKbps: d.readKbps,
@@ -215,7 +238,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                             : 'bg-slate-800 text-slate-400 border border-transparent hover:bg-slate-700'
                         }`}
                       >
-                        Disk {idx}
+                        {disk.model ? `Disk ${idx}: ${disk.model}` : `Disk ${idx}`}
                       </button>
                     ))}
                   </div>
@@ -332,12 +355,12 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <>
                   <div><p className="text-xs text-slate-400">In use</p><p className="text-xl text-white">{latestData?.RamUsedGb?.toFixed(1) || stats.ram.used_gb} GB</p></div>
                   <div><p className="text-xs text-slate-400">Available</p><p className="text-xl text-white">{(stats.ram.total_gb - (latestData?.RamUsedGb || stats.ram.used_gb)).toFixed(1)} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{(stats.ram as any).speed_mtps || 0} MT/s</p></div>
-                  <div><p className="text-xs text-slate-400">Slots used</p><p className="text-xl text-white">{(stats.ram as any).slots_used || 0} of {(stats.ram as any).slots_total || 4}</p></div>
-                  <div><p className="text-xs text-slate-400">Form factor</p><p className="text-xl text-white">{(stats.ram as any).form_factor || 'DIMM'}</p></div>
-                  <div><p className="text-xs text-slate-400">Hardware reserved</p><p className="text-xl text-white">{(stats.ram as any).hardware_reserved_mb || 0} MB</p></div>
-                  <div><p className="text-xs text-slate-400">Committed</p><p className="text-xl text-white">{(stats.ram as any).committed_gb || 0} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Cached</p><p className="text-xl text-white">{(stats.ram as any).cached_gb || 0} GB</p></div>
+                  <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{stats.ram.speed_mtps || 0} MT/s</p></div>
+                  <div><p className="text-xs text-slate-400">Slots used</p><p className="text-xl text-white">{stats.ram.slots_used || 0} of {stats.ram.slots_total || 4}</p></div>
+                  <div><p className="text-xs text-slate-400">Form factor</p><p className="text-xl text-white">{stats.ram.form_factor || 'DIMM'}</p></div>
+                  <div><p className="text-xs text-slate-400">Hardware reserved</p><p className="text-xl text-white">{stats.ram.hardware_reserved_mb || 0} MB</p></div>
+                  <div><p className="text-xs text-slate-400">Committed</p><p className="text-xl text-white">{stats.ram.committed_gb || 0} GB</p></div>
+                  <div><p className="text-xs text-slate-400">Cached</p><p className="text-xl text-white">{stats.ram.cached_gb || 0} GB</p></div>
                 </>
               )}
 
