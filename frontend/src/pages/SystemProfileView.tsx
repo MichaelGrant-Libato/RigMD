@@ -66,7 +66,9 @@ function formatLastUpdated(value: Date | null) {
 
 function formatStorageSize(sizeGb: number | null | undefined) {
   if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Not available';
-  return sizeGb >= 1000 ? `${(sizeGb / 1024).toFixed(1)} TB` : `${sizeGb} GB`;
+  if (sizeGb >= 1000) return `${(sizeGb / 1024).toFixed(1)} TB`;
+  if (sizeGb >= 10) return `${Math.round(sizeGb)} GB`;
+  return `${sizeGb.toFixed(1)} GB`;
 }
 
 function formatStorageDisplay(stats: HardwareStats): string {
@@ -339,7 +341,7 @@ export default function SystemProfileView({
                     icon={Cpu}
                     title="Processor"
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
-                    helper={liveCpuTemp != null ? `Temperature: ${Math.round(liveCpuTemp)}°C` : (stats.cpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.cpu.temperature_celsius)}°C` : 'Temp Unavailable (Requires Admin)')}
+                    helper={liveCpuTemp != null ? `Temperature: ${Math.round(liveCpuTemp)}°C` : (stats.cpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.cpu.temperature_celsius)}°C` : 'Temperature not available')}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}
@@ -359,7 +361,9 @@ export default function SystemProfileView({
                     icon={HardDrive}
                     title="Storage"
                     value={formatStorageDisplay(stats)}
-                    helper={usageLabel(stats.disk.usage_percent)}
+                    helper={typeof stats.disk.used_gb === 'number' && stats.disk.total_gb > 0
+                      ? `${formatStorageSize(Math.max(0, stats.disk.total_gb - stats.disk.used_gb))} free | ${stats.disk.usage_percent.toFixed(1)}% of space used`
+                      : usageLabel(stats.disk.usage_percent)}
                     tone={getUsageTone(stats.disk.usage_percent)}
                     warningLabel={stats.disk.usage_percent >= 90 ? 'Storage is almost full' : 'Storage is getting full'}
                     onClick={() => handleCardClick('Storage')}
@@ -369,7 +373,7 @@ export default function SystemProfileView({
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
-                    helper={liveGpuTemp != null ? `Temperature: ${Math.round(liveGpuTemp)}°C` : (stats.gpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.gpu.temperature_celsius)}°C` : 'Temp Unavailable (Requires Admin)')}
+                    helper={liveGpuTemp != null ? `Temperature: ${Math.round(liveGpuTemp)}°C` : (stats.gpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.gpu.temperature_celsius)}°C` : 'Temperature not available')}
                     tone="neutral"
                     onClick={() => handleCardClick('GPU')}
                   />
@@ -379,7 +383,6 @@ export default function SystemProfileView({
                     title="Windows"
                     value={cleanValue(stats.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}
                     tone="neutral"
-                    onClick={() => handleCardClick('OS')}
                   />
 
                   <FriendlyInfoCard

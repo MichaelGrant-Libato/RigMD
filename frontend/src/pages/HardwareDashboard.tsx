@@ -157,7 +157,7 @@ function agentSnapshotToHardwareStats(
                   : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0))) *
                 1000
             ) / 10
-          : (hardware.allDisks?.[0]?.usagePercent ?? 0),
+          : Number.NaN,
     },
 
     all_disks: (hardware.allDisks ?? []).map((d) => ({
@@ -736,7 +736,7 @@ export default function HardwareDashboard() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-transparent font-sans text-gray-200">
+    <div className="rigmd-app-shell flex overflow-hidden bg-transparent font-sans text-gray-200">
       <AppSidebar
         activePage={activePage}
         setActivePage={handleSetActivePage}

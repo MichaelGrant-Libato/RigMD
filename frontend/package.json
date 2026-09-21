@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:ui-data": "node --test tests/storageTelemetry.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -3,7 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as signalR from '@microsoft/signalr';
-import { HardwareStats } from '../types/rigmd';
+import { API_BASE_URL } from '../lib/api';
+import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
+import type { HardwareStats } from '../types/rigmd';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
 
@@ -26,8 +28,8 @@ interface TelemetryPoint {
   CpuUsagePercent: number;
   RamUsagePercent: number;
   GpuUsagePercent: number;
-  NetworkSendKbps: number;
-  NetworkReceiveKbps: number;
+  NetworkSendKbps: number | null;
+  NetworkReceiveKbps: number | null;
   CpuSpeedMhz: number;
   RamUsedGb: number;
   GpuMemoryUsedGb: number;
@@ -63,46 +65,54 @@ interface RawTelemetryPayload {
   }>;
 }
 
+function formatGb(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'Not available';
+  return value >= 10 ? `${Math.round(value)} GB` : `${value.toFixed(1)} GB`;
+}
+
+function formatTelemetryValue(value: unknown, unit: string) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toFixed(unit === 'Kbps' ? 1 : 0)} ${unit}`
+    : 'Not available';
+}
+
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats }: DeviceDetailModalProps) {
   const [data, setData] = useState<TelemetryPoint[]>([]);
   const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [lastReadingAt, setLastReadingAt] = useState<number | null>(null);
+  const [clock, setClock] = useState(Date.now());
   const connectionRef = useRef<signalR.HubConnection | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    // Initialize 60 seconds of empty data
-    const initialData = Array.from({ length: 60 }).map((_, i) => ({
-      time: i.toString(),
-      CpuUsagePercent: 0,
-      RamUsagePercent: 0,
-      GpuUsagePercent: 0,
-      NetworkSendKbps: 0,
-      NetworkReceiveKbps: 0,
-      CpuSpeedMhz: 0,
-      RamUsedGb: 0,
-      GpuMemoryUsedGb: 0,
-      Disks: [],
-    }));
-    setData(initialData);
+    setData([]);
+    setLastReadingAt(null);
+    setSelectedDiskIndex(0);
+    let disposed = false;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
 
     const connectSignalR = async () => {
-      const hubUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5273'}/hubs/telemetry`;
+      const hubUrl = `${API_BASE_URL}/hubs/telemetry`;
       const connection = new signalR.HubConnectionBuilder()
         .withUrl(hubUrl)
         .withAutomaticReconnect()
         .build();
 
+      connectionRef.current = connection;
       connection.on('ReceiveTelemetry', (telemetry: RawTelemetryPayload) => {
+        if (disposed) return;
+        setLastReadingAt(Date.now());
         setData((prevData) => {
-          const newData = [...prevData.slice(1)];
+          const newData = [...prevData.slice(-59)];
           newData.push({
             time: new Date().toLocaleTimeString(),
             CpuUsagePercent: telemetry.cpuUsagePercent || 0,
             RamUsagePercent: telemetry.ramUsagePercent || 0,
             GpuUsagePercent: telemetry.gpuUsagePercent || 0,
-            NetworkSendKbps: telemetry.networkSendKbps || 0,
-            NetworkReceiveKbps: telemetry.networkReceiveKbps || 0,
+            NetworkSendKbps: typeof telemetry.networkSendKbps === 'number' ? telemetry.networkSendKbps : null,
+            NetworkReceiveKbps: typeof telemetry.networkReceiveKbps === 'number' ? telemetry.networkReceiveKbps : null,
             CpuSpeedMhz: telemetry.cpuSpeedMhz || 0,
             RamUsedGb: telemetry.ramUsedGb || 0,
             GpuMemoryUsedGb: telemetry.gpuMemoryUsedGb || 0,
@@ -125,7 +135,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
       try {
         await connection.start();
-        connectionRef.current = connection;
+        if (disposed) await connection.stop();
       } catch (err) {
         console.error('SignalR Connection Error: ', err);
       }
@@ -134,21 +144,42 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     connectSignalR();
 
     return () => {
+      disposed = true;
+      window.clearInterval(timer);
       if (connectionRef.current) {
         connectionRef.current.stop();
       }
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    dialog?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key !== 'Tab' || !dialog) return;
+      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], summary, [tabindex="0"]')];
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('keydown', handleKey); previousFocus?.focus(); };
+  }, [isOpen, onClose]);
+
   if (!isOpen || !stats) return null;
 
   // Determine which metric to show on chart based on hardware type
   let dataKey = 'CpuUsagePercent';
   let strokeColor = '#22d3ee'; // cyan-400
-  let chartTitle = '% Utilization over 60 seconds';
+  let chartTitle = 'Activity during the last 60 readings';
   let chartYDomain = [0, 100];
   let Icon = Cpu;
-  let title = 'CPU';
+  let title = 'Processor';
   let subtitle = stats.cpu.name;
 
   if (hardwareType === 'Memory') {
@@ -163,7 +194,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     dataKey = 'GpuUsagePercent';
     strokeColor = '#34d399'; // emerald-400
     Icon = Monitor;
-    title = 'GPU';
+    title = 'Graphics';
     subtitle = stats.gpu.name;
   } else if (hardwareType === 'Storage') {
     strokeColor = '#fbbf24'; // amber-400
@@ -176,6 +207,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     Icon = Wifi;
     title = 'Network';
     subtitle = stats.network?.is_wifi ? 'Wi-Fi' : 'Ethernet';
+    chartTitle = 'Network receive speed (Kbps)';
+    chartYDomain = [0, Math.max(100, ...data.map((point) => point.NetworkReceiveKbps ?? 0))];
   } else if (hardwareType === 'OS') {
     Icon = Activity;
     title = 'Windows';
@@ -194,6 +227,11 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
         onClick={onClose}
       >
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="device-detail-title"
+          tabIndex={-1}
           initial={{ y: 50, opacity: 0, scale: 0.95 }}
           animate={{ y: 0, opacity: 1, scale: 1 }}
           exit={{ y: 20, opacity: 0, scale: 0.95 }}
@@ -208,11 +246,13 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <Icon size={24} />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-white">{title}</h2>
+                <h2 id="device-detail-title" className="text-2xl font-bold text-white">{title}</h2>
                 <p className="text-sm text-slate-400">{subtitle}</p>
               </div>
             </div>
             <button
+              type="button"
+              aria-label="Close device details"
               onClick={onClose}
               className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
             >
@@ -230,6 +270,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   <div className="flex flex-wrap gap-2 mb-2 border-b border-[var(--rigmd-border)] pb-4">
                     {stats.storage_drives.map((disk, idx) => (
                       <button
+                        type="button"
+                        aria-pressed={selectedDiskIndex === idx}
                         key={idx}
                         onClick={() => setSelectedDiskIndex(idx)}
                         className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
@@ -238,7 +280,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                             : 'bg-slate-800 text-slate-400 border border-transparent hover:bg-slate-700'
                         }`}
                       >
-                        {disk.model ? `Disk ${idx}: ${disk.model}` : `Disk ${idx}`}
+                        Drive {disk.disk_index ?? idx}: {disk.model}
                       </button>
                     ))}
                   </div>
@@ -248,28 +290,33 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 {(() => {
                   const idx = selectedDiskIndex < stats.storage_drives.length ? selectedDiskIndex : 0;
                   const disk = stats.storage_drives[idx];
-                  const latestDisk = latestData?.Disks?.find((d: DiskTelemetryPoint) => String(d?.DeviceId ?? '').startsWith(idx.toString()));
-                  const activeTime = latestDisk?.ActiveTimePercent ?? 0;
-                  const readKbps = latestDisk?.ReadKbps ?? 0;
-                  const writeKbps = latestDisk?.WriteKbps ?? 0;
-                  
-                  const diskDataKey = `disk_${idx}_active`;
+                  const latestDisk = findDiskReading(latestData?.Disks ?? [], disk.disk_index);
+                  const isFresh = lastReadingAt !== null && clock - lastReadingAt < 10000;
+                  const activeTime = isFresh ? validReading(latestDisk?.ActiveTimePercent) : null;
+                  const readKbps = isFresh ? validReading(latestDisk?.ReadKbps) : null;
+                  const writeKbps = isFresh ? validReading(latestDisk?.WriteKbps) : null;
+                  const diskDataKey = 'activity';
                   const diskData = data.map(pt => ({
                     time: pt.time,
-                    [diskDataKey]: (pt.Disks || []).find((d: DiskTelemetryPoint) => String(d?.DeviceId ?? '').startsWith(idx.toString()))?.ActiveTimePercent ?? 0,
+                    activity: validReading(findDiskReading(pt.Disks, disk.disk_index)?.ActiveTimePercent),
                   }));
 
                   return (
                     <div className="rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-4">
                       <div className="mb-3 flex items-center justify-between">
                         <div>
-                          <h3 className="text-sm font-semibold text-white">Disk {idx} ({disk.model})</h3>
-                          <p className="text-xs text-slate-500">{disk.size_gb} GB {disk.media_type || disk.type}</p>
+                          <h3 className="text-sm font-semibold text-white">{disk.model}</h3>
+                <p className="text-xs text-slate-500">{formatGb(disk.size_gb)} {disk.media_type || disk.type}</p>
                         </div>
-                        <span className="text-lg font-bold text-white">{activeTime}%<span className="ml-1 text-xs font-normal text-slate-400">active</span></span>
+                        <span className="text-lg font-bold text-white">{activeTime === null ? 'Not available' : `${activeTime}% active`}</span>
                       </div>
                       
-                      <div className="h-48 w-full mb-6 mt-2">
+                      <p className="mb-3 text-sm text-slate-300" role="status">
+                        {activeTime === null ? 'Live disk activity is unavailable. This does not mean the drive is idle.' : 'Live disk activity is available.'}
+                      </p>
+                      {lastReadingAt !== null && <p className="mb-3 text-xs text-slate-400">Last reading: {new Date(lastReadingAt).toLocaleTimeString()}</p>}
+                      <p className="mb-4 text-sm text-slate-300">Activity shows how busy the drive is. It is different from how much space your files use.</p>
+                      {activeTime !== null && <div className="h-48 w-full mb-6 mt-2" aria-label="Recent disk activity chart">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={diskData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -285,17 +332,18 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                             />
                           </LineChart>
                         </ResponsiveContainer>
-                      </div>
+                      </div>}
 
                       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 mt-6">
                         <div><p className="text-xs text-slate-400">Capacity</p><p className="text-lg text-white">{disk.size_gb} GB</p></div>
                         <div><p className="text-xs text-slate-400">Type</p><p className="text-lg text-white">{disk.media_type || disk.type}</p></div>
                         <div><p className="text-xs text-slate-400">Interface</p><p className="text-lg text-white">{disk.interface || 'Unknown'}</p></div>
-                        <div><p className="text-xs text-slate-400">Active Time</p><p className="text-lg text-white">{activeTime}%</p></div>
-                        <div><p className="text-xs text-slate-400">Read Speed</p><p className="text-lg text-white">{readKbps > 1024 ? `${(readKbps / 1024).toFixed(1)} MB/s` : `${readKbps} KB/s`}</p></div>
-                        <div><p className="text-xs text-slate-400">Write Speed</p><p className="text-lg text-white">{writeKbps > 1024 ? `${(writeKbps / 1024).toFixed(1)} MB/s` : `${writeKbps} KB/s`}</p></div>
-                        {disk.used_gb != null && <div><p className="text-xs text-slate-400">Used</p><p className="text-lg text-white">{disk.used_gb} GB ({disk.usage_percent}%)</p></div>}
+                        <div><p className="text-xs text-slate-400">Drive activity</p><p className="text-lg text-white">{activeTime === null ? 'Not available' : `${activeTime}%`}</p></div>
+                        <div><p className="text-xs text-slate-400">Reading files</p><p className="text-lg text-white">{formatDiskRate(readKbps)}</p></div>
+                        <div><p className="text-xs text-slate-400">Writing files</p><p className="text-lg text-white">{formatDiskRate(writeKbps)}</p></div>
+                        {disk.used_gb != null && <div><p className="text-xs text-slate-400">Space used at last scan</p><p className="text-lg text-white">{formatGb(disk.used_gb)}{disk.usage_percent != null ? ` (${disk.usage_percent.toFixed(1)}%)` : ''}</p></div>}
                       </div>
+                      <p className="mt-4 text-sm text-slate-400">Space readings come from the last scan. Refresh retrieves the latest saved readings; run a new device check to collect new readings.</p>
                     </div>
                   );
                 })()}
@@ -307,7 +355,11 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-300">{chartTitle}</h3>
                   <span className="text-lg font-bold text-white">
-                    {hardwareType === 'Memory' ? `${latestData?.RamUsedGb?.toFixed(1) || 0} GB` : `${latestData?.[dataKey as keyof TelemetryPoint] || 0}%`}
+                    {hardwareType === 'Memory'
+                      ? formatTelemetryValue(latestData?.RamUsedGb, 'GB')
+                      : hardwareType === 'Network'
+                        ? formatTelemetryValue(latestData?.[dataKey as keyof TelemetryPoint], 'Kbps')
+                        : formatTelemetryValue(latestData?.[dataKey as keyof TelemetryPoint], '%')}
                   </span>
                 </div>
                 <div className="h-48 w-full">
@@ -378,8 +430,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
               {hardwareType === 'Network' && (
                 <>
-                  <div><p className="text-xs text-slate-400">Send</p><p className="text-xl text-white">{latestData?.NetworkSendKbps || 0} Kbps</p></div>
-                  <div><p className="text-xs text-slate-400">Receive</p><p className="text-xl text-white">{latestData?.NetworkReceiveKbps || 0} Kbps</p></div>
+                  <div><p className="text-xs text-slate-400">Send speed</p><p className="text-xl text-white">{formatTelemetryValue(latestData?.NetworkSendKbps, 'Kbps')}</p></div>
+                  <div><p className="text-xs text-slate-400">Receive speed</p><p className="text-xl text-white">{formatTelemetryValue(latestData?.NetworkReceiveKbps, 'Kbps')}</p></div>
                   <div><p className="text-xs text-slate-400">IPv4 address</p><p className="text-sm text-white">{stats.network?.ip_address}</p></div>
                   <div><p className="text-xs text-slate-400">MAC address</p><p className="text-sm text-white">{stats.network?.mac_address}</p></div>
                 </>
