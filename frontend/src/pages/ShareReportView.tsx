@@ -72,6 +72,120 @@ function sortSessionsNewestFirst(sessions: SessionSummary[]) {
   });
 }
 
+function formatStorageSize(sizeGb: number | null | undefined) {
+  if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Not available';
+  return sizeGb >= 1000
+    ? `${(sizeGb / 1024).toFixed(1)} TB`
+    : `${Math.round(sizeGb * 10) / 10} GB`;
+}
+
+interface ResolvedDriveInfo {
+  model: string;
+  type: string;
+  size_gb: number;
+  interface?: string;
+  disk_index?: number | null;
+  used_gb?: number | null;
+  usage_percent?: number | null;
+  is_failing_smart?: boolean;
+  status?: string | null;
+  volumes?: Array<{
+    drive: string;
+    mountpoint: string;
+    fstype?: string;
+    disk_index?: number | null;
+    total_gb?: number;
+    used_gb?: number;
+    usage_percent?: number;
+  }>;
+}
+
+function resolveAllStorageDrives(stats: HardwareStats | null): ResolvedDriveInfo[] {
+  if (!stats) return [];
+
+  // 1. Primary: Use physical storage_drives if provided
+  if (stats.storage_drives && stats.storage_drives.length > 0) {
+    return stats.storage_drives.map((drive, idx) => {
+      const driveVolumes =
+        drive.volumes && drive.volumes.length > 0
+          ? drive.volumes
+          : (stats.all_disks ?? []).filter(
+              (d) => drive.disk_index != null && d.disk_index === drive.disk_index
+            );
+
+      let usedGb = drive.used_gb;
+      let usagePercent = drive.usage_percent;
+      if ((usedGb == null || usagePercent == null) && driveVolumes.length > 0) {
+        const totalVol = driveVolumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
+        const usedVol = driveVolumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
+        if (usedVol > 0) usedGb = Math.round(usedVol * 100) / 100;
+        if (totalVol > 0) usagePercent = Math.round((usedVol / totalVol) * 1000) / 10;
+      }
+
+      return {
+        model: drive.model,
+        type: drive.type || drive.media_type || stats.storage_type || 'SSD',
+        size_gb: drive.size_gb,
+        interface: drive.interface,
+        disk_index: drive.disk_index ?? idx,
+        used_gb: usedGb,
+        usage_percent: usagePercent,
+        is_failing_smart: drive.is_failing_smart,
+        status: drive.status,
+        volumes: driveVolumes,
+      };
+    });
+  }
+
+  // 2. Secondary fallback: Group all_disks by disk_index
+  if (stats.all_disks && stats.all_disks.length > 0) {
+    const byIndex = new Map<number | string, typeof stats.all_disks>();
+    stats.all_disks.forEach((disk, i) => {
+      const key = disk.disk_index != null ? disk.disk_index : `disk-${i}`;
+      const group = byIndex.get(key) ?? [];
+      group.push(disk);
+      byIndex.set(key, group);
+    });
+
+    return Array.from(byIndex.entries()).map(([key, volumes], idx) => {
+      const diskIndex = typeof key === 'number' ? key : idx;
+      const totalGb = volumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
+      const usedGb = volumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
+      const usagePercent = totalGb > 0 ? Math.round((usedGb / totalGb) * 1000) / 10 : undefined;
+      const driveLetter = volumes.map((v) => v.drive).filter(Boolean).join(', ');
+
+      return {
+        model: driveLetter ? `Storage Drive (${driveLetter})` : `Storage Drive ${idx + 1}`,
+        type: stats.storage_type || 'SSD',
+        size_gb: totalGb,
+        disk_index: diskIndex,
+        used_gb: usedGb,
+        usage_percent: usagePercent,
+        status: 'Healthy (OK)',
+        volumes,
+      };
+    });
+  }
+
+  // 3. Last fallback: Single stats.disk summary
+  if (stats.disk?.total_gb) {
+    return [
+      {
+        model: 'Primary Storage Drive',
+        type: stats.storage_type || 'SSD',
+        size_gb: stats.disk.total_gb,
+        disk_index: 0,
+        used_gb: stats.disk.used_gb,
+        usage_percent: stats.disk.usage_percent,
+        status: 'Healthy (OK)',
+        volumes: [],
+      },
+    ];
+  }
+
+  return [];
+}
+
 function buildReportText({
   stats,
   dashboard,
@@ -85,6 +199,124 @@ function buildReportText({
 }) {
   const latest = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
   const recentSessions = sessions.slice(0, 8);
+  const drives = resolveAllStorageDrives(stats);
+
+  // Calculate overall storage across all drives
+  const totalStorageGb = drives.length > 0
+    ? drives.reduce((acc, d) => acc + (d.size_gb || 0), 0)
+    : (stats?.disk?.total_gb ?? 0);
+
+  const totalUsedGb = drives.length > 0
+    ? drives.reduce((acc, d) => acc + (d.used_gb || 0), 0)
+    : (stats?.disk?.used_gb ?? 0);
+
+  const totalUsagePercent = totalStorageGb > 0
+    ? (totalUsedGb / totalStorageGb) * 100
+    : (stats?.disk?.usage_percent ?? null);
+
+  const rawStorageType = stats?.storage_type?.trim();
+  const knownStorageType =
+    rawStorageType &&
+    rawStorageType.toLowerCase() !== 'unknown' &&
+    rawStorageType.toLowerCase() !== 'not available'
+      ? rawStorageType
+      : '';
+
+  const storageSummaryLabel =
+    drives.length > 1
+      ? `${formatStorageSize(totalStorageGb)} (${drives.length} Storage Drives${knownStorageType ? ` • ${knownStorageType}` : ''})`
+      : `${formatStorageSize(totalStorageGb)}${knownStorageType ? ` ${knownStorageType}` : ''}`;
+
+  const storageUsageLabel =
+    typeof totalUsagePercent === 'number' && !Number.isNaN(totalUsagePercent)
+      ? `${totalUsagePercent.toFixed(1)}% in use${totalUsedGb > 0 ? ` (${formatStorageSize(totalUsedGb)} used of ${formatStorageSize(totalStorageGb)})` : ''}`
+      : 'Not available';
+
+  // Build individual disk detail lines
+  const storageDriveLines: string[] = [];
+  if (drives.length > 0) {
+    storageDriveLines.push(
+      `Storage drives (${drives.length} detected)`,
+      ...drives.flatMap((disk, index) => {
+        const diskIdentifier =
+          disk.disk_index != null ? `Disk ${disk.disk_index}` : `Disk ${index}`;
+        const diskModel = cleanValue(disk.model);
+        const diskType = cleanValue(disk.type || knownStorageType || 'SSD');
+        const diskCapacity = formatStorageSize(disk.size_gb);
+
+        const driveLetters = (disk.volumes ?? [])
+          .map((v) => v.drive || v.mountpoint)
+          .filter(Boolean)
+          .join(', ');
+
+        const usedSpaceStr =
+          typeof disk.used_gb === 'number'
+            ? formatStorageSize(disk.used_gb)
+            : null;
+
+        const freeSpaceStr =
+          typeof disk.size_gb === 'number' && typeof disk.used_gb === 'number'
+            ? formatStorageSize(Math.max(0, disk.size_gb - disk.used_gb))
+            : null;
+
+        const usagePctStr =
+          typeof disk.usage_percent === 'number' && !Number.isNaN(disk.usage_percent)
+            ? `${disk.usage_percent.toFixed(1)}% in use`
+            : null;
+
+        const healthStatus =
+          disk.status ||
+          (disk.is_failing_smart
+            ? 'Warning / Failing S.M.A.R.T.'
+            : 'Healthy (OK)');
+
+        const itemLines: string[] = [
+          `${index + 1}. ${diskIdentifier}: ${diskModel} (${diskCapacity} • ${diskType})`,
+          `   - Disk identifier: ${diskIdentifier}`,
+          `   - Disk model / name: ${diskModel}`,
+          `   - Drive letter: ${driveLetters || 'No assigned drive letter (System/Recovery/Unmounted)'}`,
+          `   - Total capacity: ${diskCapacity}`,
+        ];
+
+        if (usedSpaceStr && freeSpaceStr) {
+          itemLines.push(
+            `   - Space used / free: ${usedSpaceStr} used / ${freeSpaceStr} free${usagePctStr ? ` (${usagePctStr})` : ''}`
+          );
+        } else if (usedSpaceStr) {
+          itemLines.push(
+            `   - Used space: ${usedSpaceStr}${usagePctStr ? ` (${usagePctStr})` : ''}`
+          );
+        }
+
+        itemLines.push(
+          `   - Disk type: ${diskType}`,
+          `   - Health / Status: ${healthStatus}`
+        );
+
+        if (disk.volumes && disk.volumes.length > 0) {
+          itemLines.push('   - Partitions / Volumes:');
+          disk.volumes.forEach((v) => {
+            const letter = v.drive || v.mountpoint || 'Volume';
+            const vTotal = formatStorageSize(v.total_gb);
+            const vUsed = typeof v.used_gb === 'number' ? `${formatStorageSize(v.used_gb)} used` : '';
+            const vFree =
+              typeof v.total_gb === 'number' && typeof v.used_gb === 'number'
+                ? `${formatStorageSize(Math.max(0, v.total_gb - v.used_gb))} free`
+                : '';
+            const vPct =
+              typeof v.usage_percent === 'number' ? `${v.usage_percent.toFixed(1)}% in use` : '';
+            const vFs = v.fstype ? v.fstype : '';
+
+            const details = [vTotal, vUsed, vFree, vPct, vFs].filter(Boolean).join(', ');
+            itemLines.push(`     * ${letter}: ${details}`);
+          });
+        }
+
+        return itemLines;
+      }),
+      ''
+    );
+  }
 
   const lines = [
     'RigMD Device Check Report',
@@ -95,12 +327,13 @@ function buildReportText({
     `Processor: ${cleanValue(stats?.cpu?.name).replace(/\s+\d+-Core Processor$/i, '')}`,
     `Memory: ${stats?.ram?.total_gb ? `${stats.ram.total_gb} GB total` : 'Not available'}`,
     `Memory during last scan: ${typeof stats?.ram?.usage_percent === 'number' ? `${stats.ram.usage_percent.toFixed(1)}% in use` : 'Not available'}`,
-    `Storage: ${stats?.disk?.total_gb ? `${stats.disk.total_gb} GB ${cleanValue(stats.storage_type)}` : 'Not available'}`,
-    `Storage during last scan: ${typeof stats?.disk?.usage_percent === 'number' ? `${stats.disk.usage_percent.toFixed(1)}% in use` : 'Not available'}`,
+    `Storage: ${storageSummaryLabel}`,
+    `Storage during last scan: ${storageUsageLabel}`,
     `Graphics: ${cleanValue(stats?.gpu?.name)}`,
     `Windows: ${cleanValue(stats?.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}`,
     `Device info last collected: ${formatDate(hardwareUpdatedAt)}`,
     '',
+    ...storageDriveLines,
     'Latest check',
     latest
       ? `Date: ${formatDate(getSessionDate(latest))}`
