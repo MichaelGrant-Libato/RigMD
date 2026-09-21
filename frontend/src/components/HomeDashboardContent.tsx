@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Clock3, History, Server, Stethoscope } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, HardDrive, History, MemoryStick, RefreshCw, Stethoscope, Wifi } from 'lucide-react';
 import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 
 interface Props {
@@ -23,36 +23,38 @@ function recommendedStep(action: string | undefined) {
   }
 }
 
-function friendlyActionLabel(action: string | undefined) {
-  switch (action?.toLowerCase()) {
-    case 'monitor':
-      return 'Keep an eye on it';
-    case 'maintain':
-      return 'Do simple care';
-    case 'troubleshoot':
-      return 'Try a safe fix';
-    case 'escalate':
-      return 'Get help';
-    default:
-      return 'See full result';
+function healthStatus(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { value: 'Not available', label: 'Needs a refresh', className: 'text-slate-400' };
   }
+
+  const roundedValue = Math.round(value);
+  if (roundedValue >= 90) return { value: `${roundedValue}% used`, label: 'Needs attention', className: 'text-red-300' };
+  if (roundedValue >= 75) return { value: `${roundedValue}% used`, label: 'Keep an eye on it', className: 'text-amber-300' };
+  return { value: `${roundedValue}% used`, label: 'Working normally', className: 'text-emerald-300' };
 }
 
-function friendlyResultLabel(result: string | undefined) {
-  if (!result) return 'Result unavailable';
-  if (result.toLowerCase() === 'no active issue detected') return 'No active problem found';
-  return result;
-}
-
-function friendlyStatusLabel(status: string | undefined) {
-  if (!status) return null;
-
-  const normalized = status.replaceAll('_', ' ').toLowerCase();
-  if (normalized === 'open') return 'Saved for review';
-  if (normalized === 'resolved') return 'Marked fixed';
-  if (normalized === 'needs recheck') return 'Needs another check';
-
-  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+function HealthItem({
+  icon: Icon,
+  label,
+  value,
+  status,
+}: {
+  icon: typeof MemoryStick;
+  label: string;
+  value: string;
+  status: string;
+}) {
+  return (
+    <div className="rigmd-card-surface flex min-h-[144px] min-w-0 items-center gap-6 rounded-lg border px-7 py-6">
+      <Icon size={30} strokeWidth={1.8} className="shrink-0 text-cyan-300" />
+      <div className="min-w-0">
+        <p className="text-base font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</p>
+        <p className="truncate text-lg font-semibold leading-tight text-white">{value}</p>
+        <p className="mt-1 text-base text-slate-400">{status}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function HomeDashboardContent({ stats, dashboard, setActivePage, onViewSession }: Props) {
@@ -61,17 +63,6 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
   const hasPatterns = dashboard.recurring_issues_count > 0;
   const unavailable = Boolean(dashboard.database_warning);
   const checkedAt = latest?.created_at ? new Date(latest.created_at) : null;
-  const checkHistoryLabel = unavailable
-    ? 'Check history unavailable'
-    : !latest
-      ? 'No check completed yet'
-      : checkedAt && !Number.isNaN(checkedAt.getTime())
-        ? `Last checked: ${checkedAt.toLocaleString(undefined, {
-            month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
-          })}`
-        : latest.display_date
-          ? `Last checked: ${latest.display_date}`
-          : 'Last check date unavailable';
   const action = latest?.action_category?.toLowerCase();
   const title = unavailable
     ? 'Your check history is unavailable'
@@ -83,24 +74,23 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
             : 'Your latest check is ready to review'
         : 'Ready for your first Device check';
   const linkClass = 'inline-flex items-center gap-2 rounded text-sm font-semibold text-cyan-300 hover:text-cyan-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300';
-  const hardwareDetails = [
-    ['Processor', stats?.cpu?.name?.replace(/\s+\d+-Core Processor$/i, '').trim()],
-    ['Memory', stats?.ram?.total_gb ? `${stats.ram.total_gb} GB installed` : null],
-    ['Graphics', stats?.gpu?.name],
-    ['Operating system', stats?.os_version?.replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '').trim()],
-  ];
+  const memoryHealth = healthStatus(stats?.ram?.usage_percent);
+  const storageHealth = healthStatus(stats?.disk?.usage_percent);
+  const networkHealth = stats?.network
+    ? { value: stats.network.is_wifi ? 'Wi-Fi connected' : 'Ethernet connected', label: 'Working normally' }
+    : { value: 'Not available', label: 'Needs a refresh' };
+  const lastCheckValue = checkedAt && !Number.isNaN(checkedAt.getTime())
+    ? checkedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : latest?.display_date || 'Not available';
+  const lastCheckStatus = checkedAt && !Number.isNaN(checkedAt.getTime())
+    ? checkedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : 'Run a check to update';
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
-        <section className={`rigmd-card-surface flex flex-col rounded-lg border p-6 ${hasWarnings ? 'border-amber-400/50' : ''}`}>
-          <div className="mb-4 flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">Device Checkup</p>
-            <span className="inline-flex min-w-0 items-center gap-2 text-sm leading-5 text-slate-300">
-              <Clock3 size={14} className="shrink-0" />
-              <span>{checkHistoryLabel}</span>
-            </span>
-          </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <section className={`rigmd-card-surface rounded-lg border p-6 ${hasWarnings ? 'border-amber-400/50' : ''}`}>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">Device Checkup</p>
           <h2 className="max-w-3xl text-2xl font-bold text-white">{title}</h2>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
             {unavailable ? 'Saved results could not be loaded. Try again shortly.'
@@ -116,71 +106,45 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
               {hasWarnings ? 'Review Alerts' : latest ? 'View Latest Result' : 'Check My Device'}
             </button>
             {(latest || hasWarnings) && <button type="button" onClick={() => setActivePage('newDiagnosis')} className={linkClass}>Check My Device</button>}
-            <button type="button" onClick={() => setActivePage('systemProfile')} className={linkClass}>View Device Info <ChevronRight size={16} /></button>
           </div>
         </section>
-        <section className="rigmd-card-surface flex min-w-0 flex-col rounded-lg border p-6">
-          <h3 className="flex items-center gap-2 font-semibold text-white"><Server size={18} className="text-cyan-400" /> Your Device at a Glance</h3>
-          <p className="mt-2 text-sm text-slate-300">The main Device details RigMD found during the latest scan.</p>
-          <dl className="mt-4 grid gap-x-5 gap-y-4 sm:grid-cols-2">
-            {hardwareDetails.map(([label, value]) => (
-              <div key={label} className="min-w-0">
-                <dt className="text-sm text-slate-300">{label}</dt>
-                <dd className="mt-1 break-words text-sm font-medium text-slate-200">{value || 'Not available yet'}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
-        <section className="rigmd-card-surface flex min-w-0 flex-col rounded-lg border p-6">
-          <h3 className="flex items-center gap-2 font-semibold text-white"><Clock3 size={18} className="text-cyan-400" /> Latest Check</h3>
-          {unavailable ? <p className="mt-4 text-sm text-slate-300">Latest check unavailable.</p> : latest ? (
-            <div className="my-4 space-y-3">
-              <p className="text-sm text-slate-300">{latest.display_date ?? 'Check date unavailable'}</p>
-              <p className="break-words text-lg font-semibold text-white">{latest.symptom_type}</p>
-              <p className="break-words text-sm text-slate-300"><span className="text-slate-300">Result: </span>{friendlyResultLabel(latest.diagnosed_category)}</p>
-              <p className="text-sm text-slate-300"><span className="text-slate-300">What to do: </span>{friendlyActionLabel(latest.action_category)}</p>
-              {friendlyStatusLabel(latest.resolution_status) && <p className="text-sm text-slate-300">Check status: {friendlyStatusLabel(latest.resolution_status)}</p>}
-            </div>
-          ) : <p className="mt-4 text-sm leading-relaxed text-slate-300">No checks completed yet. Your results will appear here.</p>}
-          {!latest && !unavailable && (
-            <div className="mt-4 mb-4 border-t border-slate-700/50 pt-4">
-              <p className="text-sm font-medium text-slate-200">What your check will include</p>
-              <p className="mt-2 text-sm leading-relaxed text-slate-300">A summary of your symptoms, a probable cause, and recommended next steps.</p>
-            </div>
-          )}
-          <button type="button" onClick={() => setActivePage('diagnosticHistory')} className={`mt-auto self-start pt-5 ${linkClass}`}>View Past Checks <ChevronRight size={16} /></button>
-        </section>
-
-        <section className={`rigmd-card-surface flex min-w-0 flex-col rounded-lg border p-6 ${hasWarnings ? 'border-amber-400/50' : ''}`}>
-          <h3 className="flex items-center gap-2 font-semibold text-white"><AlertTriangle size={18} className={hasWarnings || hasPatterns ? 'text-amber-300' : 'text-slate-300'} /> Warnings &amp; Repeated Problems</h3>
-          {unavailable ? <p className="mt-4 text-sm text-slate-300">Warnings and repeated problems are unavailable.</p> : (
-            <div className="mt-4 mb-4 space-y-4">
-              <p className={`text-sm ${hasWarnings ? 'font-semibold text-amber-200' : 'text-slate-300'}`}>
-                {hasWarnings ? `${dashboard.warning_signs_active_count} warning sign${dashboard.warning_signs_active_count === 1 ? '' : 's'} recorded` : latest ? 'No warning signs recorded.' : 'Not assessed yet.'}
-              </p>
-              {hasWarnings && dashboard.recent_warning_signs.length > 0 && (
-                <ul className="space-y-2 text-sm text-slate-300">
-                  {dashboard.recent_warning_signs.slice(0, 3).map((warning) => <li key={warning.id} className="break-words">{warning.warning_sign}</li>)}
-                </ul>
-              )}
-              {hasPatterns && <button type="button" onClick={() => setActivePage('recurringPatterns')} className={linkClass}>
-                {dashboard.recurring_issues_count} thing{dashboard.recurring_issues_count === 1 ? '' : 's'} appeared more than once <ChevronRight size={16} />
-              </button>}
-              {!hasPatterns && hasWarnings && <p className="text-sm text-slate-300">No repeated problems detected in saved checks.</p>}
-              {!hasWarnings && !hasPatterns && (
-                <div className="border-t border-slate-700/50 pt-4">
-                  <p className="text-sm font-medium text-slate-200">{latest ? 'No repeated problems detected in saved checks' : 'Results appear after diagnostic checks'}</p>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-300">Warnings and recurring symptoms will appear here as you complete checks.</p>
+        {unavailable ? (
+          <section className="rigmd-card-surface flex items-center rounded-lg border p-5">
+            <p className="text-sm text-slate-300">Warnings and repeated checks are unavailable right now.</p>
+          </section>
+        ) : (
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+            <div className={`rigmd-card-surface flex min-w-0 items-center justify-between gap-3 rounded-lg border p-5 ${hasWarnings ? 'border-amber-400/50' : ''}`}>
+              <div className="flex min-w-0 items-center gap-3">
+                <CheckCircle2 size={20} className={hasWarnings ? 'shrink-0 text-amber-300' : 'shrink-0 text-emerald-300'} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white">Warning signs</p>
+                  <p className="truncate text-xs text-slate-400">{hasWarnings ? `${dashboard.warning_signs_active_count} recorded` : latest ? 'None found in the latest check' : 'Not checked yet'}</p>
                 </div>
-              )}
+              </div>
+              {hasWarnings && <button type="button" onClick={() => setActivePage('warningSigns')} className={`${linkClass} shrink-0 text-xs`}>Review <ChevronRight size={14} /></button>}
             </div>
-          )}
-          <button type="button" onClick={() => setActivePage('warningSigns')} className={`mt-auto self-start pt-5 ${linkClass}`}>View Alerts <ChevronRight size={16} /></button>
-        </section>
+            <div className="rigmd-card-surface flex min-w-0 items-center justify-between gap-3 rounded-lg border p-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <RefreshCw size={20} className={hasPatterns ? 'shrink-0 text-cyan-300' : 'shrink-0 text-slate-400'} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white">Repeated checks</p>
+                  <p className="truncate text-xs text-slate-400">{hasPatterns ? `${dashboard.recurring_issues_count} repeated check pattern${dashboard.recurring_issues_count === 1 ? '' : 's'} found` : 'None found yet'}</p>
+                </div>
+              </div>
+              {hasPatterns && <button type="button" onClick={() => setActivePage('recurringPatterns')} className={`${linkClass} shrink-0 text-xs`}>View <ChevronRight size={14} /></button>}
+            </div>
+          </section>
+        )}
       </div>
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <HealthItem icon={MemoryStick} label="Memory" value={memoryHealth.value} status={memoryHealth.label} />
+        <HealthItem icon={HardDrive} label="Storage" value={storageHealth.value} status={storageHealth.label} />
+        <HealthItem icon={Wifi} label="Network" value={networkHealth.value} status={networkHealth.label} />
+        <HealthItem icon={Clock3} label="Last check" value={lastCheckValue} status={lastCheckStatus} />
+      </section>
 
     </div>
   );
