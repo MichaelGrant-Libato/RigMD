@@ -149,17 +149,17 @@ public class WmiStorageProvider : IStorageProvider
         var media = mediaType.ToLowerInvariant();
         var intf = interfaceType.ToLowerInvariant();
 
-        if (intf.Contains("nvme") || m.Contains("nvme") || m.Contains("980 pro") || m.Contains("970 evo"))
+        if (intf.Contains("nvme") || m.Contains("nvme") || m.Contains("pcie") || m.Contains("980 pro") || m.Contains("970 evo") || m.Contains("sn850") || m.Contains("sn770") || m.Contains("sn570") || m.Contains("sn580"))
             return ("NVMe SSD", "Model/Interface Hint");
             
-        if (m.Contains("ssd") || media.Contains("solid state"))
+        if (m.Contains("ssd") || media.Contains("solid state") || m.Contains("wds") || m.Contains("wdc wds") || m.Contains("kingston") || m.Contains("crucial") || m.Contains("bx500") || m.Contains("mx500") || m.Contains("sandisk"))
         {
-            if (intf.Contains("ide") || intf.Contains("sata") || intf.Contains("ata"))
+            if (intf.Contains("ide") || intf.Contains("sata") || intf.Contains("ata") || m.Contains("wds240") || m.Contains("green") || m.Contains("blue"))
                 return ("SATA SSD", "Media/Interface Hint");
             return ("SSD", "Media Hint");
         }
         
-        if (m.Contains("hdd") || m.Contains("wd blue") || m.Contains("barracuda") || (m.Length > 2 && m.StartsWith("st") && char.IsDigit(m[2])))
+        if (m.Contains("hdd") || m.Contains("wd blue") || m.Contains("barracuda") || (m.Length > 2 && m.StartsWith("st") && char.IsDigit(m[2])) || m.Contains("wd10") || m.Contains("wd20") || m.Contains("wd40"))
             return ("HDD", "Model Hint");
 
         return ("Unknown", "Fallback");

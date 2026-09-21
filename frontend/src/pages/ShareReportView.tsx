@@ -186,6 +186,15 @@ function resolveAllStorageDrives(stats: HardwareStats | null): ResolvedDriveInfo
   return [];
 }
 
+function padCol(val: string, width: number): string {
+  if (val.length > width) return val.slice(0, Math.max(0, width - 1)) + '…';
+  return val.padEnd(width);
+}
+
+function kv(label: string, value: string, pad = 24): string {
+  return `${label.padEnd(pad)}: ${value}`;
+}
+
 function buildReportText({
   stats,
   dashboard,
@@ -201,7 +210,7 @@ function buildReportText({
   const recentSessions = sessions.slice(0, 8);
   const drives = resolveAllStorageDrives(stats);
 
-  // Calculate overall storage across all drives
+  // Storage aggregation
   const totalStorageGb = drives.length > 0
     ? drives.reduce((acc, d) => acc + (d.size_gb || 0), 0)
     : (stats?.disk?.total_gb ?? 0);
@@ -214,87 +223,93 @@ function buildReportText({
     ? (totalUsedGb / totalStorageGb) * 100
     : (stats?.disk?.usage_percent ?? null);
 
-  const rawStorageType = stats?.storage_type?.trim();
-  const knownStorageType =
-    rawStorageType &&
-    rawStorageType.toLowerCase() !== 'unknown' &&
-    rawStorageType.toLowerCase() !== 'not available'
-      ? rawStorageType
-      : '';
+  const freeStorageGb = Math.max(0, totalStorageGb - totalUsedGb);
 
-  const storageSummaryLabel =
-    drives.length > 1
-      ? `${formatStorageSize(totalStorageGb)} (${drives.length} Storage Drives${knownStorageType ? ` • ${knownStorageType}` : ''})`
-      : `${formatStorageSize(totalStorageGb)}${knownStorageType ? ` ${knownStorageType}` : ''}`;
+  let storagePoolSummary = formatStorageSize(totalStorageGb);
+  if (drives.length > 1) {
+    storagePoolSummary += ` across ${drives.length} drives`;
+  }
+  if (typeof totalUsagePercent === 'number' && !Number.isNaN(totalUsagePercent)) {
+    const usedPart = totalUsedGb > 0 ? ` (${formatStorageSize(totalUsedGb)} used / ${formatStorageSize(freeStorageGb)} free)` : '';
+    storagePoolSummary += ` • ${totalUsagePercent.toFixed(1)}% in use${usedPart}`;
+  }
 
-  const storageUsageLabel =
-    typeof totalUsagePercent === 'number' && !Number.isNaN(totalUsagePercent)
-      ? `${totalUsagePercent.toFixed(1)}% in use${totalUsedGb > 0 ? ` (${formatStorageSize(totalUsedGb)} used of ${formatStorageSize(totalStorageGb)})` : ''}`
-      : 'Not available';
+  // OS display string
+  const osString = cleanValue(stats?.os_version)
+    .replace(/^Microsoft\s+/i, '')
+    .replace(/\s*\([\d.]+\)$/, '');
 
-  // Build individual disk detail lines
-  const storageDriveLines: string[] = [];
+  // CPU display string
+  const cpuString = cleanValue(stats?.cpu?.name).replace(/\s+\d+-Core Processor$/i, '');
+
+  // RAM display string
+  let ramString = 'Not available';
+  if (stats?.ram?.total_gb) {
+    ramString = `${stats.ram.total_gb} GB total`;
+    if (typeof stats.ram.usage_percent === 'number' && !Number.isNaN(stats.ram.usage_percent)) {
+      ramString += ` (${stats.ram.usage_percent.toFixed(1)}% in use)`;
+    }
+  }
+
+  // Storage Drive block
+  const driveLines: string[] = [];
   if (drives.length > 0) {
-    storageDriveLines.push(
-      `Storage drives (${drives.length} detected)`,
-      ...drives.flatMap((disk, index) => {
-        const diskIdentifier =
-          disk.disk_index != null ? `Disk ${disk.disk_index}` : `Disk ${index}`;
-        const diskModel = cleanValue(disk.model);
-        const diskType = cleanValue(disk.type || knownStorageType || 'SSD');
-        const diskCapacity = formatStorageSize(disk.size_gb);
+    drives.forEach((disk, index) => {
+      const diskId = disk.disk_index != null ? `Disk ${disk.disk_index}` : `Disk ${index}`;
+      const diskModel = cleanValue(disk.model);
+      const diskType = cleanValue(disk.type || 'SSD');
+      const diskCapacity = formatStorageSize(disk.size_gb);
 
-        const driveLetters = (disk.volumes ?? [])
-          .map((v) => v.drive || v.mountpoint)
-          .filter(Boolean)
-          .join(', ');
+      const driveLetters = (disk.volumes ?? [])
+        .map((v) => v.drive || v.mountpoint)
+        .filter(Boolean)
+        .join(', ');
 
-        const usedSpaceStr =
-          typeof disk.used_gb === 'number'
-            ? formatStorageSize(disk.used_gb)
-            : null;
+      const usedSpaceStr =
+        typeof disk.used_gb === 'number' ? formatStorageSize(disk.used_gb) : null;
+      const freeSpaceStr =
+        typeof disk.size_gb === 'number' && typeof disk.used_gb === 'number'
+          ? formatStorageSize(Math.max(0, disk.size_gb - disk.used_gb))
+          : null;
+      const usagePctStr =
+        typeof disk.usage_percent === 'number' && !Number.isNaN(disk.usage_percent)
+          ? `${disk.usage_percent.toFixed(1)}% in use`
+          : null;
 
-        const freeSpaceStr =
-          typeof disk.size_gb === 'number' && typeof disk.used_gb === 'number'
-            ? formatStorageSize(Math.max(0, disk.size_gb - disk.used_gb))
-            : null;
+      let capUsageLine = diskCapacity;
+      if (usedSpaceStr && freeSpaceStr) {
+        capUsageLine = `${usedSpaceStr} used / ${freeSpaceStr} free (${diskCapacity} total${usagePctStr ? ` • ${usagePctStr}` : ''})`;
+      } else if (usagePctStr) {
+        capUsageLine = `${diskCapacity} (${usagePctStr})`;
+      }
 
-        const usagePctStr =
-          typeof disk.usage_percent === 'number' && !Number.isNaN(disk.usage_percent)
-            ? `${disk.usage_percent.toFixed(1)}% in use`
-            : null;
+      const healthStatus =
+        disk.status ||
+        (disk.is_failing_smart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy (OK)');
 
-        const healthStatus =
-          disk.status ||
-          (disk.is_failing_smart
-            ? 'Warning / Failing S.M.A.R.T.'
-            : 'Healthy (OK)');
+      driveLines.push(`[${index + 1}] ${diskId}: ${diskModel}`);
+      driveLines.push(kv('    Drive Type', diskType));
+      driveLines.push(kv('    Drive Letter', driveLetters || 'Unmounted / System Reserved'));
+      driveLines.push(kv('    Capacity & Usage', capUsageLine));
+      driveLines.push(kv('    Status (S.M.A.R.T.)', healthStatus));
 
-        const itemLines: string[] = [
-          `${index + 1}. ${diskIdentifier}: ${diskModel} (${diskCapacity} • ${diskType})`,
-          `   - Disk identifier: ${diskIdentifier}`,
-          `   - Disk model / name: ${diskModel}`,
-          `   - Drive letter: ${driveLetters || 'No assigned drive letter (System/Recovery/Unmounted)'}`,
-          `   - Total capacity: ${diskCapacity}`,
-        ];
-
-        if (usedSpaceStr && freeSpaceStr) {
-          itemLines.push(
-            `   - Space used / free: ${usedSpaceStr} used / ${freeSpaceStr} free${usagePctStr ? ` (${usagePctStr})` : ''}`
-          );
-        } else if (usedSpaceStr) {
-          itemLines.push(
-            `   - Used space: ${usedSpaceStr}${usagePctStr ? ` (${usagePctStr})` : ''}`
-          );
-        }
-
-        itemLines.push(
-          `   - Disk type: ${diskType}`,
-          `   - Health / Status: ${healthStatus}`
-        );
-
-        if (disk.volumes && disk.volumes.length > 0) {
-          itemLines.push('   - Partitions / Volumes:');
+      if (disk.volumes && disk.volumes.length > 0) {
+        if (disk.volumes.length === 1) {
+          const v = disk.volumes[0];
+          const letter = v.drive || v.mountpoint || 'Volume';
+          const vTotal = formatStorageSize(v.total_gb);
+          const vUsed = typeof v.used_gb === 'number' ? `${formatStorageSize(v.used_gb)} used` : '';
+          const vFree =
+            typeof v.total_gb === 'number' && typeof v.used_gb === 'number'
+              ? `${formatStorageSize(Math.max(0, v.total_gb - v.used_gb))} free`
+              : '';
+          const vPct =
+            typeof v.usage_percent === 'number' ? `${v.usage_percent.toFixed(1)}% in use` : '';
+          const vFs = v.fstype || '';
+          const details = [vTotal, vUsed, vFree, vPct, vFs].filter(Boolean).join(', ');
+          driveLines.push(kv('    Partitions', `${letter} (${details})`));
+        } else {
+          driveLines.push('    Partitions          :');
           disk.volumes.forEach((v) => {
             const letter = v.drive || v.mountpoint || 'Volume';
             const vTotal = formatStorageSize(v.total_gb);
@@ -305,71 +320,115 @@ function buildReportText({
                 : '';
             const vPct =
               typeof v.usage_percent === 'number' ? `${v.usage_percent.toFixed(1)}% in use` : '';
-            const vFs = v.fstype ? v.fstype : '';
-
+            const vFs = v.fstype || '';
             const details = [vTotal, vUsed, vFree, vPct, vFs].filter(Boolean).join(', ');
-            itemLines.push(`     * ${letter}: ${details}`);
+            driveLines.push(`      • ${letter} (${details})`);
           });
         }
+      }
 
-        return itemLines;
-      }),
-      ''
+      if (index < drives.length - 1) {
+        driveLines.push('');
+      }
+    });
+  } else {
+    driveLines.push('No storage drives detected or telemetry unavailable.');
+  }
+
+  // Latest check formatting
+  const latestLines: string[] = [];
+  if (latest) {
+    const rawSymptom = latest.symptom_type?.trim();
+    const triggerText =
+      rawSymptom && rawSymptom.toLowerCase() !== 'not available' && rawSymptom.toLowerCase() !== 'unknown'
+        ? cleanValue(rawSymptom)
+        : 'Routine System Check';
+
+    latestLines.push(
+      kv('Check Date', formatDate(getSessionDate(latest))),
+      kv('Trigger / Symptom', triggerText),
+      kv('Diagnostic Finding', friendlyResult(latest.diagnosed_category)),
+      kv('Recommended Action', friendlyAction(latest.action_category)),
+      kv('Match Strength', cleanValue(latest.confidence_label))
+    );
+  } else {
+    latestLines.push(
+      kv('Check Date', 'No saved checks yet'),
+      kv('Status', 'Run a Device Check to record system triage')
     );
   }
 
+  // Recent history table
+  const historyTableLines: string[] = [];
+  if (recentSessions.length > 0) {
+    historyTableLines.push(
+      `  ${padCol('Date', 21)} | ${padCol('Trigger / Symptom', 23)} | ${padCol('Diagnostic Finding', 24)} | Recommended Action`,
+      '  ----------------------+-------------------------+--------------------------+-----------------------'
+    );
+    recentSessions.forEach((session) => {
+      const dateStr = formatDate(getSessionDate(session));
+      const rawSym = session.symptom_type?.trim();
+      const symStr =
+        rawSym && rawSym.toLowerCase() !== 'not available' && rawSym.toLowerCase() !== 'unknown'
+          ? cleanValue(rawSym)
+          : 'Routine System Check';
+      const findStr = friendlyResult(session.diagnosed_category);
+      const actStr = friendlyAction(session.action_category);
+
+      historyTableLines.push(
+        `  ${padCol(dateStr, 21)} | ${padCol(symStr, 23)} | ${padCol(findStr, 24)} | ${actStr}`
+      );
+    });
+  } else {
+    historyTableLines.push('  No saved checks yet.');
+  }
+
+  const divider = '='.repeat(80);
+  const sectionDivider = '-'.repeat(80);
+
   const lines = [
-    'RigMD Device Check Report',
-    `Created: ${formatDate(new Date())}`,
+    divider,
+    '                           RigMD Device Check Report',
+    divider,
+    kv('Generated', formatDate(new Date())),
+    kv('System Name', cleanValue(stats?.device_name)),
+    kv('Operating System', osString),
+    kv('Hardware Scan Time', formatDate(hardwareUpdatedAt)),
     '',
-    'Device summary',
-    `Computer: ${cleanValue(stats?.device_name)}`,
-    `Processor: ${cleanValue(stats?.cpu?.name).replace(/\s+\d+-Core Processor$/i, '')}`,
-    `Memory: ${stats?.ram?.total_gb ? `${stats.ram.total_gb} GB total` : 'Not available'}`,
-    `Memory during last scan: ${typeof stats?.ram?.usage_percent === 'number' ? `${stats.ram.usage_percent.toFixed(1)}% in use` : 'Not available'}`,
-    `Storage: ${storageSummaryLabel}`,
-    `Storage during last scan: ${storageUsageLabel}`,
-    `Graphics: ${cleanValue(stats?.gpu?.name)}`,
-    `Windows: ${cleanValue(stats?.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}`,
-    `Device info last collected: ${formatDate(hardwareUpdatedAt)}`,
+    sectionDivider,
+    'CORE HARDWARE SUMMARY',
+    sectionDivider,
+    kv('Processor (CPU)', cpuString),
+    kv('Memory (RAM)', ramString),
+    kv('Graphics (GPU)', cleanValue(stats?.gpu?.name)),
+    kv('Storage Capacity', storagePoolSummary),
     '',
-    ...storageDriveLines,
-    'Latest check',
-    latest
-      ? `Date: ${formatDate(getSessionDate(latest))}`
-      : 'Date: No saved checks yet',
-    latest
-      ? `Symptom: ${cleanValue(latest.symptom_type)}`
-      : 'Symptom: Not available',
-    latest
-      ? `Result: ${friendlyResult(latest.diagnosed_category)}`
-      : 'Result: Not available',
-    latest
-      ? `What to do: ${friendlyAction(latest.action_category)}`
-      : 'What to do: Run a Device check first',
-    latest
-      ? `Match strength: ${cleanValue(latest.confidence_label)}`
-      : 'Match strength: Not available',
+    sectionDivider,
+    `STORAGE DRIVES (${drives.length} Detected)`,
+    sectionDivider,
+    ...driveLines,
     '',
-    'Saved check summary',
-    `Total saved checks: ${dashboard.totals.total_sessions || sessions.length}`,
-    `Checks this month: ${dashboard.totals.this_month_count}`,
-    `Repeated problems: ${dashboard.recurring_issues_count}`,
-    `Warning signs active: ${dashboard.warning_signs_active_count}`,
-    `Needs help: ${dashboard.totals.escalated_count}`,
+    sectionDivider,
+    'LATEST SYSTEM CHECK',
+    sectionDivider,
+    ...latestLines,
     '',
-    'Recent saved checks',
-    recentSessions.length
-      ? recentSessions
-          .map(
-            (session, index) =>
-              `${index + 1}. ${formatDate(getSessionDate(session))} - ${cleanValue(session.symptom_type)} - ${friendlyResult(session.diagnosed_category)} - ${friendlyAction(session.action_category)}`
-          )
-          .join('\n')
-      : 'No saved checks yet.',
+    sectionDivider,
+    'CHECK HISTORY & HEALTH SUMMARY',
+    sectionDivider,
+    kv('Total Saved Checks', String(dashboard.totals.total_sessions || sessions.length)),
+    kv('Checks This Month', String(dashboard.totals.this_month_count)),
+    kv('Recurring Issues', String(dashboard.recurring_issues_count)),
+    kv('Active Warnings', String(dashboard.warning_signs_active_count)),
+    kv('Escalations Needed', String(dashboard.totals.escalated_count)),
     '',
-    'Note',
-    'RigMD provides Device checkup guidance only. It does not replace professional hardware inspection.',
+    'Recent Saved Checks:',
+    ...historyTableLines,
+    '',
+    divider,
+    'NOTE: RigMD provides device checkup guidance and telemetry-based triage.',
+    '      It does not replace in-person professional hardware diagnosis or repair.',
+    divider,
   ];
 
   return lines.join('\n');
@@ -542,7 +601,7 @@ export default function ShareReportView({
                 </button>
               </div>
 
-              <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap p-5 text-sm leading-relaxed text-slate-200">
+              <pre className="font-mono max-h-[560px] overflow-auto whitespace-pre-wrap p-5 text-xs sm:text-sm leading-relaxed text-slate-200">
                 {reportText}
               </pre>
             </motion.section>

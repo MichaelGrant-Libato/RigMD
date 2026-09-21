@@ -73,7 +73,6 @@ function agentSnapshotToHardwareStats(
   snapshot: AgentSnapshotResponse
 ): HardwareStats {
   const hardware = snapshot.hardware;
-  const primaryDisk = hardware.allDisks?.[0];
 
   return {
     device_name: hardware.deviceName,
@@ -97,15 +96,15 @@ function agentSnapshotToHardwareStats(
       cores: hardware.cpu.cores,
       threads: hardware.cpu.threads,
       frequency_mhz: hardware.cpu.frequencyMhz,
-      max_frequency_mhz: (hardware.cpu as any).maxFrequencyMhz,
-      sockets: (hardware.cpu as any).sockets,
-      virtualization_enabled: (hardware.cpu as any).virtualizationEnabled,
-      l1_cache_kb: (hardware.cpu as any).l1CacheKb,
-      l2_cache_mb: (hardware.cpu as any).l2CacheMb,
-      l3_cache_mb: (hardware.cpu as any).l3CacheMb,
-      processes: (hardware.cpu as any).processes,
-      handles: (hardware.cpu as any).handles,
-      temperature_celsius: (hardware.cpu as any).temperatureCelsius,
+      max_frequency_mhz: hardware.cpu.maxFrequencyMhz,
+      sockets: hardware.cpu.sockets,
+      virtualization_enabled: hardware.cpu.virtualizationEnabled,
+      l1_cache_kb: hardware.cpu.l1CacheKb,
+      l2_cache_mb: hardware.cpu.l2CacheMb,
+      l3_cache_mb: hardware.cpu.l3CacheMb,
+      processes: hardware.cpu.processes,
+      handles: hardware.cpu.handles,
+      temperature_celsius: hardware.cpu.temperatureCelsius ?? undefined,
     },
 
     gpu: {
@@ -173,7 +172,7 @@ function agentSnapshotToHardwareStats(
 
     storage_drives: (hardware.storageDrives ?? []).map((drive) => {
       const driveVolumes = (drive.volumes && drive.volumes.length > 0)
-        ? drive.volumes.map((v: any) => ({
+        ? drive.volumes.map((v) => ({
             drive: v.drive,
             mountpoint: v.mountpoint,
             fstype: v.fsType || v.fstype || '',
@@ -216,8 +215,8 @@ function agentSnapshotToHardwareStats(
         disk_index: drive.diskIndex,
         used_gb: usedGb,
         usage_percent: usagePercent,
-        is_failing_smart: (drive as any).isFailingSmart ?? false,
-        status: (drive as any).isFailingSmart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy / OK',
+        is_failing_smart: drive.isFailingSmart ?? false,
+        status: drive.isFailingSmart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy / OK',
         volumes: driveVolumes,
       };
     }),

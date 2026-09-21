@@ -50,6 +50,15 @@ export interface AgentHardwareSnapshot {
     threads: number;
     frequencyMhz: number;
     usagePercent: number;
+    maxFrequencyMhz?: number;
+    sockets?: number;
+    virtualizationEnabled?: boolean;
+    l1CacheKb?: number;
+    l2CacheMb?: number;
+    l3CacheMb?: number;
+    processes?: number;
+    handles?: number;
+    temperatureCelsius?: number | null;
   };
 
   gpu: {
@@ -88,6 +97,7 @@ export interface AgentHardwareSnapshot {
     detectionSource?: string | null;
     diskIndex?: number | null;
     usedGb?: number | null;
+    usagePercent?: number | null;
     isFailingSmart?: boolean;
     status?: string | null;
     volumes?: Array<{

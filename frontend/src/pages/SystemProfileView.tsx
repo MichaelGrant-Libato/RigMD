@@ -155,7 +155,6 @@ export default function SystemProfileView({
   isRefreshingHardware,
   onRefreshHardware,
 }: SystemProfileViewProps) {
-  const [selectedDevice, setSelectedDevice] = useState<HardwareType | null>(null);
   const [liveCpuTemp, setLiveCpuTemp] = useState<number | null>(null);
   const [liveGpuTemp, setLiveGpuTemp] = useState<number | null>(null);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
@@ -171,7 +170,7 @@ export default function SystemProfileView({
         .withAutomaticReconnect()
         .build();
 
-      connection.on('ReceiveTelemetry', (telemetry: any) => {
+      connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number; gpuTempCelsius?: number }) => {
         if (telemetry.cpuTempCelsius !== undefined) setLiveCpuTemp(telemetry.cpuTempCelsius);
         if (telemetry.gpuTempCelsius !== undefined) setLiveGpuTemp(telemetry.gpuTempCelsius);
       });
