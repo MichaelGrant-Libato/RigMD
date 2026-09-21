@@ -72,7 +72,7 @@ function formatStorageSize(sizeGb: number | null | undefined) {
 function formatStorageDisplay(stats: HardwareStats): string {
   const sizeStr = formatStorageSize(stats.disk?.total_gb);
   const drives = stats.storage_drives ?? [];
-  const driveCount = drives.length > 0 ? drives.length : (stats.all_disks?.length || 1);
+  const driveCount = drives.length > 0 ? drives.length : 1;
   const rawType = stats.storage_type?.trim();
   const hasKnownType =
     rawType &&

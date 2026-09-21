@@ -195,6 +195,15 @@ export interface HardwareStats {
       usage_percent: number;
     }>;
   }>;
+  all_disks?: Array<{
+    drive: string;
+    mountpoint: string;
+    fstype: string;
+    disk_index?: number | null;
+    total_gb: number;
+    used_gb: number;
+    usage_percent: number;
+  }>;
   cpu: {
     name: string;
     usage_percent: number;
