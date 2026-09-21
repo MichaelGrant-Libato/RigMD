@@ -135,46 +135,92 @@ function agentSnapshotToHardwareStats(
     },
 
     disk: {
-      total_gb: primaryDisk?.totalGb ?? 0,
-      used_gb: primaryDisk?.usedGb ?? 0,
-      usage_percent: primaryDisk?.usagePercent ?? 0,
+      total_gb: Math.round(
+        ((hardware.storageDrives && hardware.storageDrives.length > 0)
+          ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
+          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0)) * 100
+      ) / 100,
+      used_gb: Math.round(
+        ((hardware.storageDrives && hardware.storageDrives.length > 0)
+          ? hardware.storageDrives.reduce((acc, d) => acc + (d.usedGb || 0), 0)
+          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.usedGb || 0), 0)) * 100
+      ) / 100,
+      usage_percent:
+        ((hardware.storageDrives && hardware.storageDrives.length > 0)
+          ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
+          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0)) > 0
+          ? Math.round(
+              (((hardware.storageDrives && hardware.storageDrives.length > 0)
+                ? hardware.storageDrives.reduce((acc, d) => acc + (d.usedGb || 0), 0)
+                : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.usedGb || 0), 0)) /
+                ((hardware.storageDrives && hardware.storageDrives.length > 0)
+                  ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
+                  : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0))) *
+                1000
+            ) / 10
+          : (hardware.allDisks?.[0]?.usagePercent ?? 0),
     },
 
-    network: hardware.network ? {
-      is_wifi: hardware.network.isWifi,
-      wifi_signal_strength: hardware.network.wifiSignalStrength,
-      mac_address: hardware.network.macAddress,
-      ip_address: hardware.network.ipAddress,
-      ping_latency_ms: hardware.network.pingLatencyMs,
-      packet_loss_percent: hardware.network.packetLossPercent,
-    } : null,
-
-    displays: hardware.displays?.map(d => ({
-      name: d.name,
-      resolution: d.resolution,
-      refresh_rate: d.refreshRate
+    all_disks: (hardware.allDisks ?? []).map((d) => ({
+      drive: d.drive,
+      mountpoint: d.mountpoint,
+      fstype: d.fsType,
+      disk_index: d.diskIndex,
+      total_gb: d.totalGb,
+      used_gb: d.usedGb,
+      usage_percent: d.usagePercent,
     })),
 
-    device_errors: hardware.deviceErrors?.map(e => ({
-      name: e.name,
-      device_id: e.deviceId,
-      error_code: e.errorCode,
-      description: e.description
-    })),
+    storage_drives: (hardware.storageDrives ?? []).map((drive) => {
+      const driveVolumes = (drive.volumes && drive.volumes.length > 0)
+        ? drive.volumes.map((v: any) => ({
+            drive: v.drive,
+            mountpoint: v.mountpoint,
+            fstype: v.fsType || v.fstype || '',
+            disk_index: v.diskIndex ?? v.disk_index ?? drive.diskIndex,
+            total_gb: v.totalGb ?? v.total_gb ?? 0,
+            used_gb: v.usedGb ?? v.used_gb ?? 0,
+            usage_percent: v.usagePercent ?? v.usage_percent ?? 0,
+          }))
+        : (hardware.allDisks ?? [])
+            .filter((d) => drive.diskIndex != null && d.diskIndex === drive.diskIndex)
+            .map((v) => ({
+              drive: v.drive,
+              mountpoint: v.mountpoint,
+              fstype: v.fsType,
+              disk_index: v.diskIndex,
+              total_gb: v.totalGb,
+              used_gb: v.usedGb,
+              usage_percent: v.usagePercent,
+            }));
 
-    storage_drives: (hardware.storageDrives ?? []).map((drive) => ({
-      model: drive.model,
-      type: drive.type,
-      size_gb: drive.sizeGb,
-      interface: drive.interface,
-      media_type: drive.mediaType,
-      bus_type: drive.busType,
-      detection_source: drive.detectionSource,
-      disk_index: drive.diskIndex,
-      used_gb: drive.usedGb,
-      usage_percent: drive.usagePercent,
-      volumes: [],
-    })),
+      let usedGb = drive.usedGb;
+      let usagePercent = drive.usagePercent;
+      if ((usedGb == null || usagePercent == null) && driveVolumes.length > 0) {
+        const totalVol = driveVolumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
+        const usedVol = driveVolumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
+        usedGb = Math.round(usedVol * 100) / 100;
+        if (totalVol > 0) {
+          usagePercent = Math.round((usedVol / totalVol) * 1000) / 10;
+        }
+      }
+
+      return {
+        model: drive.model,
+        type: drive.type,
+        size_gb: drive.sizeGb,
+        interface: drive.interface,
+        media_type: drive.mediaType,
+        bus_type: drive.busType,
+        detection_source: drive.detectionSource,
+        disk_index: drive.diskIndex,
+        used_gb: usedGb,
+        usage_percent: usagePercent,
+        is_failing_smart: (drive as any).isFailingSmart ?? false,
+        status: (drive as any).isFailingSmart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy / OK',
+        volumes: driveVolumes,
+      };
+    }),
 
     process_insights: hardware.processInsights
       ? {

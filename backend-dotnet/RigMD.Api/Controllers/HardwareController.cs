@@ -39,6 +39,8 @@ public class HardwareController : ControllerBase
                     media_type = d.MediaType,
                     bus_type = d.BusType,
                     detection_source = d.DetectionSource,
+                    is_failing_smart = d.IsFailingSmart,
+                    status = d.IsFailingSmart ? "Warning / Failing S.M.A.R.T." : "Healthy / OK",
                     used_gb = d.UsedGb,
                     usage_percent = d.UsagePercent,
                     volumes = d.Volumes.Select(v => new

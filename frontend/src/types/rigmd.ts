@@ -88,7 +88,22 @@ export interface AgentHardwareSnapshot {
     detectionSource?: string | null;
     diskIndex?: number | null;
     usedGb?: number | null;
-    usagePercent?: number | null;
+    isFailingSmart?: boolean;
+    status?: string | null;
+    volumes?: Array<{
+      drive: string;
+      mountpoint: string;
+      fsType?: string;
+      fstype?: string;
+      diskIndex?: number | null;
+      disk_index?: number | null;
+      totalGb?: number;
+      total_gb?: number;
+      usedGb?: number;
+      used_gb?: number;
+      usagePercent?: number;
+      usage_percent?: number;
+    }>;
   }>;
 
   allDisks: Array<{
@@ -185,6 +200,8 @@ export interface HardwareStats {
     disk_index?: number | null;
     used_gb?: number | null;
     usage_percent?: number | null;
+    is_failing_smart?: boolean;
+    status?: string | null;
     volumes?: Array<{
       drive: string;
       mountpoint: string;
