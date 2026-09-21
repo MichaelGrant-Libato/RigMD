@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { Bell, Menu, Microchip, Monitor } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -26,6 +26,38 @@ export function HeaderStatusProvider({
       {children}
     </HeaderStatusContext.Provider>
   );
+}
+
+export function getDeviceInitials(name?: string | null): string {
+  if (!name) return 'PC';
+  const trimmed = name.trim();
+  if (
+    !trimmed ||
+    trimmed.toLowerCase() === 'detecting device' ||
+    trimmed.toLowerCase() === 'detecting pc' ||
+    trimmed.toLowerCase() === 'unknown' ||
+    trimmed.toLowerCase().startsWith('detecting')
+  ) {
+    return 'PC';
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+
+  if (words.length === 1) {
+    const subparts = trimmed.split(/[-_]+/).filter(Boolean);
+    if (
+      subparts.length >= 2 &&
+      !/^(desktop|laptop|win|pc)$/i.test(subparts[0])
+    ) {
+      return (subparts[0][0] + subparts[1][0]).toUpperCase();
+    }
+    return words[0][0].toUpperCase();
+  }
+
+  return 'PC';
 }
 
 interface TopHeaderProps {
@@ -72,6 +104,7 @@ function getLiveStatusView(status: LiveDataStatus) {
 export default function TopHeader({ title, subtitle }: TopHeaderProps) {
   const { deviceName, liveStatus, onMenuClick } = useContext(HeaderStatusContext);
   const statusView = getLiveStatusView(liveStatus);
+  const initials = useMemo(() => getDeviceInitials(deviceName), [deviceName]);
 
   return (
     <header className="rigmd-app-header flex min-h-[72px] shrink-0 items-center justify-between border-b px-4 sm:px-6 lg:px-8">
@@ -117,9 +150,11 @@ export default function TopHeader({ title, subtitle }: TopHeaderProps) {
         <motion.button
           type="button"
           whileTap={{ scale: 0.98 }}
+          title={deviceName && !deviceName.toLowerCase().startsWith('detecting') ? `Device: ${deviceName}` : 'Device Profile'}
+          aria-label={deviceName && !deviceName.toLowerCase().startsWith('detecting') ? `Device: ${deviceName}` : 'Device Profile'}
           className="ml-1 flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/22 bg-cyan-400/12 text-sm font-bold text-cyan-100 transition hover:bg-cyan-400/20"
         >
-          MG
+          {initials}
         </motion.button>
       </div>
     </header>
