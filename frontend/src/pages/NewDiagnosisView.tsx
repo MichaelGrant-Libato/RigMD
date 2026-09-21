@@ -182,28 +182,28 @@ const wait = (
 const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
   {
     id: 'full',
-    title: 'Full System Diagnosis',
+    title: 'Full computer check',
     description:
-      'Scan the complete Device and collect fresh system, hardware, storage, memory, graphics, and process evidence.',
-    action: 'Scan Entire Device',
+      'Check the main parts of your computer for possible problems.',
+    action: 'Check all parts',
     icon: Stethoscope,
   },
 
   {
     id: 'component',
-    title: 'Diagnose by Component',
+    title: 'Check specific parts',
     description:
-      'Focus the diagnosis on selected Device components while still collecting the evidence needed for correlation.',
-    action: 'Choose Components',
+      'Choose the parts you want to check, such as memory or storage.',
+    action: 'Choose parts',
     icon: Microchip,
   },
 
   {
     id: 'scenario',
-    title: 'Diagnose by Scenario',
+    title: 'Check a problem',
     description:
       'Start from a common problem such as slow performance, overheating, startup trouble, or display issues.',
-    action: 'Choose Scenario',
+    action: 'Choose a problem',
     icon: Layers,
   },
 ];
@@ -218,17 +218,17 @@ const COMPONENT_GROUPS: {
     items: [
       {
         id: 'cpu',
-        title: 'CPU / Processor',
+        title: 'Processor (CPU)',
         description:
-          'Processor configuration, workload, and system behavior.',
+          'How busy your processor is and how it is performing.',
         icon: Microchip,
       },
 
       {
         id: 'memory',
-        title: 'RAM / Memory',
+        title: 'Memory (RAM)',
         description:
-          'Memory capacity, utilization, and pressure.',
+          'How much memory is available and how much is being used.',
         icon: MemoryStick,
       },
 
@@ -466,6 +466,16 @@ function normalizeActionCategory(
   }
 
   return action || 'Action';
+}
+
+function friendlyActionLabel(action: string | undefined | null) {
+  const labels: Record<string, string> = {
+    Monitor: 'Keep an eye on it',
+    Maintain: 'Review care steps',
+    Troubleshoot: 'Review suggested fixes',
+    Escalate: 'Ask a technician',
+  };
+  return labels[normalizeActionCategory(action)] ?? 'Review the result';
 }
 
 function getActionTone(
@@ -932,26 +942,26 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   const runButtonLabel =
     diagnosisStage ===
     'requesting'
-      ? 'Creating Scan Request...'
+      ? 'Preparing your check...'
       : diagnosisStage ===
           'scanning'
         ? 'Scanning This Device...'
         : diagnosisStage ===
             'loading-evidence'
-          ? 'Loading Evidence...'
+          ? 'Loading readings...'
           : diagnosisStage ===
               'analyzing'
-            ? 'Analyzing Evidence...'
+            ? 'Checking your results...'
             : diagnosisStage ===
                 'completed'
-              ? 'Run Diagnosis Again'
+              ? 'Run another check'
               : diagnosisMode ===
                   'full'
-                ? 'Run Full Diagnosis'
+                ? 'Check my computer'
                 : diagnosisMode ===
                     'component'
-                  ? 'Run Component Diagnosis'
-                  : 'Run Scenario Diagnosis';
+                  ? 'Check selected parts'
+                  : 'Check this problem';
 
   const stageDescription =
     diagnosisStage ===
@@ -959,13 +969,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       ? 'Sending a scan request to the installed RigMD Agent.'
       : diagnosisStage ===
           'scanning'
-        ? 'The RigMD Agent is collecting fresh system and process evidence.'
+        ? 'Reading your computer. This may take a moment.'
         : diagnosisStage ===
             'loading-evidence'
-          ? 'The scan finished. RigMD is retrieving the fresh snapshot.'
+          ? 'The scan is complete. Loading the readings.'
           : diagnosisStage ===
               'analyzing'
-            ? 'Fresh evidence is ready for diagnostic interpretation.'
+            ? 'Reviewing the readings for possible problems.'
             : '';
 
   const selectedScopeLabel =
@@ -1747,8 +1757,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   return (
     <>
       <TopHeader
-        title="New Diagnosis"
-        subtitle="Choose a diagnosis type, scan the Device, and review fresh system evidence"
+        title="Check My Device"
+        subtitle="Check your computer and review suggested next steps"
       />
 
       <motion.div
@@ -1777,16 +1787,16 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-xl font-bold text-white">
-                        One-Click Diagnosis
+                        Check your computer
                       </h2>
 
-                      <span className="rounded-full border border-teal-300/25 bg-teal-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-teal-200">
+                      <span className="rounded-full border border-teal-300/25 bg-teal-300/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-teal-200">
                         Recommended
                       </span>
                     </div>
 
                     <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-400">
-                      Select what you want RigMD to inspect, then run a fresh scan using the installed Windows Agent.
+                      Choose a full check, specific parts, or a problem you have noticed.
                     </p>
                   </div>
                 </div>
@@ -1821,7 +1831,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                             ? undefined
                             : buttonTap
                         }
-                        className={`flex min-h-[178px] flex-col items-start justify-between rounded-xl border p-5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`flex min-h-[234px] flex-col items-start justify-start rounded-xl border p-5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                           selected
                             ? selectedCardStyle
                             : unselectedCardStyle
@@ -1837,23 +1847,23 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           </span>
 
                           {selected && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-cyan-200">
                               <Check size={12} />
                               Selected
                             </span>
                           )}
                         </span>
 
-                        <span className="mt-5">
+                        <span className="mt-5 flex w-full flex-1 flex-col">
                           <span className="block text-base font-bold text-white">
                             {mode.title}
                           </span>
 
-                          <span className="mt-2 block text-sm leading-relaxed text-slate-400">
+                          <span className="mt-2 block min-h-[48px] text-sm leading-relaxed text-slate-400">
                             {mode.description}
                           </span>
 
-                          <span className="mt-3 block text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+                          <span className="mt-auto pt-4 block text-xs font-bold uppercase tracking-wider text-cyan-300">
                             {mode.action}
                           </span>
                         </span>
@@ -1872,11 +1882,11 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                       <div>
                         <p className="text-sm font-bold text-white">
-                          Full System Scan
+                          What this check includes
                         </p>
 
                         <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                          RigMD will collect all currently supported system evidence. No questionnaire is required.
+                          Checks the parts RigMD can read. No questions to answer first.
                         </p>
                       </div>
                     </div>
@@ -1892,7 +1902,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           Choose components
                         </h3>
 
-                        <p className="mt-1 text-sm text-slate-500">
+                        <p className="mt-1 text-sm text-slate-400">
                           Select one or more subsystems to focus the diagnosis.
                         </p>
                       </div>
@@ -1914,7 +1924,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       {COMPONENT_GROUPS.map(
                         (group) => (
                           <div key={group.group}>
-                            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                            <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
                               {group.group}
                             </p>
 
@@ -1980,7 +1990,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                           )}
                                         </span>
 
-                                        <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                                        <span className="mt-1 block text-xs leading-relaxed text-slate-400">
                                           {
                                             component.description
                                           }
@@ -2006,7 +2016,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         Choose a scenario
                       </h3>
 
-                      <p className="mt-1 text-sm text-slate-500">
+                      <p className="mt-1 text-sm text-slate-400">
                         Select the closest problem. RigMD will still use fresh system evidence instead of relying only on the label.
                       </p>
                     </div>
@@ -2068,7 +2078,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                   )}
                                 </span>
 
-                                <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                                <span className="mt-1 block text-xs leading-relaxed text-slate-400">
                                   {
                                     scenario.description
                                   }
@@ -2084,8 +2094,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                 <div className="mt-5 flex flex-col gap-3 rounded-xl border border-[var(--rigmd-border)] bg-[#0d151d] p-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                      Selected Scope
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                      Parts to check
                     </p>
 
                     <p className="mt-1 text-sm font-semibold text-white">
@@ -2115,7 +2125,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         ? buttonTap
                         : undefined
                     }
-                    className="flex min-w-[230px] items-center justify-center gap-2 rounded-xl bg-[#2dd4bf] px-5 py-3.5 text-sm font-bold text-[#041014] transition hover:bg-[#5eead4] disabled:cursor-not-allowed disabled:bg-slate-700/35 disabled:text-slate-500"
+                    className="flex min-w-[230px] items-center justify-center gap-2 rounded-xl bg-[#2dd4bf] px-5 py-3.5 text-sm font-bold text-[#041014] transition hover:bg-[#5eead4] disabled:cursor-not-allowed disabled:bg-slate-700/35 disabled:text-slate-400"
                   >
                     {diagnosisBusy ? (
                       <RefreshCw
@@ -2133,7 +2143,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 {!canRunDiagnosis &&
                   diagnosisMode !==
                     'full' && (
-                    <p className="mt-2 text-right text-xs text-slate-500">
+                    <p className="mt-2 text-right text-xs text-slate-400">
                       {diagnosisMode ===
                       'component'
                         ? 'Select at least one component before running diagnosis.'
@@ -2164,7 +2174,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       {runButtonLabel}
                     </p>
 
-                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                    <p className="mt-1 text-xs leading-relaxed text-slate-400">
                       {stageDescription}
                     </p>
 
@@ -2228,13 +2238,14 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
             {snapshot &&
               diagnosisStage ===
                 'completed' && (
-                <motion.section
+                <motion.details
                   variants={cardFadeUp}
                   initial="hidden"
                   animate="visible"
                   transition={cardTransition}
                   className={`rounded-2xl border p-5 ${softPanelStyle}`}
                 >
+                  <summary className="mb-3 font-semibold text-slate-200">View device readings from this check</summary>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2">
@@ -2244,11 +2255,11 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         />
 
                         <h3 className="text-lg font-bold text-white">
-                          Fresh System Evidence
+                          Device readings
                         </h3>
                       </div>
 
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-slate-400">
                         Captured{' '}
                         {new Date(
                           snapshot.capturedAt,
@@ -2256,15 +2267,15 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       </p>
                     </div>
 
-                    <span className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                    <span className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-emerald-300">
                       <Database size={12} />
-                      Agent Snapshot
+                      Saved readings
                     </span>
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className={`rounded-xl border p-4 ${softTileStyle}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Diagnosis Mode
                       </p>
 
@@ -2272,13 +2283,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         {activeMode.title}
                       </p>
 
-                      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      <p className="mt-1 text-xs leading-relaxed text-slate-400">
                         {selectedScopeLabel}
                       </p>
                     </div>
 
                     <div className={`rounded-xl border p-4 ${softTileStyle}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Memory
                       </p>
 
@@ -2290,7 +2301,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         %
                       </p>
 
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-slate-400">
                         {Number(
                           snapshot.hardware.ram
                             .usedGb,
@@ -2305,7 +2316,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
 
                     <div className={`rounded-xl border p-4 ${softTileStyle}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Graphics
                       </p>
 
@@ -2315,13 +2326,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           'Detected GPU'}
                       </p>
 
-                      <p className="mt-1 text-xs text-slate-500">
-                        Graphics evidence received
+                      <p className="mt-1 text-xs text-slate-400">
+                        Graphics information collected
                       </p>
                     </div>
 
                     <div className={`rounded-xl border p-4 ${softTileStyle}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Storage Type
                       </p>
 
@@ -2331,8 +2342,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           'Detected'}
                       </p>
 
-                      <p className="mt-1 text-xs text-slate-500">
-                        Storage evidence received
+                      <p className="mt-1 text-xs text-slate-400">
+                        Storage information collected
                       </p>
                     </div>
                   </div>
@@ -2350,18 +2361,18 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         </p>
 
                           <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                            The installed RigMD Agent returned fresh system evidence and the backend analyzed the snapshot using evidence-based diagnostic rules.
+                            These readings were used for the result below.
                           </p>
 
                         {commandId && (
-                          <p className="mt-2 break-all font-mono text-[10px] text-slate-600">
-                            Command: {commandId}
+                          <p className="mt-2 break-all font-mono text-xs text-slate-600">
+                            Scan reference: {commandId}
                           </p>
                         )}
                       </div>
                     </div>
                   </div>
-                </motion.section>
+                </motion.details>
               )}
 
             {report && (
@@ -2378,21 +2389,21 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <span className="rounded border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-                          Diagnosis Ready
+                        <span className="rounded border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-cyan-300">
+                          Check complete
                         </span>
 
                         <span
-                          className={`rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${getActionTone(report.action_category).badge}`}
+                          className={`rounded border px-2.5 py-1 text-xs font-bold uppercase tracking-wider ${getActionTone(report.action_category).badge}`}
                         >
-                          {normalizeActionCategory(
+                          {friendlyActionLabel(
                             report.action_category,
                           )}
                         </span>
                       </div>
 
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                        Probable Cause
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+                        Possible cause
                       </p>
 
                       <h3 className="mt-1 text-2xl font-bold leading-tight text-white">
@@ -2405,7 +2416,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         ?.toLowerCase()
                         .includes('low') && (
                         <p className="mt-2 text-sm text-slate-400">
-                          The available evidence is limited, so this result should be treated as a starting point for further verification.
+                          There is not enough information to confirm the cause. More checks may be needed.
                         </p>
                       )}
                     </div>
@@ -2414,14 +2425,14 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       <div
                         className={`rounded-lg border p-3 ${softTileStyle}`}
                       >
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                          Recommended Action
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Suggested next step
                         </p>
 
                         <p
                           className={`mt-1 text-sm font-bold ${getActionTone(report.action_category).text}`}
                         >
-                          {normalizeActionCategory(
+                          {friendlyActionLabel(
                             report.action_category,
                           )}
                         </p>
@@ -2430,8 +2441,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       <div
                         className={`rounded-lg border p-3 ${softTileStyle}`}
                       >
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                          Confidence
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          How certain is this result?
                         </p>
 
                         <p className="mt-1 text-sm font-bold text-white">
@@ -2443,25 +2454,21 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   </div>
                 </div>
 
-                <div>
-                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">
-                    Why RigMD Suggested This
-                  </h4>
-
-                  <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
-                    <p className="text-sm leading-relaxed text-gray-300">
-                      {report.ai_explanation ||
-                        'RigMD did not return a diagnostic explanation for this result.'}
-                    </p>
-                  </div>
-                </div>
+                  <section className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4">
+                    <h4 className="font-semibold text-cyan-200">What to do next</h4>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-200">{report.recommended_next_step || 'No next step was provided. Review the result before making changes.'}</p>
+                  </section>
+                <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
+                  <summary className="font-semibold text-slate-200">Why this result was suggested</summary>
+                  <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
+                    {report.ai_explanation || 'An explanation is not available for this result.'}
+                  </p>
+                </details>
 
                 {report.proof &&
                   report.proof.length > 0 && (
-                    <div>
-                      <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">
-                        Evidence / Live Scan Proof
-                      </h4>
+                    <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
+                      <summary className="mb-3 font-semibold text-slate-200">View scan details</summary>
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         {report.proof.map(
@@ -2484,7 +2491,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                 item.status,
                               )}`}
                             >
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                              <p className="text-xs font-bold uppercase tracking-wider text-gray-400">
                                 {
                                   item.label
                                 }
@@ -2502,14 +2509,14 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                 }
                               </p>
 
-                              <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                                Source: Live scan
+                              <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                                Source: Device scan
                               </p>
                             </motion.div>
                           ),
                         )}
                       </div>
-                    </div>
+                    </details>
                   )}
 
                 {!isNoActiveIssue(
@@ -2523,11 +2530,11 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                             size={14}
                             className="text-cyan-400"
                           />
-                          Targeted Verification
+                          Check this area
                         </h4>
 
-                        <p className="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                          Verification Target
+                        <p className="mt-3 text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Area to check
                         </p>
 
                         <p className="mt-1 text-sm font-bold text-cyan-200">
@@ -2554,30 +2561,18 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       >
                         {inspecting
                           ? 'Opening...'
-                          : 'Verify & Inspect'}
+                          : 'Open details'}
                       </motion.button>
                     </div>
                   </div>
                 )}
 
-                <div
-                  className={`rounded-xl border border-l-4 p-4 ${getActionTone(report.action_category).border} ${getActionTone(report.action_category).soft} ${getActionTone(report.action_category).accent}`}
-                >
-                  <h4 className="mb-1 text-xs font-bold uppercase tracking-wider text-white">
-                    Recommended Next Step
-                  </h4>
-
-                  <p className="text-sm leading-relaxed text-gray-300">
-                    {report.recommended_next_step ||
-                      'RigMD did not return a recommended next step for this result.'}
-                  </p>
-                </div>
 
                 {isNoActiveIssue(
                   report,
                 ) && (
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-emerald-300">
-                    No active issue requiring remediation was verified from the latest system evidence.
+                    The latest check did not find a problem that needs a fix.
                   </div>
                 )}
 
@@ -2592,8 +2587,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           Safe Actions Available
                         </h4>
 
-                        <p className="mt-1 text-xs text-slate-500">
-                          Only backend-approved remediation actions are shown here.
+                        <p className="mt-1 text-xs text-slate-400">
+                          Review each action before choosing whether to run it.
                         </p>
                       </div>
 
@@ -2651,7 +2646,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                     }
                                   </p>
 
-                                  <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
+                                  <p className="mt-2 text-xs leading-relaxed text-slate-600">
                                     Risk:{' '}
                                     {
                                       action.risk
@@ -2672,7 +2667,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                       whileTap={
                                         buttonTap
                                       }
-                                      className="mt-4 w-fit rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-[11px] font-bold text-cyan-400 transition-colors hover:bg-cyan-500/10 disabled:opacity-50"
+                                      className="mt-4 w-fit rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-bold text-cyan-400 transition-colors hover:bg-cyan-500/10 disabled:opacity-50"
                                     >
                                       {inspecting
                                         ? 'Opening...'
@@ -2693,8 +2688,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 ) &&
                   remediationActions.length ===
                     0 && (
-                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 text-xs text-gray-500">
-                      No backend-approved automatic action is currently available for this result.
+                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 text-xs text-gray-400">
+                      No automatic fix is available for this result.
                     </div>
                   )}
 
@@ -2736,7 +2731,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                   </h4>
 
                                   <span
-                                    className={`rounded border px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${resolutionView.className}`}
+                                    className={`rounded border px-2 py-1 text-xs font-bold uppercase tracking-wider ${resolutionView.className}`}
                                   >
                                     {
                                       resolutionView.label
@@ -2789,7 +2784,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                           item.status,
                                         )}`}
                                       >
-                                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                                           {
                                             item.label
                                           }
@@ -2801,7 +2796,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                           }
                                         </p>
 
-                                        <p className="mt-1 text-[11px] text-slate-500">
+                                        <p className="mt-1 text-xs text-slate-400">
                                           {
                                             item.meaning
                                           }
@@ -2822,8 +2817,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
           <aside className="self-start overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] xl:block">
             <div className="border-b border-[var(--rigmd-border-soft)] p-4">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                Diagnosis Summary
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                Your check
               </p>
 
               <div className="mt-4 flex items-center gap-3">
@@ -2838,7 +2833,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     {activeMode.title}
                   </h3>
 
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-400">
                     Selected mode
                   </p>
                 </div>
@@ -2849,7 +2844,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
               <div
                 className={`rounded-lg border p-3.5 ${softTileStyle}`}
               >
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
                   Scope
                 </p>
 
@@ -2886,7 +2881,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                       {selectedComponentDetails.length >
                         5 && (
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-400">
                           +
                           {selectedComponentDetails.length -
                             5}{' '}
@@ -2895,7 +2890,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       )}
                     </div>
                   ) : (
-                    <p className="mt-2 text-sm text-slate-500">
+                    <p className="mt-2 text-sm text-slate-400">
                       No components selected.
                     </p>
                   )
@@ -2914,7 +2909,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         }
                       </div>
                     ) : (
-                      <p className="text-sm text-slate-500">
+                      <p className="text-sm text-slate-400">
                         No scenario selected.
                       </p>
                     )}
@@ -2933,7 +2928,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
               <div
                 className={`rounded-lg border p-3.5 ${softTileStyle}`}
               >
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
                   Status
                 </p>
 
@@ -2958,7 +2953,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   ) : (
                     <Activity
                       size={15}
-                      className="text-slate-500"
+                      className="text-slate-400"
                     />
                   )}
 
@@ -2990,13 +2985,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 <div
                   className={`rounded-lg border p-3.5 ${softTileStyle}`}
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                    Latest Evidence
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Latest readings
                   </p>
 
                   <div className="mt-3 space-y-2">
                     <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-500">
+                      <span className="text-slate-400">
                         Memory
                       </span>
 
@@ -3012,7 +3007,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
 
                     <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-500">
+                      <span className="text-slate-400">
                         Storage
                       </span>
 
@@ -3024,7 +3019,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
 
                     <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-500">
+                      <span className="text-slate-400">
                         GPU
                       </span>
 
@@ -3042,7 +3037,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 <div
                   className={`rounded-lg border p-3.5 ${softTileStyle}`}
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
                     Diagnosis
                   </p>
 
@@ -3054,21 +3049,21 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-md border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
                         Action
                       </p>
 
                       <p
                         className={`mt-1 text-xs font-bold ${getActionTone(report.action_category).text}`}
                       >
-                        {normalizeActionCategory(
+                        {friendlyActionLabel(
                           report.action_category,
                         )}
                       </p>
                     </div>
 
                     <div className="rounded-md border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
                         Confidence
                       </p>
 
@@ -3098,7 +3093,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-4 py-3 text-sm font-bold text-cyan-300 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RefreshCw size={15} />
-                Reset Diagnosis
+                Start over
               </motion.button>
             </div>
           </aside>

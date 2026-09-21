@@ -638,7 +638,7 @@ export default function DiagnosticSessionDetailView({
               >
                 <div className="flex flex-col gap-4 border-b border-[var(--rigmd-border)] pb-5 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
+                    <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
                       {
                         session.display_date
                       }{' '}
@@ -694,7 +694,7 @@ export default function DiagnosticSessionDetailView({
                 ) ? (
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Diagnosis Scope
                       </p>
 
@@ -714,7 +714,7 @@ export default function DiagnosticSessionDetailView({
                     </div>
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Diagnosis Mode
                       </p>
 
@@ -726,7 +726,7 @@ export default function DiagnosticSessionDetailView({
                     </div>
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Evidence Source
                       </p>
 
@@ -738,7 +738,7 @@ export default function DiagnosticSessionDetailView({
                 ) : (
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Activity
                       </p>
 
@@ -749,7 +749,7 @@ export default function DiagnosticSessionDetailView({
                     </div>
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Frequency
                       </p>
 
@@ -760,7 +760,7 @@ export default function DiagnosticSessionDetailView({
                     </div>
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                         Severity
                       </p>
 
@@ -772,21 +772,19 @@ export default function DiagnosticSessionDetailView({
                   </div>
                 )}
 
-                <div className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Explanation
-                  </h3>
+                <details className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                  <summary className="font-semibold text-slate-200">Why this result was suggested</summary>
 
                   <p className="mt-2 text-sm leading-relaxed text-slate-300">
                     {session.ai_explanation ||
                       'No explanation saved for this session.'}
                   </p>
-                </div>
+                </details>
 
                 {session.recommended_next_step && (
                   <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.045] p-4">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                      Recommended Next Step
+                      What to do next
                     </h3>
 
                     <p className="mt-2 text-sm leading-relaxed text-slate-300">
@@ -912,14 +910,14 @@ export default function DiagnosticSessionDetailView({
                                     className={`rounded-xl border p-4 ${proofView.className}`}
                                   >
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                                         {
                                           item.label
                                         }
                                       </p>
 
                                       <span
-                                        className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${proofView.badgeClassName}`}
+                                        className={`rounded border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${proofView.badgeClassName}`}
                                       >
                                         {
                                           proofView.label
@@ -996,7 +994,7 @@ export default function DiagnosticSessionDetailView({
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
                                     <span
-                                      className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                      className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${
                                         run.status ===
                                         'Resolved'
                                           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
@@ -1011,7 +1009,7 @@ export default function DiagnosticSessionDetailView({
                                       }
                                     </span>
 
-                                    <span className="text-[11px] text-slate-500">
+                                    <span className="text-xs text-slate-400">
                                       {new Date(
                                         run.created_at,
                                       ).toLocaleString(
@@ -1050,7 +1048,7 @@ export default function DiagnosticSessionDetailView({
                                           </span>
 
                                           <span
-                                            className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                            className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${
                                               attempt.verification_status ===
                                               'Resolved'
                                                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
@@ -1118,7 +1116,7 @@ export default function DiagnosticSessionDetailView({
 
                         {actions.length ===
                         0 ? (
-                          <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-500">
+                          <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-400">
                             No safe action is available for this saved diagnosis.
                           </div>
                         ) : (
@@ -1160,14 +1158,14 @@ export default function DiagnosticSessionDetailView({
                                         }
                                       </p>
 
-                                      <p className="mt-1 text-[11px] text-slate-500">
+                                      <p className="mt-1 text-xs text-slate-400">
                                         {
                                           action.risk
                                         }
                                       </p>
                                     </div>
 
-                                    <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                                    <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
                                       Backend candidate
                                     </span>
                                   </div>
