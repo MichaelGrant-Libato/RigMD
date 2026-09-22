@@ -66,6 +66,8 @@ public class WmiStorageProvider : IStorageProvider
             else if (types.Contains("SSD")) _primaryStorageType = "SSD";
             else if (types.Contains("HDD")) _primaryStorageType = "HDD";
             else if (types.Any()) _primaryStorageType = types.First();
+
+            _storageDrives.Sort((a, b) => (a.DiskIndex ?? 999).CompareTo(b.DiskIndex ?? 999));
         }
         catch
         {
