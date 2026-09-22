@@ -1,7 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { Menu, Microchip, Monitor } from 'lucide-react';
 import { motion } from 'motion/react';
-import DisplaySizeControl from './DisplaySizeControl';
 
 export type LiveDataStatus = 'live' | 'syncing' | 'offline' | 'stale';
 
@@ -106,8 +105,6 @@ export default function TopHeader({ title, subtitle }: TopHeaderProps) {
           <Monitor size={16} className={statusView.iconClassName} />
           {statusView.label}
         </div>
-
-        <DisplaySizeControl />
       </div>
     </header>
   );
