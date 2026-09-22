@@ -3,6 +3,7 @@ using RigMD.Api.Hubs;
 using RigMD.Application.Models;
 using System.Diagnostics;
 using System.Management;
+using System.Net.NetworkInformation;
 using RigMD.Infrastructure.Windows;
 
 namespace RigMD.Api.Services;
@@ -17,6 +18,11 @@ public class TelemetryBackgroundService : BackgroundService
     private PerformanceCounter? _threadCounter;
     private PerformanceCounter? _handleCounter;
     private PerformanceCounter? _processCounter;
+
+    private readonly Dictionary<string, DiskCounters> _diskCounters = new(StringComparer.OrdinalIgnoreCase);
+    private long _prevNetworkBytesSent;
+    private long _prevNetworkBytesReceived;
+    private DateTime _prevNetworkTime = DateTime.MinValue;
 
     public TelemetryBackgroundService(
         IHubContext<TelemetryHub> hubContext, 
@@ -102,34 +108,11 @@ public class TelemetryBackgroundService : BackgroundService
                 dto.GpuMemoryUsedGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryUsedGb() ?? 0, 1);
                 dto.GpuMemoryTotalGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryTotalGb() ?? 0, 1);
 
-                // Disks
-                // We could iterate Win32_PerfFormattedData_PerfDisk_PhysicalDisk but it takes ~300ms.
-                // Let's grab it fast using PerformanceCounterCategory
-                try
-                {
-                    var cat = new PerformanceCounterCategory("PhysicalDisk");
-                    var instances = cat.GetInstanceNames();
-                    foreach (var inst in instances)
-                    {
-                        if (inst == "_Total") continue;
-                        
-                        using var activeTime = new PerformanceCounter("PhysicalDisk", "% Disk Time", inst);
-                        using var readBytes = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", inst);
-                        using var writeBytes = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", inst);
-                        
-                        // First read usually returns 0 for rate counters
-                        activeTime.NextValue(); readBytes.NextValue(); writeBytes.NextValue();
-                        
-                        dto.Disks.Add(new DiskTelemetryDto
-                        {
-                            DeviceId = inst,
-                            ActiveTimePercent = Math.Clamp(Math.Round((double)activeTime.NextValue(), 1), 0, 100),
-                            ReadKbps = Math.Round(readBytes.NextValue() / 1024.0, 1),
-                            WriteKbps = Math.Round(writeBytes.NextValue() / 1024.0, 1)
-                        });
-                    }
-                }
-                catch { }
+                // Disks (Persistent performance counters for real live activity & rates)
+                UpdateDisks(dto);
+
+                // Network (Real-time live throughput calculation in Kbps)
+                UpdateNetwork(dto);
 
                 await _hubContext.Clients.All.SendAsync("ReceiveTelemetry", dto, stoppingToken);
             }
@@ -139,6 +122,173 @@ public class TelemetryBackgroundService : BackgroundService
             }
 
             await Task.Delay(1000, stoppingToken);
+        }
+
+        foreach (var counters in _diskCounters.Values)
+        {
+            counters.Dispose();
+        }
+        _diskCounters.Clear();
+    }
+
+    private void UpdateDisks(TelemetryUpdateDto dto)
+    {
+        try
+        {
+            var cat = new PerformanceCounterCategory("PhysicalDisk");
+            var instances = cat.GetInstanceNames().Where(i => i != "_Total").ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var staleKeys = _diskCounters.Keys.Where(k => !instances.Contains(k)).ToList();
+            foreach (var key in staleKeys)
+            {
+                if (_diskCounters.Remove(key, out var oldCounters))
+                {
+                    oldCounters.Dispose();
+                }
+            }
+
+            foreach (var inst in instances)
+            {
+                if (!_diskCounters.TryGetValue(inst, out var counters))
+                {
+                    counters = new DiskCounters(inst);
+                    _diskCounters[inst] = counters;
+                    continue;
+                }
+
+                double activeTime = 0;
+                double readKbps = 0;
+                double writeKbps = 0;
+
+                try
+                {
+                    if (counters.ActiveTime != null)
+                    {
+                        var raw = counters.ActiveTime.NextValue();
+                        activeTime = Math.Clamp(Math.Round((double)raw, 1), 0, 100);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (counters.ReadBytes != null)
+                    {
+                        var raw = counters.ReadBytes.NextValue();
+                        readKbps = Math.Round(raw / 1024.0, 1);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (counters.WriteBytes != null)
+                    {
+                        var raw = counters.WriteBytes.NextValue();
+                        writeKbps = Math.Round(raw / 1024.0, 1);
+                    }
+                }
+                catch { }
+
+                dto.Disks.Add(new DiskTelemetryDto
+                {
+                    DeviceId = inst,
+                    ActiveTimePercent = activeTime,
+                    ReadKbps = readKbps,
+                    WriteKbps = writeKbps
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read physical disk counters");
+        }
+    }
+
+    private void UpdateNetwork(TelemetryUpdateDto dto)
+    {
+        try
+        {
+            long currentBytesSent = 0;
+            long currentBytesReceived = 0;
+
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+            foreach (var nic in interfaces)
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up) continue;
+                if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                if (nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+
+                var stats = nic.GetIPStatistics();
+                currentBytesSent += stats.BytesSent;
+                currentBytesReceived += stats.BytesReceived;
+            }
+
+            var now = DateTime.UtcNow;
+            if (_prevNetworkTime != DateTime.MinValue)
+            {
+                var elapsedSeconds = (now - _prevNetworkTime).TotalSeconds;
+                if (elapsedSeconds > 0.1)
+                {
+                    var deltaSent = currentBytesSent - _prevNetworkBytesSent;
+                    var deltaRecv = currentBytesReceived - _prevNetworkBytesReceived;
+
+                    if (deltaSent >= 0 && deltaRecv >= 0)
+                    {
+                        var sendKbps = Math.Round((deltaSent * 8.0) / 1024.0 / elapsedSeconds, 1);
+                        var recvKbps = Math.Round((deltaRecv * 8.0) / 1024.0 / elapsedSeconds, 1);
+
+                        dto.NetworkSendKbps = sendKbps;
+                        dto.NetworkReceiveKbps = recvKbps;
+                    }
+                }
+            }
+
+            _prevNetworkBytesSent = currentBytesSent;
+            _prevNetworkBytesReceived = currentBytesReceived;
+            _prevNetworkTime = now;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read network statistics");
+        }
+    }
+
+    private sealed class DiskCounters : IDisposable
+    {
+        public PerformanceCounter? ActiveTime { get; }
+        public PerformanceCounter? ReadBytes { get; }
+        public PerformanceCounter? WriteBytes { get; }
+
+        public DiskCounters(string instance)
+        {
+            try
+            {
+                ActiveTime = new PerformanceCounter("PhysicalDisk", "% Disk Time", instance, true);
+                ActiveTime.NextValue();
+            }
+            catch { }
+
+            try
+            {
+                ReadBytes = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", instance, true);
+                ReadBytes.NextValue();
+            }
+            catch { }
+
+            try
+            {
+                WriteBytes = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", instance, true);
+                WriteBytes.NextValue();
+            }
+            catch { }
+        }
+
+        public void Dispose()
+        {
+            try { ActiveTime?.Dispose(); } catch { }
+            try { ReadBytes?.Dispose(); } catch { }
+            try { WriteBytes?.Dispose(); } catch { }
         }
     }
 }
