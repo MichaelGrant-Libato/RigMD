@@ -86,7 +86,7 @@ public class HardwareController : ControllerBase
                     charge_percent = profile.Battery.ChargePercent,
                     health_status = profile.Battery.HealthStatus
                 } : null,
-                network = profile.Network != null ? new
+                network = profile.Network != null && profile.Network.HasActiveAdapter ? new
                 {
                     is_wifi = profile.Network.IsWifi,
                     wifi_signal_strength = profile.Network.WifiSignalStrength,

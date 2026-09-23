@@ -25,7 +25,7 @@ public class WindowsNetworkProvider :
 
         try
         {
-            var activeAdapter =
+            var candidates =
                 NetworkInterface
                     .GetAllNetworkInterfaces()
                     .Where(adapter =>
@@ -45,12 +45,21 @@ public class WindowsNetworkProvider :
                         Properties =
                             adapter.GetIPProperties()
                     })
-                    .FirstOrDefault(item =>
+                    .Where(item =>
                         item.Properties
                             .UnicastAddresses
                             .Any(address =>
                                 address.Address.AddressFamily ==
-                                    AddressFamily.InterNetwork));
+                                    AddressFamily.InterNetwork))
+                    .ToList();
+
+            // Prioritize an adapter that has an active default gateway (routed to LAN/Internet)
+            var activeAdapter =
+                candidates.FirstOrDefault(item =>
+                    item.Properties.GatewayAddresses.Any(gateway =>
+                        gateway.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.Any.Equals(gateway.Address)))
+                ?? candidates.FirstOrDefault();
 
             if (activeAdapter == null)
             {
@@ -72,6 +81,29 @@ public class WindowsNetworkProvider :
                     .Any(address =>
                         address.Address.AddressFamily ==
                             AddressFamily.InterNetwork);
+
+            var ipv4 = activeAdapter.Properties
+                .UnicastAddresses
+                .FirstOrDefault(address =>
+                    address.Address.AddressFamily ==
+                        AddressFamily.InterNetwork);
+            if (ipv4 != null)
+            {
+                result.IpAddress = ipv4.Address.ToString();
+            }
+
+            try
+            {
+                var physAddress = activeAdapter.Adapter.GetPhysicalAddress();
+                if (physAddress != null && physAddress.GetAddressBytes().Length > 0)
+                {
+                    result.MacAddress = string.Join(":", physAddress.GetAddressBytes().Select(b => b.ToString("X2")));
+                }
+            }
+            catch
+            {
+                // Ignore physical address error
+            }
 
             result.HasDefaultGateway =
                 activeAdapter.Properties
