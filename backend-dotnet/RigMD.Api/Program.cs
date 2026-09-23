@@ -136,13 +136,32 @@ app.UseHttpsRedirection();
 // Serve React Frontend
 // ---------------------------------------------------------------
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+            ctx.Context.Response.Headers["Pragma"] = "no-cache";
+            ctx.Context.Response.Headers["Expires"] = "0";
+        }
+    }
+});
 
 app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
 app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");
 app.MapHub<RigMD.Api.Hubs.TelemetryHub>("/hubs/telemetry");
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+        ctx.Context.Response.Headers["Pragma"] = "no-cache";
+        ctx.Context.Response.Headers["Expires"] = "0";
+    }
+});
 
 app.Run();
 

@@ -92,7 +92,7 @@ Filename: "{sys}\sc.exe"; \
 Filename: "{app}\Desktop\RigMD.Desktop.exe"; \
     Description: "Launch RigMD"; \
     WorkingDir: "{app}\Desktop"; \
-    Flags: nowait postinstall skipifsilent
+    Flags: nowait postinstall skipifsilent runascurrentuser
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; \

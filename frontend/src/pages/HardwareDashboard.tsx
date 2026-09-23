@@ -90,6 +90,28 @@ function agentSnapshotToHardwareStats(
       health_status: hardware.battery.healthStatus,
     } : null,
 
+    network: (hardware.network || (hardware as unknown as { Network?: any }).Network) ? {
+      is_wifi: Boolean(hardware.network?.isWifi ?? (hardware as unknown as { Network?: any }).Network?.IsWifi),
+      wifi_signal_strength: hardware.network?.wifiSignalStrength ?? (hardware as unknown as { Network?: any }).Network?.WifiSignalStrength ?? null,
+      mac_address: hardware.network?.macAddress ?? (hardware as unknown as { Network?: any }).Network?.MacAddress ?? '',
+      ip_address: hardware.network?.ipAddress ?? (hardware as unknown as { Network?: any }).Network?.IpAddress ?? '',
+      ping_latency_ms: hardware.network?.pingLatencyMs ?? (hardware as unknown as { Network?: any }).Network?.PingLatencyMs ?? undefined,
+      packet_loss_percent: hardware.network?.packetLossPercent ?? (hardware as unknown as { Network?: any }).Network?.PacketLossPercent ?? undefined,
+    } : null,
+
+    displays: (hardware.displays || (hardware as unknown as { Displays?: any[] }).Displays || []).map((d: any) => ({
+      name: d.name ?? d.Name ?? '',
+      resolution: d.resolution ?? d.Resolution ?? '',
+      refresh_rate: d.refreshRate ?? d.RefreshRate ?? 0,
+    })),
+
+    device_errors: (hardware.deviceErrors || (hardware as unknown as { DeviceErrors?: any[] }).DeviceErrors || []).map((e: any) => ({
+      name: e.name ?? e.Name ?? '',
+      device_id: e.deviceId ?? e.DeviceId ?? '',
+      error_code: e.errorCode ?? e.ErrorCode ?? 0,
+      description: e.description ?? e.Description ?? '',
+    })),
+
     cpu: {
       name: hardware.cpu.name,
       usage_percent: hardware.cpu.usagePercent,

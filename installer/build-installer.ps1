@@ -33,6 +33,11 @@ $AgentPublishDirectory =
         $RepoRoot `
         "backend-dotnet\RigMD.Agent\bin\Release\net10.0-windows\win-x64\publish"
 
+$FrontendDirectory =
+    Join-Path `
+        $RepoRoot `
+        "frontend"
+
 $InstallerScript =
     Join-Path `
         $PSScriptRoot `
@@ -61,7 +66,7 @@ Write-Host " RigMD Combined Installer Build"
 Write-Host "======================================"
 Write-Host ""
 
-Write-Host "[1/7] Checking required tools..."
+Write-Host "[1/8] Checking required tools..."
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue))
 {
@@ -78,7 +83,26 @@ Write-Host "Inno Setup compiler found: $InnoCompiler"
 Write-Host "Required tools found."
 Write-Host ""
 
-Write-Host "[2/7] Cleaning previous publish output..."
+Write-Host "[2/8] Building React frontend..."
+
+Push-Location $FrontendDirectory
+try
+{
+    & cmd.exe /c "npm run build"
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "React frontend build failed."
+    }
+}
+finally
+{
+    Pop-Location
+}
+
+Write-Host "React frontend build completed."
+Write-Host ""
+
+Write-Host "[3/8] Cleaning previous publish output..."
 
 foreach ($directory in @(
     $DesktopPublishDirectory,
@@ -97,7 +121,7 @@ foreach ($directory in @(
 Write-Host "Previous publish output removed."
 Write-Host ""
 
-Write-Host "[3/7] Publishing self-contained RigMD Desktop..."
+Write-Host "[4/8] Publishing self-contained RigMD Desktop..."
 
 & dotnet publish `
     $DesktopProject `
@@ -123,7 +147,7 @@ if (-not (Test-Path $DesktopExecutable))
 Write-Host "RigMD Desktop publish completed."
 Write-Host ""
 
-Write-Host "[4/7] Publishing self-contained RigMD API..."
+Write-Host "[5/8] Publishing self-contained RigMD API..."
 
 & dotnet publish `
     $ApiProject `
@@ -179,7 +203,7 @@ if (-not (Test-Path $ApiFrontendIndex))
 Write-Host "RigMD API publish completed."
 Write-Host ""
 
-Write-Host "[5/7] Publishing self-contained RigMD Agent..."
+Write-Host "[6/8] Publishing self-contained RigMD Agent..."
 
 & dotnet publish `
     $AgentProject `
@@ -215,7 +239,7 @@ if (-not (Test-Path $AgentRuntimeConfig))
 Write-Host "RigMD Agent publish completed."
 Write-Host ""
 
-Write-Host "[6/7] Verifying installer inputs..."
+Write-Host "[7/8] Verifying installer inputs..."
 
 Write-Host "Desktop:"
 Write-Host $DesktopExecutable
@@ -234,7 +258,7 @@ Write-Host $AgentExecutable
 
 Write-Host ""
 
-Write-Host "[7/7] Compiling RigMD installer..."
+Write-Host "[8/8] Compiling RigMD installer..."
 
 & $InnoCompiler `
     $InstallerScript
