@@ -7,6 +7,8 @@ export interface AutonomyActionDef {
   description?: string;
   category?: string;
   riskLevel?: string;
+  safetyTier?: string;
+  toolArgumentsJson?: string;
   isReversible?: boolean;
   requiresUserConfirmation?: boolean;
 }
@@ -48,12 +50,72 @@ export interface AutonomyAttempt {
   notes?: string;
 }
 
+export interface ReActTraceStep {
+  stepIndex: number;
+  stepType: string;
+  title: string;
+  content: string;
+  toolName?: string;
+  toolArgumentsJson?: string;
+  observationJson?: string;
+  durationMs?: number;
+  timestampUtc?: string;
+}
+
+export interface ToolDryRunPreview {
+  toolName: string;
+  displayName: string;
+  safetyTier: string | number;
+  canExecute: boolean;
+  requiresAdmin: boolean;
+  isRunningAsAdmin: boolean;
+  requiresUserConfirmation: boolean;
+  whatWillHappen: string;
+  affectedItemsCount: number;
+  estimatedBytesAffected: number;
+  affectedTargets?: string[];
+  warnings?: string[];
+}
+
+export interface ProposedToolInvocation {
+  toolName: string;
+  displayName: string;
+  safetyTier: string;
+  argumentsJson: string;
+  rootCauseAnalysis: string;
+  remediationRationale: string;
+  evidenceCitations?: string[];
+  dryRunPreview?: ToolDryRunPreview;
+}
+
+export interface PostExecutionVerificationReport {
+  verificationToolName: string;
+  status: string | number;
+  summary: string;
+  beforeSnapshotJson?: string;
+  afterSnapshotJson?: string;
+  metricDeltas?: AutonomyExecutionProof[];
+}
+
+export interface RegisteredAgentTool {
+  name: string;
+  displayName: string;
+  description: string;
+  safetyTier: string;
+}
+
 export interface AutonomyResult {
+  engineMode?: string;
+  rootCauseAnalysis?: string;
   plan?: AutonomyPlan;
   safety?: AutonomySafety;
   execution?: AutonomyExecution;
   verification?: string | number;
   attempts?: AutonomyAttempt[];
+  reasoningSteps?: ReActTraceStep[];
+  proposedTool?: ProposedToolInvocation;
+  dryRunPreview?: ToolDryRunPreview;
+  verificationReport?: PostExecutionVerificationReport;
   escalated?: boolean;
   trace?: string;
 }
@@ -62,6 +124,8 @@ export interface AutonomyRequest {
   sessionId: string;
   diagnosedCategory: string;
   userConsentProvided?: boolean;
+  toolName?: string;
+  toolArgumentsJson?: string;
 }
 
 export interface MemoryAppCandidate {
@@ -87,7 +151,10 @@ interface CloseSelectedAppRequest {
 // --- SignalR Live Streaming Setup ---
 let remediationHubConnection: signalR.HubConnection | null = null;
 
-export async function startRemediationStream(onProgress: (message: string) => void) {
+export async function startRemediationStream(
+  onProgress: (message: string) => void,
+  onReActStep?: (step: ReActTraceStep) => void,
+) {
   if (remediationHubConnection) {
     await stopRemediationStream();
   }
@@ -100,6 +167,12 @@ export async function startRemediationStream(onProgress: (message: string) => vo
   remediationHubConnection.on('ReceiveProgress', (message: string) => {
     onProgress(message);
   });
+
+  if (onReActStep) {
+    remediationHubConnection.on('ReceiveReActStep', (step: ReActTraceStep) => {
+      onReActStep(step);
+    });
+  }
 
   try {
     await remediationHubConnection.start();
@@ -134,6 +207,8 @@ export async function runAutonomyExecution({
   sessionId,
   diagnosedCategory,
   userConsentProvided = false,
+  toolName,
+  toolArgumentsJson,
 }: AutonomyRequest) {
   const response = await apiPost<AutonomyResult>(
     '/api/autonomy/execute',
@@ -141,9 +216,32 @@ export async function runAutonomyExecution({
       sessionId,
       diagnosedCategory,
       userConsentProvided,
+      toolName,
+      toolArgumentsJson,
     },
   );
 
+  return response.data;
+}
+
+export async function getRegisteredAgentTools() {
+  const response = await apiGet<RegisteredAgentTool[]>(
+    '/api/autonomy/tools',
+  );
+  return response.data ?? [];
+}
+
+export async function previewAgentTool(
+  toolName: string,
+  args: Record<string, unknown> = {},
+) {
+  const response = await apiPost<ToolDryRunPreview>(
+    '/api/autonomy/tools/preview',
+    {
+      toolName,
+      arguments: args,
+    },
+  );
   return response.data;
 }
 
