@@ -562,56 +562,14 @@ export default function HardwareDashboard() {
   const deviceName = stats?.device_name?.trim() || 'Detecting Device';
 
   const fetchHardware = useCallback(async () => {
-    if (!AGENT_ID) {
-      setError('VITE_AGENT_ID is not configured.');
-      return;
-    }
-
     try {
-      const [statusResponse, snapshotResponse] =
-        await Promise.all([
-          apiGet<AgentStatus>(
-            `/api/agent/${AGENT_ID}`,
-            {
-              headers: {
-                'X-Client-ID': AGENT_ID,
-              },
-            }
-          ),
-
-          apiGet<AgentSnapshotResponse>(
-            `/api/agent/${AGENT_ID}/snapshot`,
-            {
-              headers: {
-                'X-Client-ID': AGENT_ID,
-              },
-            }
-          ),
-        ]);
-
-      setAgentStatus(statusResponse.data);
-
-      setStats(
-        agentSnapshotToHardwareStats(
-          snapshotResponse.data
-        )
-      );
-
-      setHardwareUpdatedAt(
-        new Date(snapshotResponse.data.capturedAt)
-      );
-
+      const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
+      setStats(liveResponse.data);
+      setHardwareUpdatedAt(new Date());
       setError(null);
     } catch {
-      try {
-        const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
-        setStats(liveResponse.data);
-        setHardwareUpdatedAt(new Date());
-        setError(null);
-      } catch {
-        setAgentStatus(null);
-        setError('Unable to retrieve Windows Agent telemetry.');
-      }
+      setAgentStatus(null);
+      setError('Unable to retrieve Windows hardware telemetry.');
     }
   }, []);
 

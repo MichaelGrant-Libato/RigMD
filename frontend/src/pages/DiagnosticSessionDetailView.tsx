@@ -24,7 +24,6 @@ import {
   drawerSlideRight,
   pageFade,
   pageTransition,
-  staggerContainer,
 } from '../lib/motion';
 
 import { apiFetch } from '../lib/api';
@@ -308,14 +307,6 @@ export default function DiagnosticSessionDetailView({
     );
 
   const [
-    actions,
-    setActions,
-  ] =
-    useState<RemediationAction[]>(
-      [],
-    );
-
-  const [
     loading,
     setLoading,
   ] =
@@ -364,52 +355,12 @@ export default function DiagnosticSessionDetailView({
         setSession(
           loadedSession,
         );
-
-        if (
-          loadedSession
-            ?.diagnosed_category &&
-          !isNoActiveIssue(
-            loadedSession.diagnosed_category,
-          ) &&
-          shouldShowSafeActions(
-            loadedSession,
-          )
-        ) {
-          const actionsResponse =
-            await apiFetch(
-              `/api/remediation/actions?category=${encodeURIComponent(
-                loadedSession.diagnosed_category,
-              )}`,
-            );
-
-          if (
-            !actionsResponse.ok
-          ) {
-            throw new Error(
-              `Server returned status ${actionsResponse.status}`,
-            );
-          }
-
-          const actionsData =
-            await actionsResponse.json();
-
-          setActions(
-            Array.isArray(
-              actionsData?.actions,
-            )
-              ? actionsData.actions
-              : [],
-          );
-        } else {
-          setActions([]);
-        }
       } catch {
         setError(
           'Could not open this diagnostic session.',
         );
 
         setSession(null);
-        setActions([]);
       } finally {
         setLoading(false);
       }
@@ -1113,67 +1064,6 @@ export default function DiagnosticSessionDetailView({
                             sessionId
                           }
                         />
-
-                        {actions.length ===
-                        0 ? (
-                          <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4 text-sm text-slate-400">
-                            No safe action is available for this saved diagnosis.
-                          </div>
-                        ) : (
-                          <motion.div
-                            variants={
-                              staggerContainer
-                            }
-                            initial="hidden"
-                            animate="visible"
-                            className="space-y-3"
-                          >
-                            {actions.map(
-                              (
-                                action,
-                              ) => (
-                                <motion.div
-                                  key={
-                                    action.id
-                                  }
-                                  variants={
-                                    cardFadeUp
-                                  }
-                                  transition={
-                                    cardTransition
-                                  }
-                                  className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4"
-                                >
-                                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                                    <div>
-                                      <h4 className="text-sm font-bold text-cyan-400">
-                                        {
-                                          action.label
-                                        }
-                                      </h4>
-
-                                      <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                                        {
-                                          action.description
-                                        }
-                                      </p>
-
-                                      <p className="mt-1 text-xs text-slate-400">
-                                        {
-                                          action.risk
-                                        }
-                                      </p>
-                                    </div>
-
-                                    <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
-                                      Backend candidate
-                                    </span>
-                                  </div>
-                                </motion.div>
-                              ),
-                            )}
-                          </motion.div>
-                        )}
                       </div>
                     </motion.section>
                   ) : (

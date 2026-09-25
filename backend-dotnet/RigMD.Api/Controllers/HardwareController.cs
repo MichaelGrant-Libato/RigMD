@@ -149,6 +149,17 @@ public class HardwareController : ControllerBase
         }
     }
 
+    [HttpGet("snapshot")]
+    public IActionResult GetSnapshot()
+    {
+        return Ok(new
+        {
+            agentId = "local",
+            capturedAt = DateTime.UtcNow,
+            Hardware = _profileService.GetLiveSystemProfile()
+        });
+    }
+
     [HttpPost("refresh")]
     public IActionResult RefreshHardwareCache()
     {

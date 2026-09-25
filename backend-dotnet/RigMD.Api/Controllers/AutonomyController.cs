@@ -878,6 +878,79 @@ public class AutonomyController : ControllerBase
                processName.Equals("steam", StringComparison.OrdinalIgnoreCase);
     }
 
+    public class OpenTargetRequest
+    {
+        public string Target { get; set; } = string.Empty;
+    }
+
+    [HttpPost("open-target")]
+    [HttpPost("/api/remediation/open-target")]
+    public IActionResult OpenTarget([FromBody] OpenTargetRequest payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.Target))
+        {
+            return BadRequest(new { detail = "target is required" });
+        }
+
+        var normalizedTarget = payload.Target
+            .Trim()
+            .Replace("_", " ")
+            .Replace("-", " ")
+            .ToLowerInvariant();
+
+        var (command, toolName) = normalizedTarget switch
+        {
+            "task manager" => ("taskmgr.exe", "Task Manager"),
+            "device manager" => ("devmgmt.msc", "Device Manager"),
+            "startup apps" => ("ms-settings:startupapps", "Startup Apps"),
+            "reliability monitor" => ("perfmon /rel", "Reliability Monitor"),
+            "storage settings" => ("ms-settings:storagesense", "Storage Settings"),
+            "backup settings" => ("ms-settings:backup", "Backup Settings"),
+            "power settings" => ("ms-settings:powersleep", "Power Settings"),
+            _ => (string.Empty, string.Empty)
+        };
+
+        if (string.IsNullOrEmpty(command))
+        {
+            return Ok(new
+            {
+                success = false,
+                summary = $"Unknown or unsupported verification target: {payload.Target}"
+            });
+        }
+
+        try
+        {
+            var parts = command.Split(' ', 2);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = parts[0],
+                Arguments = parts.Length > 1 ? parts[1] : string.Empty,
+                UseShellExecute = true
+            });
+
+            return Ok(new
+            {
+                success = true,
+                summary = $"{toolName} opened for verification.",
+                proof = new[]
+                {
+                    new
+                    {
+                        label = "Windows tool opened",
+                        status = "completed",
+                        meaning = $"RigMD opened {toolName}.",
+                        after = toolName
+                    }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, summary = ex.Message });
+        }
+    }
+
     private sealed class CloseAppOutcome
     {
         public string ProcessName { get; set; } = string.Empty;

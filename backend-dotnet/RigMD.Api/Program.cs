@@ -50,10 +50,6 @@ builder.Services.AddScoped<
     RemediationRepository>();
 
 builder.Services.AddScoped<
-    IAgentRepository,
-    AgentRepository>();
-
-builder.Services.AddScoped<
     IAutomaticDiagnosisService,
     AutomaticDiagnosisService>();
 
@@ -82,24 +78,17 @@ builder.Services.AddSingleton<RigMD.Infrastructure.Windows.IHardwareMonitorServi
 // Application Services
 // ---------------------------------------------------------------
 builder.Services.AddScoped<RigMD.Infrastructure.Ai.OfflineAiExplainer>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.GeminiAiExplainer>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.OfflineAiExplainer>();
 builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService,      RigMD.Application.Services.DiagnosticEngineService>();
 builder.Services.AddScoped<ResolutionService>();
 builder.Services.AddScoped<RecurringPatternService>();
 builder.Services.AddScoped<WarningSignService>();
 
 // ---------------------------------------------------------------
-// Autonomy
+// Autonomy (Phase 1 Reset — Real OS Executor retained)
 // ---------------------------------------------------------------
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationRegistry,    RigMD.Application.Services.Autonomy.RemediationRegistry>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationPlanner,     RigMD.Application.Services.Autonomy.RemediationPlanner>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IPivotEngine,            RigMD.Application.Services.Autonomy.PivotEngine>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.ISafetyPolicy,           RigMD.Application.Services.Autonomy.SafetyPolicy>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor,    RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IVerificationService,    RigMD.Infrastructure.Remediation.VerificationService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IDryRunRemediationExecutor, RigMD.Application.Services.Autonomy.DryRunRemediationExecutor>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRollbackManager,        RigMD.Infrastructure.Remediation.RollbackManager>();
 
 builder.Services.AddHostedService<RigMD.Api.Services.TelemetryBackgroundService>();
 

@@ -65,23 +65,6 @@ interface NewDiagnosisViewProps {
   onDiagnosisComplete?: (sessionId: string) => void;
 }
 
-interface AgentCommandResponse {
-  id: string;
-  agentId: string;
-  commandType: string;
-
-  status:
-    | 'pending'
-    | 'running'
-    | 'completed'
-    | 'failed';
-
-  requestedAt: string;
-  claimedAt: string | null;
-  completedAt: string | null;
-  errorMessage: string | null;
-}
-
 type DiagnosisMode =
   | 'full'
   | 'component'
@@ -162,22 +145,6 @@ interface DiagnosisScenario {
 
 const AGENT_ID =
   import.meta.env.VITE_AGENT_ID;
-
-const AUTOMATIC_SCAN_TIMEOUT_MS =
-  45_000;
-
-const AUTOMATIC_SCAN_POLL_MS =
-  1_500;
-
-const wait = (
-  milliseconds: number,
-) =>
-  new Promise<void>((resolve) => {
-    window.setTimeout(
-      resolve,
-      milliseconds,
-    );
-  });
 
 const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
   {
@@ -1145,25 +1112,6 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
         return;
       }
 
-      if (!AGENT_ID) {
-        setSnapshot(null);
-        setReport(null);
-        setRemediationActions(
-          [],
-        );
-        setCommandId(null);
-
-        setError(
-          'No RigMD Agent ID is configured. Add VITE_AGENT_ID to the frontend environment file.',
-        );
-
-        setDiagnosisStage(
-          'failed',
-        );
-
-        return;
-      }
-
       setDiagnosisStage(
         'requesting',
       );
@@ -1177,197 +1125,37 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       setError(null);
 
       try {
-        const newCommandId: string | null = null;
-        let freshSnapshot: AgentSnapshotResponse | null = null;
-        let automaticReport: DiagnosticReport | null = null;
+        setDiagnosisStage('scanning');
 
-        if (AGENT_ID === 'local') {
-          // --- LOCAL DIRECT MODE ---
-          setDiagnosisStage('scanning');
-          
-          const localResponse = await apiPost<DiagnosticReport>(
-            '/api/diagnosis/local-scan',
-            {
-              mode: diagnosisMode,
-              componentIds: diagnosisMode === 'component' ? selectedComponents : [],
-              scenarioId: diagnosisMode === 'scenario' ? selectedScenarioId : null,
-            },
-            {
-              headers: { 'X-Client-ID': AGENT_ID },
-            }
-          );
-          
-          automaticReport = localResponse.data;
-          
-          // We need to fetch the snapshot directly since local-scan doesn't return it
-          const snapshotResponse = await apiGet<AgentSnapshotResponse>(
-            `/api/agent/${AGENT_ID}/snapshot`,
-            {
-              headers: { 'X-Client-ID': AGENT_ID },
-            }
-          );
-          freshSnapshot = snapshotResponse.data;
-          
-        } else {
-          // --- HYBRID CLOUD MODE ---
-          const createResponse =
-            await apiPost<AgentCommandResponse>(
-              `/api/agent/${AGENT_ID}/scan-request`,
-              {},
-              {
-                headers: {
-                  'X-Client-ID':
-                    AGENT_ID,
-                },
-              },
-            );
-
-        const newCommandId =
-          createResponse.data.id;
-
-        if (!newCommandId) {
-          throw new Error(
-            'RigMD did not return a scan command ID.',
-          );
-        }
-
-        setCommandId(
-          newCommandId,
-        );
-
-        setDiagnosisStage(
-          'scanning',
-        );
-
-        const deadline =
-          Date.now() +
-          AUTOMATIC_SCAN_TIMEOUT_MS;
-
-        let completed =
-          false;
-
-        while (
-          Date.now() <
-          deadline
-        ) {
-          await wait(
-            AUTOMATIC_SCAN_POLL_MS,
-          );
-
-          const commandResponse =
-            await apiGet<AgentCommandResponse>(
-              `/api/agent/${AGENT_ID}/commands/${newCommandId}`,
-              {
-                headers: {
-                  'X-Client-ID':
-                    AGENT_ID,
-                },
-              },
-            );
-
-          const command =
-            commandResponse.data;
-
-          if (
-            command.status ===
-            'completed'
-          ) {
-            completed =
-              true;
-
-            break;
+        const localResponse = await apiPost<DiagnosticReport>(
+          '/api/diagnosis/local-scan',
+          {
+            mode: diagnosisMode,
+            componentIds: diagnosisMode === 'component' ? selectedComponents : [],
+            scenarioId: diagnosisMode === 'scenario' ? selectedScenarioId : null,
+          },
+          {
+            headers: { 'X-Client-ID': AGENT_ID || 'local' },
           }
-
-          if (
-            command.status ===
-            'failed'
-          ) {
-            throw new Error(
-              command.errorMessage ||
-                'The RigMD Agent reported that the scan failed.',
-            );
-          }
-        }
-
-        if (!completed) {
-          throw new Error(
-            'The RigMD Agent did not finish the scan within 45 seconds.',
-          );
-        }
-
-        setDiagnosisStage(
-          'loading-evidence',
         );
 
-        const snapshotResponse =
-          await apiGet<AgentSnapshotResponse>(
-            `/api/agent/${AGENT_ID}/snapshot`,
-            {
-              headers: {
-                'X-Client-ID':
-                  AGENT_ID,
-              },
-            },
-          );
+        const automaticReport = localResponse.data;
 
-        const freshSnapshot =
-          snapshotResponse.data;
+        const snapshotResponse = await apiGet<AgentSnapshotResponse>(
+          '/api/hardware/snapshot',
+          {
+            headers: { 'X-Client-ID': AGENT_ID || 'local' },
+          }
+        );
+
+        if (snapshotResponse.data) {
+          setSnapshot(snapshotResponse.data);
+        }
 
         if (
-          !freshSnapshot?.hardware
+          !automaticReport ||
+          !automaticReport.diagnosed_category
         ) {
-          throw new Error(
-            'The scan completed, but no hardware evidence was returned.',
-          );
-        }
-
-        setSnapshot(
-          freshSnapshot,
-        );
-
-      setDiagnosisStage(
-        'analyzing',
-      );
-
-          const automaticResponse =
-            await apiPost<DiagnosticReport>(
-              '/api/diagnosis/automatic',
-              {
-                agentId:
-                  AGENT_ID,
-
-                commandId:
-                  newCommandId,
-
-                mode:
-                  diagnosisMode,
-
-                componentIds:
-                  diagnosisMode === 'component'
-                    ? selectedComponents
-                    : [],
-
-                scenarioId:
-                  diagnosisMode === 'scenario'
-                    ? selectedScenarioId
-                    : null,
-              },
-              {
-                headers: {
-                  'X-Client-ID':
-                    AGENT_ID,
-                },
-              },
-            );
-
-          automaticReport =
-            automaticResponse.data;
-        }
-
-      if (
-        !automaticReport ||
-        !automaticReport.diagnosed_category
-      ) {
         throw new Error(
           'RigMD completed the scan, but no diagnostic interpretation was returned.',
         );
