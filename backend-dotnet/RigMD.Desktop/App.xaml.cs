@@ -97,11 +97,19 @@ public partial class App : System.Windows.Application
             }
         };
 
+#if DEBUG
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "ASPNETCORE_ENVIRONMENT"] = "Development";
+
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "DOTNET_ENVIRONMENT"] = "Development";
+#else
         _apiProcess.StartInfo.EnvironmentVariables[
             "ASPNETCORE_ENVIRONMENT"] = "Production";
 
         _apiProcess.StartInfo.EnvironmentVariables[
             "DOTNET_ENVIRONMENT"] = "Production";
+#endif
 
         _apiProcess.StartInfo.EnvironmentVariables[
             "ASPNETCORE_URLS"] = ApiUrl;

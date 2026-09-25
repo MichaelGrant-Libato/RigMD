@@ -30,22 +30,22 @@ public class ResolutionService
             return CheckSevereResourceResolution(hardware);
         }
 
-        if (category.Contains("thermal condition"))
+        if (category.Contains("thermal condition") || category.Contains("thermal load"))
         {
             return CheckThermalResolution(hardware);
         }
 
-        if (category.Contains("elevated cpu"))
+        if (category.Contains("elevated cpu") || category.Contains("cpu & thermal") || category.Contains("cpu load"))
         {
             return CheckCpuResolution(hardware);
         }
 
-        if (category.Contains("os performance"))
+        if (category.Contains("os performance") || category.Contains("boot and startup"))
         {
             return CheckOsPerformanceResolution(hardware);
         }
 
-        if (category.Contains("high memory pressure"))
+        if (category.Contains("high memory pressure") || category.Contains("memory resource pressure") || category.Contains("memory pressure / high ram"))
         {
             return CheckMemoryResolution(
                 hardware,
@@ -58,7 +58,7 @@ public class ResolutionService
             return CheckWorkloadMemoryResolution(hardware);
         }
 
-        if (category.Contains("elevated memory usage"))
+        if (category.Contains("elevated memory usage") || category.Contains("memory"))
         {
             return CheckMemoryResolution(
                 hardware,
@@ -71,7 +71,7 @@ public class ResolutionService
             return CheckStorageHealthResolution(hardware);
         }
 
-        if (category.Contains("low available storage"))
+        if (category.Contains("low available storage") || category.Contains("storage capacity"))
         {
             return CheckStorageUsageResolution(
                 hardware,
@@ -79,7 +79,7 @@ public class ResolutionService
                 issueName: "low storage space");
         }
 
-        if (category.Contains("elevated storage"))
+        if (category.Contains("elevated storage") || category.Contains("storage"))
         {
             return CheckStorageUsageResolution(
                 hardware,
@@ -87,19 +87,32 @@ public class ResolutionService
                 issueName: "high storage use");
         }
 
-        if (category.Contains("network issue"))
+        if (category.Contains("network"))
         {
             return CheckNetworkResolution(hardware);
         }
 
-        return new ResolutionResultDto
+        if (category.Contains("driver") || category.Contains("display"))
         {
-            resolution_status = "needs_recheck",
-            resolution_checked_at = DateTime.UtcNow.ToString("o"),
-            resolution_summary =
-                "This diagnosis type needs a follow-up symptom answer before RigMD can call it resolved.",
-            resolution_proof = Array.Empty<object>()
-        };
+            var errCount = hardware.DeviceErrors?.Count ?? 0;
+            var resolved = errCount == 0;
+            return CreateResult(
+                resolved,
+                resolved
+                    ? "Fresh scan shows zero PnP device error codes across graphics and system adapters."
+                    : $"Fresh scan still shows {errCount} device error code(s) in Windows Device Manager.",
+                new object[]
+                {
+                    Proof(
+                        "Device Manager Errors",
+                        errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
+                        resolved,
+                        "All hardware drivers are reporting healthy status (ErrorCode = 0).",
+                        "One or more devices still report a non-zero ConfigManagerErrorCode.")
+                });
+        }
+
+        return CheckSevereResourceResolution(hardware);
     }
 
     private static ResolutionResultDto CheckSevereResourceResolution(

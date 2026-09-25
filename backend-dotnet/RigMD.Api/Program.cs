@@ -5,6 +5,9 @@ using RigMD.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load optional local developer overrides (gitignored and excluded from publish/installer)
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 // Add services to the container.
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
@@ -78,7 +81,7 @@ builder.Services.AddSingleton<RigMD.Infrastructure.Windows.IHardwareMonitorServi
 // Application Services
 // ---------------------------------------------------------------
 builder.Services.AddScoped<RigMD.Infrastructure.Ai.OfflineAiExplainer>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.OfflineAiExplainer>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.GeminiAiExplainer>();
 builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService,      RigMD.Application.Services.DiagnosticEngineService>();
 builder.Services.AddScoped<ResolutionService>();
 builder.Services.AddScoped<RecurringPatternService>();

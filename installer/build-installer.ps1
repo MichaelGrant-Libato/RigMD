@@ -13,11 +13,6 @@ $ApiProject =
         $RepoRoot `
         "backend-dotnet\RigMD.Api\RigMD.Api.csproj"
 
-$AgentProject =
-    Join-Path `
-        $RepoRoot `
-        "backend-dotnet\RigMD.Agent\RigMD.Agent.csproj"
-
 $DesktopPublishDirectory =
     Join-Path `
         $RepoRoot `
@@ -27,11 +22,6 @@ $ApiPublishDirectory =
     Join-Path `
         $RepoRoot `
         "backend-dotnet\RigMD.Api\bin\Release\net10.0-windows\win-x64\publish"
-
-$AgentPublishDirectory =
-    Join-Path `
-        $RepoRoot `
-        "backend-dotnet\RigMD.Agent\bin\Release\net10.0-windows\win-x64\publish"
 
 $FrontendDirectory =
     Join-Path `
@@ -66,7 +56,7 @@ Write-Host " RigMD Combined Installer Build"
 Write-Host "======================================"
 Write-Host ""
 
-Write-Host "[1/8] Checking required tools..."
+Write-Host "[1/7] Checking required tools..."
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue))
 {
@@ -79,11 +69,10 @@ if (-not $InnoCompiler -or -not (Test-Path $InnoCompiler))
 }
 
 Write-Host "Inno Setup compiler found: $InnoCompiler"
-
 Write-Host "Required tools found."
 Write-Host ""
 
-Write-Host "[2/8] Building React frontend..."
+Write-Host "[2/7] Building React frontend..."
 
 Push-Location $FrontendDirectory
 try
@@ -102,12 +91,11 @@ finally
 Write-Host "React frontend build completed."
 Write-Host ""
 
-Write-Host "[3/8] Cleaning previous publish output..."
+Write-Host "[3/7] Cleaning previous publish output..."
 
 foreach ($directory in @(
     $DesktopPublishDirectory,
-    $ApiPublishDirectory,
-    $AgentPublishDirectory))
+    $ApiPublishDirectory))
 {
     if (Test-Path $directory)
     {
@@ -121,7 +109,7 @@ foreach ($directory in @(
 Write-Host "Previous publish output removed."
 Write-Host ""
 
-Write-Host "[4/8] Publishing self-contained RigMD Desktop..."
+Write-Host "[4/7] Publishing self-contained RigMD Desktop..."
 
 & dotnet publish `
     $DesktopProject `
@@ -147,7 +135,7 @@ if (-not (Test-Path $DesktopExecutable))
 Write-Host "RigMD Desktop publish completed."
 Write-Host ""
 
-Write-Host "[5/8] Publishing self-contained RigMD API..."
+Write-Host "[5/7] Publishing self-contained RigMD API..."
 
 & dotnet publish `
     $ApiProject `
@@ -203,43 +191,50 @@ if (-not (Test-Path $ApiFrontendIndex))
 Write-Host "RigMD API publish completed."
 Write-Host ""
 
-Write-Host "[6/8] Publishing self-contained RigMD Agent..."
+Write-Host "[6/7] Scrubbing sensitive config files & verifying installer inputs..."
 
-& dotnet publish `
-    $AgentProject `
-    -c Release `
-    -r win-x64 `
-    --self-contained true
+$SensitivePatterns = @(
+    "appsettings.Development.json",
+    "appsettings.Development.example.json",
+    "appsettings.Local.json",
+    "appsettings.*.local.json",
+    "secrets.json",
+    ".env",
+    ".env.*",
+    "*.db",
+    "*.db-shm",
+    "*.db-wal",
+    "*.pdb"
+)
 
-if ($LASTEXITCODE -ne 0)
+foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory))
 {
-    throw "RigMD Agent publish failed."
+    foreach ($pattern in $SensitivePatterns)
+    {
+        Get-ChildItem -Path $pubDir -Filter $pattern -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $pubAppSettings = Join-Path $pubDir "appsettings.json"
+    if (Test-Path $pubAppSettings)
+    {
+        $sanitizedConfig = [ordered]@{
+            Logging = [ordered]@{
+                LogLevel = [ordered]@{
+                    Default = "Information"
+                    "Microsoft.AspNetCore" = "Warning"
+                }
+            }
+            AllowedHosts = "*"
+            Gemini = [ordered]@{
+                ApiKey = ""
+            }
+            DATABASE_URL = ""
+        }
+        $sanitizedConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $pubAppSettings -Encoding UTF8
+    }
 }
-
-$AgentExecutable =
-    Join-Path `
-        $AgentPublishDirectory `
-        "RigMD.Agent.exe"
-
-$AgentRuntimeConfig =
-    Join-Path `
-        $AgentPublishDirectory `
-        "RigMD.Agent.runtimeconfig.json"
-
-if (-not (Test-Path $AgentExecutable))
-{
-    throw "Published RigMD.Agent.exe was not found."
-}
-
-if (-not (Test-Path $AgentRuntimeConfig))
-{
-    throw "Agent runtime configuration was not found."
-}
-
-Write-Host "RigMD Agent publish completed."
-Write-Host ""
-
-Write-Host "[7/8] Verifying installer inputs..."
 
 Write-Host "Desktop:"
 Write-Host $DesktopExecutable
@@ -253,12 +248,9 @@ Write-Host $ApiDeps
 Write-Host "Frontend:"
 Write-Host $ApiFrontendIndex
 
-Write-Host "Agent:"
-Write-Host $AgentExecutable
-
 Write-Host ""
 
-Write-Host "[8/8] Compiling RigMD installer..."
+Write-Host "[7/7] Compiling RigMD installer..."
 
 & $InnoCompiler `
     $InstallerScript
@@ -268,21 +260,11 @@ if ($LASTEXITCODE -ne 0)
     throw "Inno Setup compilation failed."
 }
 
-    $InstallerOutput = Join-Path $PSScriptRoot "output\RigMD-Setup.exe"
-    
+$InstallerOutput = Join-Path $PSScriptRoot "output\RigMD-Setup.exe"
+
 if (-not $InstallerOutput -or -not (Test-Path $InstallerOutput))
 {
     throw "RigMD setup executable was not created in output directory."
-}
-
-$GenericOutput =
-    Join-Path `
-        $PSScriptRoot `
-        "output\RigMD-Setup.exe"
-
-if ($InstallerOutput -ne $GenericOutput)
-{
-    Copy-Item $InstallerOutput $GenericOutput -Force
 }
 
 Write-Host ""
@@ -292,9 +274,4 @@ Write-Host "======================================"
 Write-Host ""
 Write-Host "Output:"
 Write-Host $InstallerOutput
-if (Test-Path $GenericOutput)
-{
-    Write-Host "Generic alias:"
-    Write-Host $GenericOutput
-}
 Write-Host ""

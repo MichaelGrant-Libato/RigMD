@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using RigMD.Application.Contracts.Ai;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Services;
@@ -16,19 +17,22 @@ public class DiagnosticController : ControllerBase
     private readonly IWindowsSystemProfileService _profileService;
     private readonly ResolutionService _resolutionService;
     private readonly IAutomaticDiagnosisService _automaticDiagnosisService;
+    private readonly IAiExplainer? _aiExplainer;
 
     public DiagnosticController(
         IDiagnosticEngineService diagnosticEngine,
         IDiagnosticSessionRepository sessionRepository,
         IWindowsSystemProfileService profileService,
         ResolutionService resolutionService,
-        IAutomaticDiagnosisService automaticDiagnosisService)
+        IAutomaticDiagnosisService automaticDiagnosisService,
+        IAiExplainer? aiExplainer = null)
     {
         _diagnosticEngine = diagnosticEngine;
         _sessionRepository = sessionRepository;
         _profileService = profileService;
         _resolutionService = resolutionService;
         _automaticDiagnosisService = automaticDiagnosisService;
+        _aiExplainer = aiExplainer;
     }
 
     public class LocalDiagnosisRequest
@@ -141,6 +145,53 @@ public class DiagnosticController : ControllerBase
                 _automaticDiagnosisService
                     .Diagnose(input);
 
+            var explanation = result.Explanation;
+            if (_aiExplainer != null)
+            {
+                try
+                {
+                    var mappedResult = new DiagnosticResult
+                    {
+                        DiagnosedCategory = result.DiagnosedCategory,
+                        ActionCategory = result.ActionCategory,
+                        ConfidenceLabel = result.ConfidenceLabel,
+                        RecommendedNextStep = result.RecommendedNextStep,
+                        Proof = result.Proof.Select(p => new DiagnosticProofItem
+                        {
+                            Label = p.Label,
+                            Value = p.Value,
+                            Status = p.Status,
+                            Meaning = p.Meaning
+                        }).ToList(),
+                        AllLiveProof = result.Proof.Select(p => new DiagnosticProofItem
+                        {
+                            Label = p.Label,
+                            Value = p.Value,
+                            Status = p.Status,
+                            Meaning = p.Meaning
+                        }).ToList()
+                    };
+                    var scopeSymptom = new DiagnosticSymptomPayload
+                    {
+                        SymptomType = request.Mode == "scenario" && !string.IsNullOrWhiteSpace(request.ScenarioId)
+                            ? request.ScenarioId
+                            : request.Mode == "component" && request.ComponentIds.Length > 0
+                                ? $"Component check: {string.Join(", ", request.ComponentIds)}"
+                                : "Full computer check",
+                        AffectedActivity = $"Mode: {request.Mode}"
+                    };
+                    var generated = await _aiExplainer.GenerateExplanationAsync(mappedResult, scopeSymptom);
+                    if (!string.IsNullOrWhiteSpace(generated))
+                    {
+                        explanation = generated;
+                    }
+                }
+                catch
+                {
+                    // Keep baseline explanation if AI explainer fails
+                }
+            }
+
             var sessionId =
                 await _sessionRepository
                     .SaveAutomaticDiagnosisAsync(
@@ -153,7 +204,7 @@ public class DiagnosticController : ControllerBase
                         result.DiagnosedCategory,
                         result.ActionCategory,
                         result.ConfidenceLabel,
-                        result.Explanation,
+                        explanation,
                         "local");
 
             return Ok(
@@ -172,7 +223,7 @@ public class DiagnosticController : ControllerBase
                         result.ConfidenceLabel,
 
                     ai_explanation =
-                        result.Explanation,
+                        explanation,
 
                     proof =
                         result.Proof,

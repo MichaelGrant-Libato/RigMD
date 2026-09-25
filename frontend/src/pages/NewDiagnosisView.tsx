@@ -933,16 +933,16 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   const stageDescription =
     diagnosisStage ===
     'requesting'
-      ? 'Sending a scan request to the installed RigMD Agent.'
+      ? 'Initializing local Windows hardware and OS telemetry scan...'
       : diagnosisStage ===
           'scanning'
-        ? 'Reading your computer. This may take a moment.'
+        ? 'Reading live WMI, sensor, and process telemetry. This may take a moment.'
         : diagnosisStage ===
             'loading-evidence'
           ? 'The scan is complete. Loading the readings.'
           : diagnosisStage ===
               'analyzing'
-            ? 'Reviewing the readings for possible problems.'
+            ? 'Analyzing telemetry and generating AI diagnostic insights.'
             : '';
 
   const selectedScopeLabel =
@@ -1168,10 +1168,6 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       setDiagnosisStage(
         'completed',
       );
-
-      if (automaticReport.session_id) {
-        onDiagnosisComplete?.(automaticReport.session_id);
-      }
 
       } catch (err: any) {
         console.error(
@@ -2471,20 +2467,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
                   )}
 
-                {!isNoActiveIssue(
-                  report,
-                ) &&
-                  remediationActions.length ===
-                    0 && (
-                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 text-xs text-gray-400">
-                      No automatic fix is available for this result.
-                    </div>
-                  )}
-
-                {!isNoActiveIssue(
-                  report,
-                ) &&
-                  report.session_id && (
+                {report.session_id && (
                     <AutonomyRemediationPanel
                       sessionId={
                         report.session_id
@@ -2497,6 +2480,19 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       }
                     />
                   )}
+
+                {report.session_id && onDiagnosisComplete && (
+                  <div className="flex justify-end">
+                    <motion.button
+                      type="button"
+                      whileTap={buttonTap}
+                      onClick={() => onDiagnosisComplete(report.session_id!)}
+                      className="rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/20"
+                    >
+                      Open Saved Session in Past Checks →
+                    </motion.button>
+                  </div>
+                )}
 
                 {!isNoActiveIssue(
                   report,
