@@ -257,7 +257,7 @@ The project will require:
 ## DECISION-006: Diagnostic Decisions Remain Deterministic
 
 - **Date:** August 2026
-- **Status:** Active
+- **Status:** Superseded by DECISION-019 & DECISION-020 (`exp-agentic-rebuild`)
 
 ### Context
 
@@ -288,7 +288,7 @@ AI may assist with explanation and summarization but does not replace the determ
 ## DECISION-007: AI Is Restricted to Explanation and Presentation
 
 - **Date:** August 2026
-- **Status:** Active
+- **Status:** Superseded by DECISION-019 & DECISION-020 (`exp-agentic-rebuild`)
 
 ### Decision
 
@@ -484,7 +484,7 @@ Future commits should contain source code and configuration rather than generate
 ## DECISION-012: Legacy Python Runtime Is Retained Until Final Validation
 
 - **Date:** August 2026
-- **Status:** Temporary
+- **Status:** Retired in Phase 1 of `exp-agentic-rebuild` (`4ff8199`)
 
 ### Context
 
@@ -610,7 +610,7 @@ The repository should distinguish between:
 ## DECISION-015: Remediation Pivot Engine for Failed Actions
 
 - **Date:** August 2026
-- **Status:** Implemented
+- **Status:** Superseded by DECISION-020 (`exp-agentic-rebuild`)
 
 ### Context
 
@@ -629,7 +629,7 @@ The orchestrator now evaluates a `List<RemediationAttempt>` rather than a single
 ## DECISION-016: SignalR for Live Remediation Progress Streaming
 
 - **Date:** September 2026
-- **Status:** Implemented
+- **Status:** Implemented & Expanded in Phase 3/4 (`ReceiveReActStep`)
 
 ### Context
 
@@ -637,24 +637,17 @@ When the autonomous engine executes remediation actions (e.g., clearing thousand
 
 ### Decision
 
-A SignalR Hub (`RemediationHub`) was introduced to stream real-time progress messages from remediation actions to the frontend during execution.
+A SignalR Hub (`RemediationHub`) was introduced to stream real-time progress messages and structured `ReActTraceStep` events from diagnostic and remediation tools to the frontend during both investigation and execution.
 
 ### Implementation
 
 ```
-AutonomyController (progressReporter lambda)
-    → AutonomousOrchestrator (progressReporter parameter)
-    → WindowsRemediationExecutor (progressReporter parameter)
-    → Remediation Action (calls progressReporter at intervals)
-    → IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveProgress", msg)
+AutonomyController (progressReporter + stepReporter lambdas)
+    → AutonomousOrchestrator (ReAct Loop)
+    → IRigMdAgentTool / WindowsRemediationExecutor
+    → IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveReActStep" / "ReceiveProgress", ...)
     → WebSocket → React frontend (AutonomyRemediationPanel)
 ```
-
-The `progressReporter` is an `Action<string>?` callback that flows through the entire execution chain. Actions that support streaming include:
-
-- `ClearTempFilesAction` — reports file deletion progress every 500 files
-- `RunDiskCleanupAction` — reports cleanup phases and results
-- `RunSfcScanAction` — reports SFC scan progress (currently mock mode)
 
 ### CORS Requirement
 
@@ -662,9 +655,8 @@ SignalR WebSocket connections require `.AllowCredentials()` in the CORS policy w
 
 ### Consequences
 
-- Users can observe remediation progress in real time
-- The `progressReporter` callback is optional (`Action<string>?`) so all existing code paths remain unaffected
-- The frontend dependency `@microsoft/signalr` was added
+- Users can observe every `Thought -> Tool Call -> Observation -> Dry-Run Preview -> Execution -> Verification` step in real time.
+- Both `progressReporter` and `stepReporter` callbacks are optional so all existing code paths remain unaffected.
 
 ---
 
@@ -685,9 +677,82 @@ WMI queries were added to directly detect the chassis type (`Win32_SystemEnclosu
 
 - `WmiDeviceTypeProvider` maps `ChassisTypes` (e.g., 3=Desktop, 9=Laptop, 10=Notebook, 30=Tablet).
 - `WmiBatteryProvider` collects charge percentage, estimated run time, and real-time charging status.
-- Injected directly into the standard hardware profile DTO so the AI/Diagnostic engines automatically factor device mobility and power state into their reasoning logic.
+- Exposed as a dedicated `Tier0_ReadOnly` agent tool (`InspectBatteryAndPowerTool`) and included in `HardwareProfileDto`.
+
+---
+
+## DECISION-018: Phase 1 Purge — Retire Fake Autonomy Stubs, Cloud Agent Queue, and Legacy Python (`4ff8199`)
+
+- **Date:** September 2026
+- **Status:** Implemented (`exp-agentic-rebuild`)
+
+### Context
+
+A technical audit revealed that the initial autonomy classes (`RemediationPlanner`, `RemediationRegistry`, `SafetyPolicy`, `PivotEngine`, `DryRunRemediationExecutor`, `RollbackManager`, `VerificationService`), the 3,300+ lines of hardcoded scoring rules in `DiagnosticEngine.cs` / `AutomaticDiagnosisService.cs`, and the 390-line frontend `ACTION_COPY` dictionary were static facades or no-op stubs rather than genuine autonomous reasoning. In addition, the legacy `backend/` Python folder and the unused `RigMD.Agent` cloud PostgreSQL polling queue added dead weight.
+
+### Decision
+
+Execute a clean architectural purge (`-16,630 lines` across 89 files):
+1. Permanently delete the legacy `backend/` Python FastAPI directory.
+2. Delete the cloud-polling `RigMD.Agent` Windows Service project, `AgentController`, and `AgentRepository`.
+3. Delete all 14 fake autonomy classes/interfaces (`RemediationPlanner`, `RemediationRegistry`, `SafetyPolicy`, `PivotEngine`, `DryRunRemediationExecutor`, `RollbackManager`, `VerificationService`) while retaining the real Windows WMI hardware providers and real OS remediation action primitives.
 
 ### Consequences
 
-- The diagnostic engine automatically differentiates thermal advice between laptops and desktops.
-- The engine can correlate CPU/GPU power throttling to a critically low battery state rather than a hardware defect.
+- Eliminated simulated dry-runs (`Thread.Sleep` + hardcoded strings) and fake rollback claims.
+- Established a clean, local-first `.NET 10` foundation for real tool-calling autonomy.
+
+---
+
+## DECISION-019: Phase 2 Tooling Layer — Expose Real WMI Providers and OS Actions as Typed Agent Tools (`e6607b1`)
+
+- **Date:** September 2026
+- **Status:** Implemented (`exp-agentic-rebuild`)
+
+### Context
+
+For an LLM or ReAct agent to genuinely diagnose and remediate Windows issues without hallucinating or executing unsafe shell commands, it needs strongly-typed, bounded tools backed by real Windows telemetry and OS primitives.
+
+### Decision
+
+Introduce `IRigMdAgentTool` and `IRigMdAgentToolRegistry` with 14 registered tools classified across three `ToolSafetyTier` levels:
+- **7 `Tier0_ReadOnly` Diagnostic Tools**: `inspect_cpu_and_thermals`, `inspect_memory_and_processes`, `inspect_storage_health`, `inspect_gpu_and_displays`, `inspect_network_connectivity`, `inspect_battery_and_power`, `query_windows_event_logs`.
+- **3 `Tier1_SafeReversible` Maintenance Tools**: `clear_temp_files`, `flush_dns_cache`, `restart_windows_explorer`.
+- **4 `Tier2_DestructiveOrAdmin` Remediation Tools**: `terminate_processes` (with hard protected-process denylist), `clear_browser_cache`, `clear_windows_update_cache`, `run_system_file_checker` (with UTF-16LE output decoding and Administrator elevation checks).
+
+Every tool exposes a real, non-destructive `PreviewImpactAsync` method that measures actual files, bytes, running process locks, and elevation requirements before execution.
+
+---
+
+## DECISION-020: Phase 3 Multi-Turn ReAct Reasoning Engine & Paired Telemetry Verification (`3eb60bc`)
+
+- **Date:** September 2026
+- **Status:** Implemented (`exp-agentic-rebuild`)
+
+### Context
+
+The autonomous orchestrator must perform genuine multi-step investigation (`Thought -> Tool Call -> Observation`) before proposing a remediation, and must objectively verify system state before and after execution—all while strictly maintaining a `$0.00` operational budget.
+
+### Decision
+
+1. Implement `GeminiReActLlmClient` (`IReActLlmClient`) supporting both **Google Gemini Free-Tier Function Calling** (`gemini-2.5-flash` / `gemini-2.0-flash`) and a **$0.00 Built-In Local Tool-Calling ReAct Engine** when offline or when no API key is configured.
+2. Upgrade `AutonomousOrchestrator` to run up to 4 turns of `Tier0_ReadOnly` tool calls, intercept any direct `Tier1`/`Tier2` tool calls behind a mandatory user-consent safety gate, run `PreviewImpactAsync` on the proposed remediation tool, and capture before/after JSON snapshots using paired `Tier0_ReadOnly` verification tools upon user-consented execution.
+
+---
+
+## DECISION-021: Phase 4 Transparent ReAct UI & Live Dry-Run Review (`8c253b8`)
+
+- **Date:** September 2026
+- **Status:** Implemented (`exp-agentic-rebuild`)
+
+### Context
+
+The frontend previously displayed static hardcoded copy from a 390-line `ACTION_COPY` lookup table and bypassed backend previews for memory actions.
+
+### Decision
+
+Rewire `autonomyService.ts` and `AutonomyRemediationPanel.tsx` to:
+1. Subscribe to `ReceiveReActStep` and `ReceiveProgress` over SignalR (`/hubs/remediation`).
+2. Render a live `ReActTimeline` showing every `Thought`, `ToolCall`, `Observation` (with expandable raw JSON telemetry), `DryRunPreview`, `Execution`, and `Verification` step.
+3. Display real dry-run measurements (`affectedItemsCount`, `estimatedBytesAffected`, `affectedTargets`, privilege checks) and allow switching between registered remediation tools with live dry-run recalculation.
+

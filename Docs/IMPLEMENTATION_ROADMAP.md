@@ -559,6 +559,19 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 
 ---
 
+## 2026 Agentic Re-Structuring (`exp-agentic-rebuild` Branch) ✅ COMPLETE
+
+Following a comprehensive technical audit in September 2026, the static/hardcoded autonomy classes and legacy Python runtime were replaced with a genuine **ReAct (`Thought -> Tool Call -> Observation`)** tool-calling architecture across 4 phases:
+
+| Rebuild Phase | Commit | Summary | Status |
+|---|---|---|---|
+| **Phase 1: The Purge** | `4ff8199` | Removed `-16,630` lines across 89 files: deleted legacy Python `backend/`, deleted `RigMD.Agent` cloud polling queue, deleted 14 fake autonomy classes (`RemediationPlanner`, `RemediationRegistry`, `SafetyPolicy`, `PivotEngine`, `DryRunRemediationExecutor`, `RollbackManager`, `VerificationService`), and removed the 390-line frontend `ACTION_COPY` dictionary. | ✅ Complete |
+| **Phase 2: Tooling Layer** | `e6607b1` | Created `IRigMdAgentTool` & `IRigMdAgentToolRegistry` with 14 real tools: 7 `Tier0_ReadOnly` diagnostic tools (wrapping WMI, LibreHardwareMonitor, live DNS/Ping, and `wevtutil` Event Logs) and 7 `Tier1`/`Tier2` OS remediation tools with real `PreviewImpactAsync` byte/file/PID measurements and protected process denylists. | ✅ Complete |
+| **Phase 3: ReAct Reasoning Engine** | `3eb60bc` | Implemented `GeminiReActLlmClient` (supporting free-tier Gemini function calling + `$0.00` local tool-calling ReAct fallback) and upgraded `AutonomousOrchestrator` to run multi-turn `Tier0` tool loops, intercept write tools behind user consent, and perform paired before/after telemetry verification. | ✅ Complete |
+| **Phase 4: Frontend ReAct UI** | `8c253b8` | Rewired `autonomyService.ts` and `AutonomyRemediationPanel.tsx` to stream `ReceiveReActStep` and `ReceiveProgress` via SignalR, render the live `ReActTimeline` with expandable raw telemetry JSON, display live dry-run metrics, and allow switching between registered tools. | ✅ Complete |
+
+---
+
 ## Current Status Summary
 
 | Phase | Name | Status |
@@ -572,38 +585,32 @@ Run automated performance benchmarks to measure startup time, diagnostic latency
 | 6 | ASP.NET Core API | ✅ Complete |
 | 7 | Connect the React Frontend | ✅ Complete |
 | 8 | Migrate the Diagnostic Engine | ✅ Complete |
-| 9 | Build the Autonomous Remediation Framework | ✅ Complete |
-| 10 | Dry-Run Autonomous Engine | ✅ Complete |
-| 11 | First Real Autonomous Remediation | ✅ Complete |
-| 12 | Verification, Rollback, and Pivot | ✅ Complete |
+| 9–12 | Autonomous ReAct Engine, Dry-Run Previews & Paired Telemetry Verification (`exp-agentic-rebuild`) | ✅ Complete |
 | 13 | History, Audit, & Recurring Patterns | ✅ Complete |
-| 14 | AI Explanation Integration | ✅ Complete |
-| 15 | Optional Cloud Sync | 🔲 Pending |
+| 14 | AI Function-Calling & Local Tool-Calling ReAct Integration | ✅ Complete |
+| 15 | Optional Cloud Sync | ✅ Complete (Startup Sync via `DatabaseSyncService`) |
 | 16 | Desktop Packaging | ✅ Complete |
-| 17 | Performance, Testing, & Thesis Validation | 🔲 Pending |
+| 17 | Performance, Testing, & Thesis Validation | ✅ Complete |
 
 ---
 
 ## Current Verified Test Status
 
-As of the latest autonomy safety validation:
-
-dotnet test
-Total: 41
-Passed: 41
+```
+dotnet test backend-dotnet/RigMD.slnx
+Total: 45
+Passed: 45
 Failed: 0
 Skipped: 0
-
+```
 
 Current automated coverage includes:
-
-- dry-run executor isolation
-- real executor isolation
-- rejected safety plan prevents execution
-- Windows Server remediation rejection
-- high-risk plan rejection
-- empty plan rejection
-- valid low-risk plan approval
-- unsupported real remediation action failure
-
-Automated coverage is still limited and must continue expanding before the legacy Python backend is retired.
+- Clean architecture layer dependency enforcement (`LayerDependencyTests`)
+- All 14 `IRigMdAgentTool` registrations, JSON Schema declarations, and safety tier classifications (`AgentToolLayerTests`)
+- `Tier0_ReadOnly` diagnostic tool execution and structured JSON telemetry output (`AgentToolLayerTests`)
+- Protected system/RigMD process denylist enforcement on `TerminateProcessesTool` (`AgentToolLayerTests`)
+- Real non-destructive `PreviewImpactAsync` dry-run checks across `Tier1` and `Tier2` tools (`AgentToolLayerTests`)
+- Multi-turn `Thought -> Tool Call -> Observation -> DryRunPreview -> AwaitingApproval` ReAct orchestration (`ReActOrchestratorTests`)
+- Safety gate interception preventing unapproved `Tier1`/`Tier2` tool execution during reasoning turns (`ReActOrchestratorTests`)
+- User consent enforcement and paired `Tier0_ReadOnly` before/after telemetry verification (`ReActOrchestratorTests`)
+- Controller and persistence integration tests (`AutonomyControllerTests`, `DiagnosticSessionRepositoryTests`, `WarningSignServiceTests`, `ResolutionServiceTests`)

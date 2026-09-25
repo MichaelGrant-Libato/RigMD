@@ -1,132 +1,107 @@
 # System Architecture
 
 ## Overview
-RigMD is a React + C#/.NET diagnostic and controlled remediation platform for Windows PCs and Laptops. This document describes the current system architecture.
+RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous remediation platform for Windows PCs and Laptops. This document describes the active system architecture following the 4-Phase Agentic Re-Structuring (`exp-agentic-rebuild`).
+
+---
 
 ## Major Application Layers
 
 1. **Desktop Shell (WPF + WebView2)**
-   - **Responsibilities**: Provides a standalone native Windows window to host the application. Manages the lifecycle of the internal web server. Bundles the React production build inside `wwwroot/`.
+   - **Responsibilities**: Provides a standalone native Windows window to host the application, manages the lifecycle of the internal ASP.NET Core web server, and bundles the React production build inside `wwwroot/`.
    - **Key Technologies**: WPF, WebView2.
    - **Project**: `RigMD.Desktop`
 
 2. **Presentation Layer (React + Vite)**
-   - **Responsibilities**: Renders the UI, manages client-side state, handles user intake, and presents diagnostic results and history.
-   - **Key Technologies**: React, TypeScript, Tailwind CSS, Vite.
+   - **Responsibilities**: Renders the hardware dashboard, symptom intake, diagnostic results, and the real-time **ReAct Agent Console & Remediation Review UI** (`AutonomyRemediationPanel.tsx`). Subscribes to SignalR WebSocket streams (`ReceiveReActStep` and `ReceiveProgress`) to render live `Thought -> Tool Call -> Observation -> Dry-Run Preview -> Execution -> Verification` traces.
+   - **Key Technologies**: React, TypeScript, Tailwind CSS, Vite, `@microsoft/signalr`.
    - **Project**: `frontend/`
 
 3. **API Layer (ASP.NET Core)**
-   - **Responsibilities**: Exposes HTTP endpoints (Controllers) to the React frontend. Handles routing, request validation, dependency injection, and serving the static React production build. Hosts a SignalR Hub for real-time progress streaming during remediation execution.
+   - **Responsibilities**: Exposes REST endpoints to the React frontend, manages dependency injection, serves the static React production bundle from `wwwroot/`, and hosts SignalR Hubs for real-time telemetry and ReAct step streaming.
    - **Key Technologies**: .NET 10, ASP.NET Core, SignalR.
    - **Project**: `RigMD.Api`
    - **Controllers**:
-     - `DiagnosticController` — symptom submission, automatic/local diagnosis, session retrieval, resolution checking
-     - `RemediationController` — remediation action listing, action execution, verification target opening
-     - `AutonomyController` — autonomous orchestration (plan, execute, dry-run)
-     - `RecurringController` — recurring pattern analysis
-     - `AgentController` — remote agent management, heartbeats, commands, snapshots
-     - `HardwareController` — live hardware profile endpoint
-     - `WarningSignsController` — warning sign analysis
-     - `DashboardController` — dashboard metrics
-     - `ProfilesController` — saved hardware profiles
-     - `DatabaseController` — database management
+     - `AutonomyController` — ReAct dry-run investigation & preview (`POST /api/autonomy/preview`), user-approved tool execution & before/after verification (`POST /api/autonomy/execute`), tool catalog (`GET /api/autonomy/tools`), per-tool dry-run preview (`POST /api/autonomy/tools/preview`), direct tool execution (`POST /api/autonomy/tools/execute`), memory-heavy process termination (`GET /api/autonomy/memory-apps`, `POST /api/autonomy/close-selected-app`), and Windows verification tool launching (`POST /api/autonomy/open-target` / `POST /api/remediation/open-target`).
+     - `DiagnosticController` — symptom intake, automatic/local baseline diagnosis, session retrieval, and resolution checking.
+     - `HardwareController` — live hardware profile (`GET /api/hardware/live`), cache refresh (`POST /api/hardware/refresh`), and instant telemetry snapshots (`GET /api/hardware/snapshot`).
+     - `RecurringController` — recurring pattern analysis across sessions.
+     - `WarningSignsController` — warning sign catalog and occurrence analysis.
+     - `DashboardController` — dashboard summary metrics.
+     - `ProfilesController` — saved hardware profiles.
+     - `DatabaseController` — SQLite and optional cloud sync health checks.
+   - **SignalR Hubs**:
+     - `RemediationHub` (`/hubs/remediation`) — streams `ReceiveReActStep` and `ReceiveProgress` events in real time.
+     - `TelemetryHub` (`/hubs/telemetry`) — broadcasts live hardware sensor ticks.
 
 4. **Application & Domain Layer (C#)**
-   - **Responsibilities**: Contains the core business logic, the diagnostic engine, the autonomous remediation orchestration, and domain models.
-   - **Key Technologies**: Pure C#, Pattern Matching.
+   - **Responsibilities**: Contains core domain entities, baseline telemetry mappers, tool/ReAct contracts, and the `AutonomousOrchestrator` ReAct loop. Enforces strict inward dependency rules (`Domain` <- `Application` <- `Infrastructure` / `Api`, verified by `LayerDependencyTests`).
    - **Projects**: `RigMD.Application`, `RigMD.Domain`
-   - **Key Services**:
-     - `DiagnosticEngineService` — orchestrates symptom-to-diagnosis pipeline
-     - `AutomaticDiagnosisService` — deterministic rule-based diagnosis (component, scenario, full modes)
-     - `RecurringPatternService` — detects recurring diagnostic patterns across sessions
-     - `ResolutionService` — checks whether a diagnosis has been resolved
-     - `WarningSignService` — normalizes and analyzes warning signs
-     - `AutonomousOrchestrator` — closed-loop remediation execution
-     - `RemediationPlanner` — generates remediation plans from diagnosis categories
-     - `RemediationRegistry` — maps action IDs to executable remediation actions
-     - `SafetyPolicy` — enforces safety tier restrictions on remediation plans
-     - `PivotEngine` — handles pivot-to-next-action on remediation failure
-     - `DryRunRemediationExecutor` — simulates remediation for testing
+   - **Key Contracts & Services**:
+     - `IRigMdAgentTool` & `IRigMdAgentToolRegistry` — standardized interface and registry for all 14 diagnostic (`Tier0_ReadOnly`) and remediation (`Tier1_SafeReversible`, `Tier2_DestructiveOrAdmin`) tools, including JSON Schema function declarations (`AgentToolFunctionDeclaration`) and non-destructive `PreviewImpactAsync`.
+     - `IReActLlmClient` — contract for multi-turn ReAct decision steps (`DecideNextTurnAsync`).
+     - `AutonomousOrchestrator` — drives the multi-turn `Thought -> Tool Call -> Observation` loop, enforces the safety gate preventing unapproved write-tool execution during reasoning, runs live dry-run impact previews, and performs before/after telemetry verification using paired `Tier0_ReadOnly` tools.
+     - `DiagnosticEngineService` & `AutomaticDiagnosisService` — lightweight baseline telemetry mappers that record initial session state before handing off deep investigation to the ReAct agent.
+     - `RecurringPatternService`, `ResolutionService`, `WarningSignService` — session history and resolution tracking services.
 
 5. **Infrastructure & Windows Integration Layer (C#)**
-   - **Responsibilities**: Interfaces with the underlying Windows OS and external services. Retrieves hardware telemetry directly via Windows APIs (WMI) and manages external AI API calls (Gemini).
-   - **Key Technologies**: `System.Management`, `System.Diagnostics`, `HttpClient`.
+   - **Responsibilities**: Interfaces directly with Windows WMI, CIM, `LibreHardwareMonitorLib`, `System.Diagnostics`, Windows Event Logs (`wevtutil.exe`), and the Google Gemini Function-Calling API.
    - **Project**: `RigMD.Infrastructure`
-   - **Hardware Providers** (WMI-based, implementing contracts in `IHardwareProvider.cs`):
-     - `WmiCpuProvider` — CPU name, usage, cores, threads, frequency, thermal throttling
-     - `WmiGpuProvider` — GPU name, driver, type (Dedicated/Integrated), VRAM
-     - `WmiMemoryProvider` — RAM total, used, usage percentage
-     - `WmiStorageProvider` — Storage drives, types (NVMe/SATA/HDD), SMART status, volumes
-     - `WmiMotherboardProvider` — Motherboard/chipset product name
-     - `WmiOperatingSystemProvider` — OS version, device name, system age
-     - `WindowsNetworkProvider` — Network adapter, IPv4, gateway, DNS resolution
-     - `ProcessProvider` — Browser/game detection, top memory apps, memory leak warnings
-     - `WmiDeviceTypeProvider` — Chassis type detection (Desktop, Laptop, Notebook, Tablet, etc.)
-     - `WmiBatteryProvider` — Battery presence, charge %, status (Charging/Discharging/Critical), estimated run time
-   - **AI Integration**:
-     - `GeminiAiExplainer` — calls Google Gemini API for natural-language diagnostic explanations
-     - `OfflineAiExplainer` — provides deterministic offline explanations when Gemini is unavailable
-   - **Remediation Actions**:
-     - `ClearTempFilesAction`, `ClearBrowserCacheAction`, `ClearWindowsUpdateCacheAction`
-     - `FlushDnsAction`, `RunDiskCleanupAction`, `RunSfcScanAction`
-   - **Remediation Infrastructure**:
-     - `WindowsRemediationExecutor` — executes real remediation actions on the host system
-     - `VerificationService` — verifies whether remediation resolved the issue
-     - `RollbackManager` — handles rollback of failed remediation actions
+   - **Hardware & Sensor Providers** (implementing `IHardwareProvider.cs`):
+     - `HardwareMonitorService` (`LibreHardwareMonitorLib`) — real-time CPU/GPU package & core temperatures, loads, and dedicated VRAM sensors.
+     - `WmiCpuProvider`, `WmiGpuProvider`, `WmiMemoryProvider`, `WmiStorageProvider`, `WmiMotherboardProvider`, `WmiOperatingSystemProvider`, `WindowsNetworkProvider`, `ProcessProvider`, `WmiDeviceTypeProvider`, `WmiBatteryProvider`, `WmiPowerProvider`, `WmiDisplayProvider`, `WindowsSystemProfileService`.
+   - **ReAct LLM Reasoning Client**:
+     - `GeminiReActLlmClient` — invokes Google Gemini (`gemini-2.5-flash` / `gemini-2.0-flash`) free-tier native `functionDeclarations` when `Gemini:ApiKey` or `GEMINI_API_KEY` is configured, and automatically falls back to a built-in **$0.00 Local Tool-Calling ReAct Engine** that invokes the same `Tier0_ReadOnly` tools and synthesizes root-cause proposals from live JSON observations.
+   - **14 Registered Agent Tools (`RigMD.Infrastructure/Remediation/Tools/`)**:
+     - **7 `Tier0_ReadOnly` Diagnostic Tools**:
+       1. `InspectCpuAndThermalsTool` (`inspect_cpu_and_thermals`)
+       2. `InspectMemoryAndProcessesTool` (`inspect_memory_and_processes`)
+       3. `InspectStorageHealthTool` (`inspect_storage_health`)
+       4. `InspectGpuAndDisplaysTool` (`inspect_gpu_and_displays`)
+       5. `InspectNetworkConnectivityTool` (`inspect_network_connectivity`)
+       6. `InspectBatteryAndPowerTool` (`inspect_battery_and_power`)
+       7. `QueryWindowsEventLogsTool` (`query_windows_event_logs`)
+     - **7 `Tier1_SafeReversible` & `Tier2_DestructiveOrAdmin` Remediation Tools**:
+       1. `ClearTempFilesTool` (`clear_temp_files` — Tier 1)
+       2. `FlushDnsCacheTool` (`flush_dns_cache` — Tier 1)
+       3. `RestartWindowsExplorerTool` (`restart_windows_explorer` — Tier 1)
+       4. `TerminateProcessesTool` (`terminate_processes` — Tier 2)
+       5. `ClearBrowserCacheTool` (`clear_browser_cache` — Tier 2)
+       6. `ClearWindowsUpdateCacheTool` (`clear_windows_update_cache` — Tier 2)
+       7. `RunSystemFileCheckerTool` (`run_system_file_checker` — Tier 2)
+   - **Real OS Action Primitives (`RigMD.Infrastructure/Remediation/Actions/`)**:
+     - `ClearTempFilesAction`, `ClearBrowserCacheAction`, `ClearWindowsUpdateCacheAction`, `FlushDnsAction`, `RestartExplorerAction`, `TerminateProcessesAction`, `RunDiskCleanupAction`, `RunSfcScanAction`, dispatched via `WindowsRemediationExecutor` and the `IRigMdAgentTool` wrappers.
 
-6. **Persistence Layer (EF Core + Hybrid Database)**
-   - **Responsibilities**: Manages local data storage to ensure offline functionality and handles optional cloud synchronization for cross-device telemetry.
-   - **Key Technologies**: Entity Framework Core, SQLite (Local), Supabase PostgreSQL (Cloud).
-   - **Repositories**:
-     - `DiagnosticSessionRepository` — diagnostic session CRUD and remediation history
-     - `AgentRepository` — remote agent management, commands, hardware snapshots
-     - `RemediationRepository` — remediation action logging
-   - **Services**:
-     - `DatabaseSyncService` — synchronizes local SQLite with remote Supabase PostgreSQL
-     - `LocalDatabaseSchemaUpgradeService` — applies schema migrations to local SQLite
+6. **Persistence Layer (EF Core + Local-First SQLite)**
+   - **Responsibilities**: Stores all diagnostic sessions, hardware profiles, and remediation audit runs locally in `%LOCALAPPDATA%\RigMD\rigmd.db` via Entity Framework Core SQLite, with optional startup synchronization from Supabase PostgreSQL when `DATABASE_URL` is configured.
+   - **Repositories**: `DiagnosticSessionRepository`, `RemediationRepository`.
 
-7. **Remote Agent (Windows Service)**
-   - **Responsibilities**: Runs as a background Windows Service on remote machines. Polls the API for commands, executes hardware scans, and reports results back.
-   - **Key Technologies**: .NET Generic Host, `IHostedService`.
-   - **Project**: `RigMD.Agent`
-   - **Scan Tools**: CPU, GPU, Memory, Storage, Process, and full System Profile scans.
+---
 
-## Real-Time Communication (SignalR)
+## Real-Time ReAct Streaming Architecture (SignalR)
 
-The API layer hosts a SignalR Hub (`/hubs/remediation`) that streams live progress from remediation actions to connected frontend clients.
+During both **Investigation/Preview** (`POST /api/autonomy/preview`) and **Execution/Verification** (`POST /api/autonomy/execute`), the backend streams structured `ReActTraceStep` objects and progress lines to connected clients over `/hubs/remediation`:
 
 ```
 AutonomyController
-    ↓ progressReporter callback
-AutonomousOrchestrator
-    ↓ progressReporter callback
-WindowsRemediationExecutor
-    ↓ progressReporter callback
-Remediation Action (e.g. ClearTempFilesAction)
-    ↓ progressReporter("[CLEANUP] Deleted 500 files...")
-AutonomyController (lambda)
-    ↓ IHubContext<RemediationHub>.Clients.All.SendAsync("ReceiveProgress", msg)
-SignalR Hub → WebSocket → React Frontend
+    ↓ stepReporter (ReceiveReActStep) & progressReporter (ReceiveProgress)
+AutonomousOrchestrator (ReAct Loop)
+    ├── Turn 1..N: IReActLlmClient.DecideNextTurnAsync(...)
+    │       ↓ [THOUGHT] emitted to SignalR
+    ├── Tier 0 Tool Call: IRigMdAgentTool.ExecuteAsync(...)
+    │       ↓ [TOOL CALL] & [OBSERVATION] (with live WMI/OS JSON) emitted to SignalR
+    ├── Safety Gate & Dry-Run Preview: IRigMdAgentTool.PreviewImpactAsync(...)
+    │       ↓ [DRY-RUN PREVIEW] & [AWAITING APPROVAL] emitted to SignalR
+    └── User-Consented Execution:
+            ├── Pre-Execution Baseline Snapshot (paired Tier 0 tool)
+            ├── Real OS Tool Execution (Tier 1 / Tier 2 tool)
+            └── Post-Execution Verification Snapshot (paired Tier 0 tool)
 ```
 
-The frontend subscribes to the `ReceiveProgress` event using `@microsoft/signalr` and renders progress in a live terminal UI within the `AutonomyRemediationPanel` component.
+---
 
-## Data Flow
-
-1. **Intake**: React UI submits diagnostic symptoms and context to the ASP.NET Core API.
-2. **Telemetry Collection**: The Application Layer requests a live hardware profile from the Infrastructure Layer (via native Windows WMI APIs). This includes device type detection (Desktop vs Laptop) and battery health data for laptops.
-3. **Engine Evaluation**: The Domain Layer's diagnostic engine cross-references the symptoms with the hardware telemetry to categorize the issue and determine an action plan.
-4. **Persistence**: The resulting `DiagnosticSession` is saved to the local SQLite database. 
-5. **Sync**: A background service asynchronously pushes unsynced records to Supabase when network connectivity is available.
-
-## Device-Aware Diagnostics
-
-RigMD automatically detects whether it is running on a Desktop PC or a Laptop via `Win32_SystemEnclosure` chassis type detection. This context enables device-specific diagnostic reasoning:
-
-- **Desktop**: Thermal advice focuses on case fans, airflow, and dust buildup.
-- **Laptop**: Thermal advice focuses on cooling pads, vent obstruction, battery health, and power plan settings.
-- **Battery-Aware**: On laptops, battery status (charging, discharging, critical) is factored into performance diagnosis, as power throttling and thermal throttling behave differently on battery vs AC power.
-
-## Target Behavior: Controlled Autonomous Remediation
-The system transitions from purely advisory output to controlled autonomous remediation.
-See `AUTONOMOUS_ENGINE.md` and `REMEDIATION_POLICY.md` for safety boundaries, rollback procedures, and action escalation paths.
+## Retired Legacy Subsystems (Purged in Phase 1)
+The following legacy or simulated components were permanently removed during the `exp-agentic-rebuild` restructuring (-16,630 lines):
+- **Legacy Python Backend (`backend/`)**: Completely removed; 100% of functionality resides in `backend-dotnet/`.
+- **Cloud Polling Agent Queue (`RigMD.Agent`, `AgentController`, `AgentRepository`)**: Removed; RigMD runs locally on the target Windows machine with direct WMI and OS access.
+- **Hardcoded Stubs & Fake Autonomy Classes**: `RemediationPlanner`, `RemediationRegistry`, `SafetyPolicy`, `PivotEngine`, `DryRunRemediationExecutor` (which returned `Thread.Sleep` + fake strings), `RollbackManager` (no-op stub), and `VerificationService` (arbitrary file-count check) were replaced by real `IRigMdAgentTool.PreviewImpactAsync` dry-run measurements and paired `Tier0_ReadOnly` before/after telemetry verification.

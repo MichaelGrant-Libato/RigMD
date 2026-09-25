@@ -338,118 +338,54 @@ The migration should not discard concepts from the SDD simply because the legacy
 
 ---
 
-## 15. Legacy Python Backend
+## 15. Legacy Python Backend (Retired)
 
-The directory:
+The legacy `backend/` FastAPI directory was **permanently retired and removed** in Phase 1 of the Agentic Re-Structuring (`4ff8199` on `exp-agentic-rebuild`).
+All diagnostic, hardware observation, persistence, and autonomous ReAct remediation capabilities now run exclusively in `backend-dotnet/` (.NET 10).
 
-```
-backend/
-```
-
-contains the previous FastAPI implementation.
-It is no longer the active backend used by the React frontend.
-
-It remains temporarily for:
-
-- regression comparison
-- migration verification
-- historical reference
-- auditability
-
-The Python runtime should only be removed after:
-
-- automated C# test coverage is expanded
-- full UI smoke testing passes
-- no active runtime dependency remains
-- documentation cleanup is complete
-
-Historical documentation should remain after runtime retirement.
-
-Relevant files include:
-
+Historical migration documentation remains preserved in:
 - `Docs/Migration_Archive/BASELINE.md`
 - `Docs/Migration_Archive/LEGACY_CAPABILITY_INVENTORY.md`
+- `Docs/Migration_Archive/MIGRATION_MATRIX.md`
 
 ---
 
-## 16. Current Development Status
+## 16. Current Development Status (`exp-agentic-rebuild`)
 
 ### Completed
 
-- ✅ C# solution foundation
-- ✅ ASP.NET Core API
-- ✅ Windows hardware observation layer
-- ✅ diagnostic engine migration
-- ✅ frontend API migration from port 8000 to 5273
-- ✅ diagnostic persistence compatibility
-- ✅ diagnostic history
-- ✅ dashboard
-- ✅ recurring pattern detection
-- ✅ warning-sign reference
-- ✅ profile save
-- ✅ remediation endpoints
-- ✅ resolution rechecking
-- ✅ frontend production build
-- ✅ .NET build
-- ✅ .NET test execution
-- ✅ route parity review
-- ✅ migration checkpoint
-- ✅ generated bin/ and obj/ files removed from Git tracking
-
-### In Progress / Remaining
-
-- ⏳ expand automated test coverage
-- ✅ improve Application/Infrastructure separation
-- ⏳ replace anonymous/reflection-based internal models
-- ⏳ improve database aggregation queries
-- ✅ formalize remediation planner
-- ✅ formalize safety policy
-- ✅ add dry-run remediation
-- ✅ formalize verification
-- ✅ add rollback
-- ✅ add pivot logic
-- ✅ implement SQLite local persistence
-- ✅ remediation history, audit, and failure deprioritization
-- ⏳ implement optional Supabase synchronization
-- ✅ desktop packaging
-- ✅ deep diagnostic intel (Thermal/SMART/Memory Leaks)
-- ⏳ final thesis/SRS/SDD alignment
-- ⏳ retire legacy Python runtime
+- ✅ C# solution foundation (`RigMD.Domain`, `RigMD.Application`, `RigMD.Infrastructure`, `RigMD.Api`, `RigMD.Desktop`, `RigMD.Tests`)
+- ✅ Legacy Python `backend/` and unused `RigMD.Agent` cloud polling queue purged (`-16,630` lines)
+- ✅ Fake autonomy stubs (`RemediationPlanner`, `DryRunRemediationExecutor`, `RollbackManager`, `PivotEngine`) replaced with real tool-calling architecture
+- ✅ 14-Tool Agent Tooling Layer (`IRigMdAgentTool`, `IRigMdAgentToolRegistry`) wrapping live WMI, LibreHardwareMonitor, Event Logs, and OS remediation actions
+- ✅ Real non-destructive `PreviewImpactAsync` dry-run previews (counting actual files, bytes, running process locks, and Administrator elevation)
+- ✅ Multi-turn ReAct Reasoning Engine (`AutonomousOrchestrator` + `GeminiReActLlmClient`) with `$0.00` local tool-calling fallback
+- ✅ Paired `Tier0_ReadOnly` before/after telemetry verification (`PostExecutionVerificationReport`)
+- ✅ Real-time SignalR streaming of `ReceiveReActStep` and `ReceiveProgress`
+- ✅ React `AutonomyRemediationPanel` rewired with live `ReActTimeline`, raw JSON telemetry inspector, and interactive tool switcher
+- ✅ Local-first SQLite persistence (`RigMdDbContext`) with optional startup PostgreSQL sync
+- ✅ 45/45 automated unit and architecture tests passing (`dotnet test backend-dotnet/RigMD.slnx`)
+- ✅ Frontend production build bundled into `RigMD.Api/wwwroot` (`npm.cmd run build`)
 
 ---
 
 ## 17. Important Git Checkpoints
 
 **Legacy Python Reference**
-
 ```
 python-backend-final
 ```
 
 **C# Runtime Migration Complete**
-
 ```
-csharp-migration-complete
-```
-
-Current migration checkpoint:
-
-```
-983190e feat: complete C# backend migration parity
+csharp-migration-complete (983190e)
 ```
 
----
+**4-Phase Agentic Re-Structuring (`exp-agentic-rebuild`)**
+```
+4ff8199 — Phase 1: Purge fake autonomy classes, cloud agent queue, hardcoded rule monoliths, and legacy python backend
+e6607b1 — Phase 2: Implement Agent Tooling Layer wrapping real WMI providers and OS actions
+3eb60bc — Phase 3: Implement multi-turn ReAct reasoning engine with tool calling, dry-run preview, and telemetry verification
+8c253b8 — Phase 4: Rewire React frontend to stream live ReAct trace, dry-run impact preview, and telemetry verification
+```
 
-## 19. Current Development Focus
-
-The Python-to-C# runtime migration is functionally complete for the active React frontend.
-
-The next priorities are:
-
-- expand meaningful automated tests
-- clean Application and Infrastructure boundaries
-- continue the controlled remediation framework (Action Execution)
-- implement optional Supabase synchronization
-- perform full UI and backend validation
-- retire the Python runtime
-- align final implementation with the SRS and SDD
