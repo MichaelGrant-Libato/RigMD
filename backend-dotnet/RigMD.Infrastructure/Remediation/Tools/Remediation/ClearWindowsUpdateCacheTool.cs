@@ -87,7 +87,7 @@ public class ClearWindowsUpdateCacheTool : IRigMdAgentTool
             ToolName = Name,
             DisplayName = DisplayName,
             SafetyTier = SafetyTier,
-            CanExecute = true,
+            CanExecute = isAdmin,
             RequiresAdmin = true,
             IsRunningAsAdmin = isAdmin,
             RequiresUserConfirmation = true,
@@ -109,6 +109,19 @@ public class ClearWindowsUpdateCacheTool : IRigMdAgentTool
         Action<string>? progressReporter = null,
         CancellationToken cancellationToken = default)
     {
+        if (!ToolArgumentHelper.IsCurrentProcessElevated())
+        {
+            var msg = "Clearing the Windows Update cache (stopping wuauserv and purging SoftwareDistribution\\Download) requires Administrator privileges. Please run RigMD as Administrator.";
+            return new AgentToolExecutionResult
+            {
+                ToolName = Name,
+                Success = false,
+                Summary = msg,
+                DataJson = JsonSerializer.Serialize(new { success = false, error = msg }, ToolArgumentHelper.JsonOptions),
+                OutputLog = msg
+            };
+        }
+
         progressReporter?.Invoke("Stopping wuauserv and clearing Windows Update Download cache...");
 
         var action = new ClearWindowsUpdateCacheAction(_loggerFactory.CreateLogger<ClearWindowsUpdateCacheAction>());

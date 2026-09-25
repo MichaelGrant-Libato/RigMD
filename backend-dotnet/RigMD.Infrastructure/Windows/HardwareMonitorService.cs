@@ -21,6 +21,7 @@ public interface IHardwareMonitorService
 public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 {
     private readonly Computer _computer;
+    private readonly bool _isInitialized;
 
     public HardwareMonitorService()
     {
@@ -37,16 +38,23 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
         try 
         {
             _computer.Open();
+            _isInitialized = true;
             Tick(); // Initial tick to read sensors immediately
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Failed to open LHM Computer: {ex.Message}");
+            _isInitialized = false;
+            Debug.WriteLine($"Failed to open LHM Computer (falling back to WMI): {ex.Message}");
         }
     }
 
     public void Tick()
     {
+        if (!_isInitialized)
+        {
+            return;
+        }
+
         try 
         {
             foreach (var hardware in _computer.Hardware)
@@ -63,52 +71,64 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     public double? GetCpuTemperature()
     {
-        // 1. Check direct CPU temperature sensors
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.Cpu)
+            return null;
+        }
+
+        try
+        {
+            // 1. Check direct CPU temperature sensors
+            foreach (var hardware in _computer.Hardware)
             {
-                // Prefer Tctl/Tdie, Package, or Core Average / Core temperatures
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.Cpu)
                 {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                    // Prefer Tctl/Tdie, Package, or Core Average / Core temperatures
+                    foreach (var sensor in hardware.Sensors)
                     {
-                        if (sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase) ||
-                            sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
-                            sensor.Name.Contains("Average", StringComparison.OrdinalIgnoreCase) ||
-                            sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
                         {
-                            return Math.Round(sensor.Value.Value, 1);
+                            if (sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase) ||
+                                sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
+                                sensor.Name.Contains("Average", StringComparison.OrdinalIgnoreCase) ||
+                                sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return Math.Round(sensor.Value.Value, 1);
+                            }
                         }
                     }
+                    
+                    // Fallback to first valid temperature sensor on CPU
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                            return Math.Round(sensor.Value.Value, 1);
+                    }
                 }
-                
-                // Fallback to first valid temperature sensor on CPU
-                foreach (var sensor in hardware.Sensors)
+            }
+
+            // 2. Fallback to motherboard/SuperIO sensors if CPU sensors are missing
+            foreach (var hardware in _computer.Hardware)
+            {
+                if (hardware.HardwareType == HardwareType.Motherboard)
                 {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
-                        return Math.Round(sensor.Value.Value, 1);
+                    foreach (var subHardware in hardware.SubHardware)
+                    {
+                        foreach (var sensor in subHardware.Sensors)
+                        {
+                            if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && 
+                                (sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase) || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                return Math.Round(sensor.Value.Value, 1);
+                            }
+                        }
+                    }
                 }
             }
         }
-
-        // 2. Fallback to motherboard/SuperIO sensors if CPU sensors are missing
-        foreach (var hardware in _computer.Hardware)
+        catch
         {
-            if (hardware.HardwareType == HardwareType.Motherboard)
-            {
-                foreach (var subHardware in hardware.SubHardware)
-                {
-                    foreach (var sensor in subHardware.Sensors)
-                    {
-                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && 
-                            (sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase) || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            return Math.Round(sensor.Value.Value, 1);
-                        }
-                    }
-                }
-            }
+            // Fall back to WMI provider on sensor exception
         }
 
         return null;
@@ -116,110 +136,174 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     public double? GetGpuTemperature()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
-            {
-                // Prefer Core or Hot Spot
-                foreach (var sensor in hardware.Sensors)
-                {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
-                        return Math.Round(sensor.Value.Value, 1);
-                }
+            return null;
+        }
 
-                // Fallback to any valid temperature on GPU
-                foreach (var sensor in hardware.Sensors)
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
+            {
+                if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
                 {
-                    if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
-                        return Math.Round(sensor.Value.Value, 1);
+                    // Prefer Core or Hot Spot
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0 && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
+                            return Math.Round(sensor.Value.Value, 1);
+                    }
+
+                    // Fallback to any valid temperature on GPU
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue && sensor.Value > 0)
+                            return Math.Round(sensor.Value.Value, 1);
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public double? GetGpuDedicatedMemoryUsedGb()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
+            return null;
+        }
+
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
             {
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
                 {
-                    if (sensor.SensorType == SensorType.SmallData && sensor.Name.Contains("Memory Used", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value / 1024.0;
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.SmallData && sensor.Name.Contains("Memory Used", StringComparison.OrdinalIgnoreCase))
+                            return sensor.Value / 1024.0;
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public double? GetGpuDedicatedMemoryTotalGb()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
+            return null;
+        }
+
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
             {
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
                 {
-                    if (sensor.SensorType == SensorType.SmallData && sensor.Name.Contains("Memory Total", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value / 1024.0;
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.SmallData && sensor.Name.Contains("Memory Total", StringComparison.OrdinalIgnoreCase))
+                            return sensor.Value / 1024.0;
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public double? GetCpuLoad()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.Cpu)
+            return null;
+        }
+
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
             {
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.Cpu)
                 {
-                    if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Total", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value;
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Total", StringComparison.OrdinalIgnoreCase))
+                            return sensor.Value;
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public double? GetRamLoad()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.Memory)
+            return null;
+        }
+
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
             {
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.Memory)
                 {
-                    if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value;
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
+                            return sensor.Value;
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public double? GetGpuLoad()
     {
-        foreach (var hardware in _computer.Hardware)
+        if (!_isInitialized)
         {
-            if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
+            return null;
+        }
+
+        try
+        {
+            foreach (var hardware in _computer.Hardware)
             {
-                foreach (var sensor in hardware.Sensors)
+                if (hardware.HardwareType == HardwareType.GpuNvidia || hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuIntel)
                 {
-                    if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
-                        return sensor.Value;
+                    foreach (var sensor in hardware.Sensors)
+                    {
+                        if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
+                            return sensor.Value;
+                    }
                 }
             }
         }
+        catch { }
+
         return null;
     }
 
     public void Dispose()
     {
-        _computer.Close();
+        try
+        {
+            _computer.Close();
+        }
+        catch { }
     }
 }

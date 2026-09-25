@@ -98,8 +98,11 @@ var dbPath = Path.Combine(
 
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 
+var sqliteConnectionString =
+    $"Data Source={dbPath};Mode=ReadWriteCreate;Cache=Shared;Default Timeout=5;Pooling=True";
+
 builder.Services.AddDbContext<RigMdDbContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"));
+    options.UseSqlite(sqliteConnectionString));
 
 // Client identification & isolation
 builder.Services.AddScoped<RigMD.Application.Contracts.Common.ICurrentClientProvider, RigMD.Api.Services.HttpCurrentClientProvider>();
@@ -183,11 +186,76 @@ builder.Services.AddScoped<LocalDatabaseSchemaUpgradeService>();
 
 var app = builder.Build();
 
-// Auto-create SQLite schema and synchronize with Supabase PostgreSQL on startup
+// Secondary orphan protection: if launched by RigMD.Desktop with --parent-pid <PID>,
+// automatically shut down RigMD.Api the moment the parent desktop process exits.
+int? parentPid = null;
+for (int i = 0; i < args.Length; i++)
+{
+    if (string.Equals(args[i], "--parent-pid", StringComparison.OrdinalIgnoreCase) &&
+        i + 1 < args.Length &&
+        int.TryParse(args[i + 1], out var parsedPid) &&
+        parsedPid > 0)
+    {
+        parentPid = parsedPid;
+        break;
+    }
+    if (args[i].StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase) &&
+        int.TryParse(args[i]["--parent-pid=".Length..], out var inlinePid) &&
+        inlinePid > 0)
+    {
+        parentPid = inlinePid;
+        break;
+    }
+}
+
+if (parentPid.HasValue)
+{
+    var watchedPid = parentPid.Value;
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var parent = System.Diagnostics.Process.GetProcessById(watchedPid);
+            await parent.WaitForExitAsync(app.Lifetime.ApplicationStopping);
+            if (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                app.Lifetime.StopApplication();
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Parent process already exited before watcher attached
+            app.Lifetime.StopApplication();
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal application shutdown
+        }
+        catch
+        {
+            // Ignore non-fatal process inspection errors
+        }
+    });
+}
+
+// Auto-create SQLite schema, enable WAL concurrency mode, and synchronize with Supabase PostgreSQL on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<RigMdDbContext>();
     db.Database.EnsureCreated();
+
+    if (db.Database.IsSqlite())
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;");
+        }
+        catch
+        {
+            // Non-fatal if running against an in-memory or restricted test database
+        }
+    }
 
     var schemaUpgradeService =
         scope.ServiceProvider.GetRequiredService<LocalDatabaseSchemaUpgradeService>();

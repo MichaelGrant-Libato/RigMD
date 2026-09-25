@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Models;
+using RigMD.Infrastructure.Remediation.Tools;
 
 namespace RigMD.Infrastructure.Remediation.Actions;
 
@@ -30,6 +31,32 @@ public class RunSfcScanAction
 
     public async Task<ExecutionResult> ExecuteAsync(Action<string>? progressReporter = null)
     {
+        if (!ToolArgumentHelper.IsCurrentProcessElevated())
+        {
+            _logger.LogWarning(
+                "SFC scan blocked because the current process is not running with Administrator privileges.");
+
+            return new ExecutionResult
+            {
+                Success = false,
+                Summary =
+                    "System File Checker (sfc /scannow) requires Administrator privileges. Please run RigMD as Administrator.",
+                OutputLog =
+                    "Elevation check failed: Current process is not running in an elevated Administrator role.",
+                Proof = new List<ExecutionProof>
+                {
+                    new()
+                    {
+                        Label = "System File Integrity",
+                        Before = "Unverified",
+                        After = "Blocked (Elevation Required)",
+                        Status = "Failed",
+                        Meaning = "Administrator privileges are required to execute sfc.exe /scannow."
+                    }
+                }
+            };
+        }
+
         _logger.LogInformation(
             "Starting System File Checker (sfc /scannow)");
 

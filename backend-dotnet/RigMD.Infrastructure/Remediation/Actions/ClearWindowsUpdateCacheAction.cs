@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Models;
+using RigMD.Infrastructure.Remediation.Tools;
 
 namespace RigMD.Infrastructure.Remediation.Actions;
 
@@ -34,6 +35,21 @@ public class ClearWindowsUpdateCacheAction
 
     public async Task<ExecutionResult> ExecuteAsync()
     {
+        if (!ToolArgumentHelper.IsCurrentProcessElevated())
+        {
+            _logger.LogWarning(
+                "ClearWindowsUpdateCache blocked because the current process is not running with Administrator privileges.");
+
+            return new ExecutionResult
+            {
+                Success = false,
+                Summary =
+                    "Clearing the Windows Update cache requires Administrator privileges. Please run RigMD as Administrator.",
+                OutputLog =
+                    "Elevation check failed: Current process is not running in an elevated Administrator role."
+            };
+        }
+
         var downloadPath = Path.Combine(
             Environment.GetFolderPath(
                 Environment.SpecialFolder.Windows),
