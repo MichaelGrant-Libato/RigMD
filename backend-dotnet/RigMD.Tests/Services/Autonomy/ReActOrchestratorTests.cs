@@ -184,6 +184,7 @@ public class ReActOrchestratorTests
             new InspectNetworkConnectivityTool(providers),
             new InspectBatteryAndPowerTool(providers, providers, providers),
             new QueryWindowsEventLogsTool(),
+            new QueryStartupAppsTool(),
             fakeTempTool,
             new FlushDnsCacheTool(loggerFactory),
             new ClearBrowserCacheTool(loggerFactory),
@@ -347,5 +348,75 @@ public class ReActOrchestratorTests
         Assert.Contains(executed.ReasoningSteps, s => s.StepType == nameof(ReActStepType.Observation));
         Assert.Contains(executed.ReasoningSteps, s => s.StepType == nameof(ReActStepType.Execution));
         Assert.Contains(executed.ReasoningSteps, s => s.StepType == nameof(ReActStepType.Verification));
+    }
+
+    [Fact]
+    public async Task RunDryRunCycleAsync_ComponentMode_StrictlyFiltersTier0ToolsToSelectedScope()
+    {
+        var (orchestrator, _) = CreateOrchestratorWithTools();
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "No Active Issue Detected",
+            AiExplanation = "Memory is healthy.",
+            Session = new DiagnosticSession
+            {
+                Id = Guid.NewGuid(),
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = "component" },
+                    new() { QuestionKey = "component_ids", AnswerValue = "[\"memory\"]" }
+                }
+            }
+        };
+
+        var result = await orchestrator.RunDryRunCycleAsync(
+            diagnostic,
+            new HardwareProfileDto
+            {
+                Ram = new MemoryStatsDto { TotalGb = 32, UsedGb = 14, UsagePercent = 43.7 }
+            });
+
+        var toolCallSteps = result.ReasoningSteps.Where(s => s.StepType == nameof(ReActStepType.ToolCall)).ToList();
+        Assert.NotEmpty(toolCallSteps);
+        Assert.All(toolCallSteps, s => Assert.Equal("inspect_memory_and_processes", s.ToolName));
+        Assert.DoesNotContain(toolCallSteps, s => s.ToolName == "inspect_storage_health");
+    }
+
+    [Fact]
+    public async Task RunDryRunCycleAsync_ScenarioMode_ExecutesMappedScenarioToolsBeforeDiagnosis()
+    {
+        var (orchestrator, _) = CreateOrchestratorWithTools();
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "Boot or Startup Contention",
+            AiExplanation = "Slow boot scenario.",
+            Session = new DiagnosticSession
+            {
+                Id = Guid.NewGuid(),
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = "scenario" },
+                    new() { QuestionKey = "scenario_id", AnswerValue = "slow-boot" }
+                }
+            }
+        };
+
+        var result = await orchestrator.RunDryRunCycleAsync(
+            diagnostic,
+            new HardwareProfileDto());
+
+        var calledTools = result.ReasoningSteps
+            .Where(s => s.StepType == nameof(ReActStepType.ToolCall))
+            .Select(s => s.ToolName)
+            .ToList();
+
+        Assert.Contains("query_startup_apps", calledTools);
+        Assert.Contains("query_windows_event_logs", calledTools);
     }
 }

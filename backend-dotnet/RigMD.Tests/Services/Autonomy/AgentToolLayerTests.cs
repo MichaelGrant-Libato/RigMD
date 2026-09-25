@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
+using RigMD.Application.Services.Autonomy;
 using RigMD.Infrastructure.Remediation.Actions;
 using RigMD.Infrastructure.Remediation.Tools;
 using RigMD.Infrastructure.Remediation.Tools.Diagnostic;
@@ -71,6 +72,8 @@ public class AgentToolLayerTests
         {
             Name = "NVIDIA GeForce RTX 4070",
             Type = "Dedicated",
+            HasGpu = true,
+            HasDedicatedGpu = true,
             Driver = "32.0.15.6094",
             DriverDate = "2026-01-15",
             VramGb = 12.0,
@@ -116,6 +119,7 @@ public class AgentToolLayerTests
             new InspectNetworkConnectivityTool(providers),
             new InspectBatteryAndPowerTool(providers, providers, providers),
             new QueryWindowsEventLogsTool(),
+            new QueryStartupAppsTool(),
             new TerminateProcessesTool(loggerFactory),
             new ClearTempFilesTool(loggerFactory),
             new ClearBrowserCacheTool(loggerFactory),
@@ -129,27 +133,52 @@ public class AgentToolLayerTests
     }
 
     [Fact]
-    public void Registry_RegistersAll14Tools_WithExpectedSafetyTiersAndDeclarations()
+    public void Registry_RegistersAll15Tools_WithExpectedSafetyTiersAndDeclarations()
     {
         var registry = CreateFullRegistry();
         var allTools = registry.GetAllTools();
 
-        Assert.Equal(14, allTools.Count);
-        Assert.Equal(7, registry.GetToolsByTier(ToolSafetyTier.Tier0_ReadOnly).Count);
+        Assert.Equal(15, allTools.Count);
+        Assert.Equal(8, registry.GetToolsByTier(ToolSafetyTier.Tier0_ReadOnly).Count);
         Assert.Equal(3, registry.GetToolsByTier(ToolSafetyTier.Tier1_SafeReversible).Count);
         Assert.Equal(4, registry.GetToolsByTier(ToolSafetyTier.Tier2_DestructiveOrAdmin).Count);
 
         var readOnlyDeclarations = registry.GetFunctionDeclarations(includeWriteTools: false);
-        Assert.Equal(7, readOnlyDeclarations.Count);
+        Assert.Equal(8, readOnlyDeclarations.Count);
 
         var allDeclarations = registry.GetFunctionDeclarations(includeWriteTools: true);
-        Assert.Equal(14, allDeclarations.Count);
+        Assert.Equal(15, allDeclarations.Count);
 
         foreach (var decl in allDeclarations)
         {
             Assert.False(string.IsNullOrWhiteSpace(decl.Name));
             Assert.False(string.IsNullOrWhiteSpace(decl.Description));
         }
+
+        // Verify aliases for prompt compatibility
+        Assert.NotNull(registry.GetTool("inspect_gpu_status"));
+        Assert.Equal("inspect_gpu_and_displays", registry.GetTool("inspect_gpu_status")!.Name);
+        Assert.NotNull(registry.GetTool("inspect_dns"));
+        Assert.Equal("inspect_network_connectivity", registry.GetTool("inspect_dns")!.Name);
+    }
+
+    [Fact]
+    public void DiagnosticScopeMapper_MapsComponentsAndScenariosAccurately()
+    {
+        // Component filtering: selecting ONLY "Memory" must only allow inspect_memory_and_processes
+        var (memoryTools, _) = DiagnosticScopeMapper.GetAllowedToolsForComponents(new[] { "Memory" });
+        Assert.Single(memoryTools);
+        Assert.Contains("inspect_memory_and_processes", memoryTools);
+        Assert.DoesNotContain("inspect_storage_health", memoryTools);
+
+        // Scenario mapping: supports both snake_case and kebab-case scenario IDs
+        var slowBootTools = DiagnosticScopeMapper.GetRequiredToolsForScenario("slow_boot");
+        Assert.Contains(slowBootTools, t => t.ToolName == "query_startup_apps");
+        Assert.Contains(slowBootTools, t => t.ToolName == "query_windows_event_logs" && t.ArgumentsJson.Contains("Boot"));
+
+        var blueScreenTools = DiagnosticScopeMapper.GetRequiredToolsForScenario("blue-screen-crash");
+        Assert.Contains(blueScreenTools, t => t.ToolName == "query_windows_event_logs" && t.ArgumentsJson.Contains("BugCheck"));
+        Assert.Contains(blueScreenTools, t => t.ToolName == "inspect_gpu_and_displays");
     }
 
     [Fact]
@@ -173,6 +202,11 @@ public class AgentToolLayerTests
         var powerResult = await powerTool.ExecuteAsync(emptyArgs.RootElement);
         Assert.True(powerResult.Success);
         Assert.Contains("Balanced", powerResult.DataJson);
+
+        var startupTool = registry.GetTool("query_startup_apps")!;
+        var startupResult = await startupTool.ExecuteAsync(emptyArgs.RootElement);
+        Assert.True(startupResult.Success);
+        Assert.Contains("startupAppCount", startupResult.DataJson);
     }
 
     [Theory]

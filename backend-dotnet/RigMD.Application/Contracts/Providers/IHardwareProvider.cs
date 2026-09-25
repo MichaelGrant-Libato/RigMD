@@ -70,4 +70,18 @@ public interface IDisplayProvider
 public interface IWindowsSystemProfileService
 {
     HardwareProfileDto GetLiveSystemProfile();
+
+    HardwarePresenceProbeDto GetHardwarePresenceProbe()
+    {
+        var profile = GetLiveSystemProfile();
+        return profile.Presence ?? new HardwarePresenceProbeDto
+        {
+            DeviceType = profile.DeviceType,
+            HasBattery = profile.Battery?.HasBattery == true,
+            HasGpu = profile.Gpu.HasGpu,
+            HasDedicatedGpu = profile.Gpu.HasDedicatedGpu,
+            GpuName = profile.Gpu.Name,
+            GpuType = profile.Gpu.Type
+        };
+    }
 }

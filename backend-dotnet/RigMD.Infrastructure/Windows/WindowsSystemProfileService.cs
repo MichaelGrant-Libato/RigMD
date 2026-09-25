@@ -93,10 +93,14 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             catch { }
         }
 
+        var deviceType = _deviceTypeProvider.GetDeviceType();
+        var battery = _batteryProvider.GetBatteryStats();
+        var presence = BuildPresenceProbe(deviceType, battery, gpuStats);
+
         return new HardwareProfileDto
         {
             DeviceName = _osProvider.GetDeviceName(),
-            DeviceType = _deviceTypeProvider.GetDeviceType(),
+            DeviceType = deviceType,
             OsVersion = _osProvider.GetOsVersion(),
             SystemAge = _osProvider.GetSystemAge(),
             ChipsetDriver = _motherboardProvider.GetChipsetDriver(),
@@ -106,7 +110,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             Displays = _displayProvider.GetDisplays(),
             DeviceErrors = GetDeviceErrors(),
             
-            Battery = _batteryProvider.GetBatteryStats(),
+            Battery = battery,
             
             Cpu = cpuStats,
             Gpu = gpuStats,
@@ -116,8 +120,72 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             StorageDrives = storageDrives,
             AllDisks = allDisks,
             
-            ProcessInsights = _processProvider.GetProcessInsights()
+            ProcessInsights = _processProvider.GetProcessInsights(),
+            Presence = presence
         };
+    }
+
+    public HardwarePresenceProbeDto GetHardwarePresenceProbe()
+    {
+        var deviceType = _deviceTypeProvider.GetDeviceType();
+        var battery = _batteryProvider.GetBatteryStats();
+        var gpu = _gpuProvider.GetGpuStats();
+        return BuildPresenceProbe(deviceType, battery, gpu);
+    }
+
+    private static HardwarePresenceProbeDto BuildPresenceProbe(
+        string deviceType,
+        BatteryStatsDto? battery,
+        GpuStatsDto gpu)
+    {
+        bool hasBattery = battery?.HasBattery == true;
+        bool hasGpu = gpu.HasGpu && !string.Equals(gpu.Name, "Unknown GPU", StringComparison.OrdinalIgnoreCase);
+        bool hasDedicatedGpu = gpu.HasDedicatedGpu || string.Equals(gpu.Type, "Dedicated", StringComparison.OrdinalIgnoreCase);
+
+        var probe = new HardwarePresenceProbeDto
+        {
+            DeviceType = string.IsNullOrWhiteSpace(deviceType) ? (hasBattery ? "Laptop" : "Desktop") : deviceType,
+            HasBattery = hasBattery,
+            HasGpu = hasGpu,
+            HasDedicatedGpu = hasDedicatedGpu,
+            GpuName = gpu.Name,
+            GpuType = gpu.Type
+        };
+
+        var alwaysPresentIds = new[] { "cpu", "memory", "storage", "os", "drivers", "network", "display" };
+        foreach (var id in alwaysPresentIds)
+        {
+            probe.Components[id] = new ComponentPresenceInfoDto
+            {
+                ComponentId = id,
+                Status = nameof(ComponentStatus.Present),
+                IsSelectable = true
+            };
+        }
+
+        probe.Components["gpu"] = new ComponentPresenceInfoDto
+        {
+            ComponentId = "gpu",
+            Status = hasGpu ? nameof(ComponentStatus.Present) : nameof(ComponentStatus.NotPresent),
+            IsSelectable = hasGpu,
+            Badge = hasDedicatedGpu
+                ? "Dedicated GPU"
+                : hasGpu
+                    ? "Integrated GPU"
+                    : "Not Present",
+            Reason = hasGpu ? null : "No graphics controller detected on this device"
+        };
+
+        probe.Components["battery"] = new ComponentPresenceInfoDto
+        {
+            ComponentId = "battery",
+            Status = hasBattery ? nameof(ComponentStatus.Present) : nameof(ComponentStatus.NotPresent),
+            IsSelectable = hasBattery,
+            Badge = hasBattery ? "Battery Present" : "Not Present (Desktop PC)",
+            Reason = hasBattery ? null : "No battery detected on this device"
+        };
+
+        return probe;
     }
 
     private List<DeviceErrorDto> GetDeviceErrors()

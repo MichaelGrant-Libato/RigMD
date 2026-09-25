@@ -60,9 +60,27 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             stepReporter?.Invoke(step);
         }
 
+        var (diagnosisMode, componentIds, scenarioId) = ExtractSessionScope(diagnostic);
+        var (allowedTier0Tools, allowedRemediationTools) = diagnosisMode == "component" && componentIds.Count > 0
+            ? DiagnosticScopeMapper.GetAllowedToolsForComponents(componentIds)
+            : (new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        var requiredScenarioCalls = diagnosisMode == "scenario" && !string.IsNullOrWhiteSpace(scenarioId)
+            ? DiagnosticScopeMapper.GetRequiredToolsForScenario(scenarioId).ToList()
+            : new List<ReActToolCallRequest>();
+
+        var targetScopeLabels = diagnosisMode == "component" && componentIds.Count > 0
+            ? componentIds.Select(DiagnosticScopeMapper.GetComponentDisplayName).ToList()
+            : new List<string>();
+
         var context = new ReActConversationContext
         {
             SessionId = diagnostic.DiagnosticSessionId.ToString(),
+            DiagnosisMode = diagnosisMode,
+            TargetScope = targetScopeLabels,
+            ScenarioId = scenarioId,
+            AllowedDiagnosticTools = allowedTier0Tools.ToList(),
+            RequiredScenarioToolCalls = requiredScenarioCalls,
             UserSymptom = !string.IsNullOrWhiteSpace(diagnostic.AiExplanation)
                 ? diagnostic.AiExplanation!
                 : $"{diagnostic.DiagnosedCategory} {diagnostic.ActionCategory}".Trim(),
@@ -73,7 +91,13 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             MaxTurns = 4
         };
 
-        var declarations = _toolRegistry.GetFunctionDeclarations(includeWriteTools: true);
+        var allDeclarations = _toolRegistry.GetFunctionDeclarations(includeWriteTools: true);
+        var declarations = diagnosisMode == "component" && allowedTier0Tools.Count > 0
+            ? allDeclarations
+                .Where(d => allowedTier0Tools.Contains(d.Name) || allowedRemediationTools.Contains(d.Name))
+                .ToList()
+            : allDeclarations;
+
         ReActFinalProposal? finalProposal = null;
         string engineMode = "ReAct-Agent";
 
@@ -85,6 +109,20 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             swTurn.Stop();
 
             engineMode = decision.EngineName;
+
+            // Scenario Gate: On Turn 0, ensure all scenario-mapped Tier-0 tools are executed before any FinalProposal
+            if (turn == 0 && requiredScenarioCalls.Count > 0)
+            {
+                decision.FinalProposal = null;
+                var plannedCalls = new List<ReActToolCallRequest>();
+                foreach (var reqCall in requiredScenarioCalls)
+                {
+                    var matching = decision.ToolCalls.FirstOrDefault(c =>
+                        string.Equals(c.ToolName, reqCall.ToolName, StringComparison.OrdinalIgnoreCase));
+                    plannedCalls.Add(matching ?? reqCall);
+                }
+                decision.ToolCalls = plannedCalls;
+            }
 
             if (!string.IsNullOrWhiteSpace(decision.Thought))
             {
@@ -116,6 +154,16 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                     continue;
                 }
 
+                // Scoped Component Gate: Never run unselected Tier-0 diagnostic tools in 'component' mode
+                if (diagnosisMode == "component" &&
+                    allowedTier0Tools.Count > 0 &&
+                    tool.SafetyTier == ToolSafetyTier.Tier0_ReadOnly &&
+                    !allowedTier0Tools.Contains(tool.Name) &&
+                    !allowedTier0Tools.Contains(call.ToolName))
+                {
+                    continue;
+                }
+
                 // Safety Gate: Never auto-execute Tier 1 or Tier 2 remediation tools during reasoning turns!
                 if (tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly)
                 {
@@ -135,7 +183,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                 {
                     StepType = nameof(ReActStepType.ToolCall),
                     Title = $"Calling Tool: {tool.DisplayName}",
-                    Content = $"Executing read-only diagnostic tool '{tool.Name}' with args {call.ArgumentsJson}",
+                    Content = $"Executing read-only diagnostic tool '{call.ToolName}' with args {call.ArgumentsJson}",
                     ToolName = tool.Name,
                     ToolArgumentsJson = call.ArgumentsJson
                 });
@@ -488,6 +536,59 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             },
             Trace = traceBuilder.ToString().Trim()
         };
+    }
+
+    private static (string DiagnosisMode, List<string> ComponentIds, string? ScenarioId) ExtractSessionScope(
+        DiagnosticOutput diagnostic)
+    {
+        var answers = diagnostic.Session?.Answers;
+        if (answers == null || answers.Count == 0)
+        {
+            return ("full", new List<string>(), null);
+        }
+
+        string GetAnswer(string key) =>
+            answers.FirstOrDefault(a => string.Equals(a.QuestionKey, key, StringComparison.OrdinalIgnoreCase))?.AnswerValue ?? string.Empty;
+
+        var rawMode = GetAnswer("diagnosis_mode").Trim().ToLowerInvariant();
+        var mode = rawMode is "component" or "scenario" or "full" ? rawMode : "full";
+
+        var rawScenario = GetAnswer("scenario_id").Trim();
+        var scenarioId = string.IsNullOrWhiteSpace(rawScenario)
+            ? null
+            : DiagnosticScopeMapper.NormalizeScenarioId(rawScenario);
+
+        var rawComponents = GetAnswer("component_ids").Trim();
+        var componentIds = new List<string>();
+        if (!string.IsNullOrWhiteSpace(rawComponents))
+        {
+            if (rawComponents.StartsWith("["))
+            {
+                try
+                {
+                    var parsed = JsonSerializer.Deserialize<List<string>>(rawComponents);
+                    if (parsed != null)
+                    {
+                        componentIds.AddRange(parsed
+                            .Select(DiagnosticScopeMapper.NormalizeComponentId)
+                            .Where(c => !string.IsNullOrWhiteSpace(c)));
+                    }
+                }
+                catch
+                {
+                    // Ignore malformed JSON array
+                }
+            }
+            else
+            {
+                componentIds.AddRange(rawComponents
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(DiagnosticScopeMapper.NormalizeComponentId)
+                    .Where(c => !string.IsNullOrWhiteSpace(c)));
+            }
+        }
+
+        return (mode, componentIds, scenarioId);
     }
 
     private static string GetPairedVerificationToolName(string remediationToolName)

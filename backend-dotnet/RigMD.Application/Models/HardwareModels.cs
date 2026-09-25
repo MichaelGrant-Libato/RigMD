@@ -19,8 +19,36 @@ public class CpuStatsDto
     public double? TemperatureCelsius { get; set; }
 }
 
+public enum ComponentStatus
+{
+    Present,
+    NotPresent
+}
+
+public class ComponentPresenceInfoDto
+{
+    public string ComponentId { get; set; } = string.Empty;
+    public string Status { get; set; } = nameof(ComponentStatus.Present);
+    public bool IsSelectable { get; set; } = true;
+    public string? Badge { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class HardwarePresenceProbeDto
+{
+    public string DeviceType { get; set; } = "Desktop";
+    public bool HasBattery { get; set; }
+    public bool HasGpu { get; set; } = true;
+    public bool HasDedicatedGpu { get; set; }
+    public string GpuName { get; set; } = string.Empty;
+    public string GpuType { get; set; } = string.Empty;
+    public Dictionary<string, ComponentPresenceInfoDto> Components { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
 public class GpuStatsDto
 {
+    public bool HasGpu { get; set; } = true;
+    public bool HasDedicatedGpu { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Driver { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty; // Dedicated / Integrated
@@ -170,6 +198,7 @@ public class HardwareProfileDto
     public List<DiskVolumeDto> AllDisks { get; set; } = new();
     
     public ProcessInsightsDto ProcessInsights { get; set; } = new();
+    public HardwarePresenceProbeDto? Presence { get; set; }
 }
 
 public class SaveProfilePayload

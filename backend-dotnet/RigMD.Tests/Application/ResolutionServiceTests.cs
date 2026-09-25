@@ -108,8 +108,14 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        // Since only storage was selected, it ignores the 92% RAM spike and focuses strictly on Storage
-        Assert.Equal("Elevated Storage Utilization", storageOnlyResult.DiagnosedCategory);
+        // Since only storage was selected and storage is healthy at 45%, Primary Verdict is healthy (No Active Issue Detected)
+        // while the 92% unselected RAM spike is surfaced strictly as an IncidentalWarning.
+        Assert.Equal("No Active Issue Detected", storageOnlyResult.DiagnosedCategory);
+        Assert.Equal(ComponentStatus.Present, storageOnlyResult.ComponentStatus);
+        Assert.Contains("Storage / SSD / HDD is operating normally", storageOnlyResult.PrimaryResult);
+        Assert.NotNull(storageOnlyResult.IncidentalWarning);
+        Assert.Contains("Although you only scanned Storage / SSD / HDD", storageOnlyResult.IncidentalWarning);
+        Assert.Contains("Memory (RAM)", storageOnlyResult.IncidentalWarning);
         Assert.NotEmpty(storageOnlyResult.Proof);
         Assert.Contains(storageOnlyResult.Proof, p => p.Label.Contains("Storage"));
         Assert.DoesNotContain(storageOnlyResult.Proof, p => p.Label.Contains("Memory (RAM)"));
@@ -125,6 +131,57 @@ public class ResolutionServiceTests
         Assert.Equal("High Memory Pressure", memoryResult.DiagnosedCategory);
         Assert.NotEmpty(memoryResult.Proof);
         Assert.Contains(memoryResult.Proof, p => p.Label == "Physical Memory (RAM)" && p.Status == "high");
+    }
+
+    [Fact]
+    public void AutomaticDiagnosisService_Diagnose_ReturnsNotPresent_WhenDesktopHasNoBattery()
+    {
+        var autoService = new AutomaticDiagnosisService();
+        var hardware = CreateHardware(
+            ramUsage: 42,
+            browserHeavy: false,
+            browserMemoryMb: 600);
+        hardware.DeviceType = "Desktop";
+        hardware.Battery = null;
+
+        var batteryResult = autoService.Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = "component",
+            ComponentIds = ["battery"],
+            Hardware = hardware
+        });
+
+        Assert.Equal(ComponentStatus.NotPresent, batteryResult.ComponentStatus);
+        Assert.Equal("No battery detected on this device", batteryResult.PrimaryResult);
+        Assert.Contains(batteryResult.Proof, p => p.Value == "Not Present (Desktop PC)" && p.Meaning.Contains("No battery detected on this device"));
+    }
+
+    [Fact]
+    public void AutomaticDiagnosisService_Diagnose_SeparatesScopedMemoryPrimaryResultFromCriticalStorageIncidentalWarning()
+    {
+        var autoService = new AutomaticDiagnosisService();
+        var hardware = CreateHardware(
+            ramUsage: 42,
+            browserHeavy: false,
+            browserMemoryMb: 500,
+            cpuUsage: 12,
+            storageUsage: 95,
+            dnsResolutionSucceeded: true);
+
+        var result = autoService.Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = "component",
+            ComponentIds = ["memory"],
+            Hardware = hardware
+        });
+
+        Assert.Equal("No Active Issue Detected", result.DiagnosedCategory);
+        Assert.Contains("Memory (RAM)", result.TargetScope);
+        Assert.Contains("Memory (RAM) is operating normally", result.PrimaryResult);
+        Assert.Contains("42% in use, no leaks detected", result.PrimaryResult);
+        Assert.NotNull(result.IncidentalWarning);
+        Assert.Contains("Note: Although you only scanned Memory (RAM)", result.IncidentalWarning);
+        Assert.Contains("critically low on space", result.IncidentalWarning);
     }
 
     private static HardwareProfileDto CreateHardware(

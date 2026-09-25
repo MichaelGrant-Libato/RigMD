@@ -8,57 +8,84 @@ public class WmiGpuProvider : IGpuProvider
 {
     public GpuStatsDto GetGpuStats()
     {
-        var dto = new GpuStatsDto { Name = "Unknown GPU", Driver = "Unknown", Type = "Unknown", VramGb = 0 };
-        
+        var fallbackDto = new GpuStatsDto
+        {
+            HasGpu = false,
+            HasDedicatedGpu = false,
+            Name = "Unknown GPU",
+            Driver = "Unknown",
+            Type = "Unknown",
+            VramGb = 0
+        };
+
+        var candidates = new List<GpuStatsDto>();
+
         try
         {
+            var dxVersion = Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\DirectX", "Version", null) as string;
+            var resolvedDx = !string.IsNullOrEmpty(dxVersion) ? dxVersion : "Unknown";
+
             using var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, DriverDate, AdapterRAM, PNPDeviceID FROM Win32_VideoController");
             foreach (var obj in searcher.Get())
             {
-                var name = obj["Name"]?.ToString() ?? "";
-                
-                if (name.Contains("Microsoft Basic"))
+                var name = (obj["Name"]?.ToString() ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(name) || name.Contains("Microsoft Basic", StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
+                }
 
-                dto.Name = name;
-                dto.Driver = obj["DriverVersion"]?.ToString() ?? "Unknown";
-                
+                var candidate = new GpuStatsDto
+                {
+                    HasGpu = true,
+                    Name = name,
+                    Driver = obj["DriverVersion"]?.ToString() ?? "Unknown",
+                    DirectXVersion = resolvedDx,
+                    Type = "Integrated"
+                };
+
                 var dDate = obj["DriverDate"]?.ToString() ?? "";
-                if (dDate.Length >= 8) 
+                if (dDate.Length >= 8)
                 {
-                    dto.DriverDate = $"{dDate.Substring(0, 4)}-{dDate.Substring(4, 2)}-{dDate.Substring(6, 2)}";
+                    candidate.DriverDate = $"{dDate.Substring(0, 4)}-{dDate.Substring(4, 2)}-{dDate.Substring(6, 2)}";
                 }
 
-                if (obj["AdapterRAM"] != null && long.TryParse(obj["AdapterRAM"].ToString(), out var ramBytes))
+                if (obj["AdapterRAM"] != null && long.TryParse(obj["AdapterRAM"].ToString(), out var ramBytes) && ramBytes > 0)
                 {
-                    if (ramBytes > 0)
-                    {
-                        dto.VramGb = Math.Round(ramBytes / (1024.0 * 1024.0 * 1024.0), 1);
-                        dto.DedicatedMemoryGb = dto.VramGb;
-                    }
+                    candidate.VramGb = Math.Round(ramBytes / (1024.0 * 1024.0 * 1024.0), 1);
+                    candidate.DedicatedMemoryGb = candidate.VramGb;
                 }
-                
+
                 var pnpId = obj["PNPDeviceID"]?.ToString() ?? "";
-                if (pnpId.StartsWith("PCI\\"))
+                if (pnpId.StartsWith("PCI\\", StringComparison.OrdinalIgnoreCase))
                 {
-                    dto.PhysicalLocation = "PCI bus"; // Simplified
+                    candidate.PhysicalLocation = "PCI bus";
                 }
-                
-                var dxVersion = Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\DirectX", "Version", null) as string;
-                dto.DirectXVersion = !string.IsNullOrEmpty(dxVersion) ? dxVersion : "Unknown";
-                dto.SharedMemoryGb = Math.Round(dto.VramGb > 0 ? dto.VramGb * 0.5 : 8.0, 1); // Mocked shared memory
-                
+
+                candidate.SharedMemoryGb = Math.Round(candidate.VramGb > 0 ? candidate.VramGb * 0.5 : 8.0, 1);
+
                 var lowerName = name.ToLowerInvariant();
-                if (lowerName.Contains("nvidia") || lowerName.Contains("rtx") || lowerName.Contains("gtx") || lowerName.Contains("radeon rx"))
+                bool isDedicated =
+                    lowerName.Contains("nvidia") ||
+                    lowerName.Contains("geforce") ||
+                    lowerName.Contains("rtx") ||
+                    lowerName.Contains("gtx") ||
+                    lowerName.Contains("quadro") ||
+                    lowerName.Contains("radeon rx") ||
+                    lowerName.Contains("radeon pro") ||
+                    lowerName.Contains("intel arc");
+
+                if (isDedicated)
                 {
-                    dto.Type = "Dedicated";
+                    candidate.Type = "Dedicated";
+                    candidate.HasDedicatedGpu = true;
                 }
-                else if (lowerName.Contains("intel") || lowerName.Contains("radeon graphics"))
+                else if (lowerName.Contains("intel") || lowerName.Contains("radeon") || lowerName.Contains("uhd") || lowerName.Contains("iris"))
                 {
-                    dto.Type = "Integrated";
+                    candidate.Type = "Integrated";
+                    candidate.HasDedicatedGpu = false;
                 }
-                
-                break; 
+
+                candidates.Add(candidate);
             }
         }
         catch (Exception)
@@ -66,6 +93,15 @@ public class WmiGpuProvider : IGpuProvider
             // Ignore and return defaults
         }
 
-        return dto;
+        if (candidates.Count == 0)
+        {
+            return fallbackDto;
+        }
+
+        bool anyDedicated = candidates.Any(c => c.HasDedicatedGpu);
+        var selected = candidates.FirstOrDefault(c => c.HasDedicatedGpu) ?? candidates[0];
+        selected.HasGpu = true;
+        selected.HasDedicatedGpu = anyDedicated;
+        return selected;
     }
 }

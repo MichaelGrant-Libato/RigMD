@@ -31,7 +31,10 @@ public interface IDiagnosticSessionRepository
         string actionCategory,
         string confidenceLabel,
         string explanation,
-        string clientId = "");
+        string clientId = "",
+        string? primaryResult = null,
+        string? incidentalWarning = null,
+        string? componentStatus = null);
 
     /// <summary>Returns all sessions for the current client, newest first.</summary>
     Task<IReadOnlyList<DiagnosticSessionDto>> GetSessionsAsync();

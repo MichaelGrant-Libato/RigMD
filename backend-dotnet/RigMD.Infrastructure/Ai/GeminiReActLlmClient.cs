@@ -154,6 +154,18 @@ public class GeminiReActLlmClient : IReActLlmClient
             }
         });
 
+        var targetScopeText = context.TargetScope.Count > 0
+            ? $"[{string.Join(", ", context.TargetScope)}]"
+            : "[Full System]";
+
+        var scopedSystemRule = context.TargetScope.Count > 0
+            ? $" The user has explicitly asked to diagnose: {targetScopeText}. Your PRIMARY verdict must evaluate only these requested components. Do not replace the primary verdict with an unselected component."
+            : string.Empty;
+
+        var scenarioRule = context.RequiredScenarioToolCalls.Count > 0
+            ? $" Selected Scenario: '{context.ScenarioId}'. On Turn 1, you must execute the scenario's mapped diagnostic tools ({string.Join(", ", context.RequiredScenarioToolCalls.Select(c => c.ToolName))}) before submitting a diagnosis."
+            : string.Empty;
+
         var contents = new List<object>
         {
             new
@@ -164,12 +176,15 @@ public class GeminiReActLlmClient : IReActLlmClient
                     new
                     {
                         text =
+                            $"Diagnosis Mode: {context.DiagnosisMode}\n" +
+                            $"TargetScope: {targetScopeText}\n" +
+                            (!string.IsNullOrWhiteSpace(context.ScenarioId) ? $"ScenarioId: {context.ScenarioId}\n" : string.Empty) +
                             $"User Symptom / Context: {context.UserSymptom}\n" +
                             $"Initial Category Hint: {context.DiagnosedCategory}\n" +
                             $"Baseline Summary: {context.InitialSummary}\n" +
                             $"Current ReAct Turn: {context.CurrentTurn + 1} of {context.MaxTurns}.\n" +
                             (context.History.Count == 0
-                                ? "First, call 1 or 2 read-only diagnostic tools (inspect_*) to gather live Windows telemetry before proposing any remediation."
+                                ? "First, call the relevant read-only diagnostic tools (inspect_* / query_*) for the requested scope to gather live Windows telemetry before proposing any remediation."
                                 : "Review the live tool observations below. If you have enough telemetry evidence, call submit_diagnosis_and_remediation_plan with exact metric citations and the best remediation tool.")
                     }
                 }
@@ -226,7 +241,9 @@ public class GeminiReActLlmClient : IReActLlmClient
                         text =
                             "You are RigMD's Autonomous Windows Diagnostic & Remediation ReAct Agent. " +
                             "Never guess or use canned responses. Always call read-only inspection tools first to observe live WMI, sensor, disk, process, network, or Windows Event Log telemetry. " +
-                            "Once you have observed live metrics, call submit_diagnosis_and_remediation_plan citing the exact numbers observed."
+                            "Once you have observed live metrics, call submit_diagnosis_and_remediation_plan citing the exact numbers observed." +
+                            scopedSystemRule +
+                            scenarioRule
                     }
                 }
             },
@@ -350,9 +367,50 @@ public class GeminiReActLlmClient : IReActLlmClient
             context.History.Select(h => h.ToolName),
             StringComparer.OrdinalIgnoreCase);
 
-        // Turn 0: Issue targeted Tier 0 read-only diagnostic tool calls based on symptom/category context
+        // Turn 0: Issue targeted Tier 0 read-only diagnostic tool calls based on scenario, component scope, or symptom context
         if (context.History.Count == 0)
         {
+            // 1. Explicit Scenario-to-Tool Mapping
+            if (context.RequiredScenarioToolCalls is { Count: > 0 })
+            {
+                var scenarioTools = string.Join(", ", context.RequiredScenarioToolCalls.Select(t => $"'{t.ToolName}'"));
+                return new ReActModelTurnDecision
+                {
+                    EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                    Thought = $"Executing Scenario-to-Tool diagnostic plan for '{context.ScenarioId}': invoking {scenarioTools} to gather targeted telemetry before generating a diagnosis.",
+                    ToolCalls = context.RequiredScenarioToolCalls.ToList()
+                };
+            }
+
+            // 2. Strict Scoped "Specific Parts" Component Tool Filtering
+            if (string.Equals(context.DiagnosisMode, "component", StringComparison.OrdinalIgnoreCase) &&
+                context.AllowedDiagnosticTools is { Count: > 0 })
+            {
+                var scopedCalls = context.AllowedDiagnosticTools
+                    .Where(t => !string.Equals(t, "inspect_gpu_status", StringComparison.OrdinalIgnoreCase) &&
+                                !string.Equals(t, "inspect_dns", StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(toolName => new ReActToolCallRequest
+                    {
+                        ToolName = toolName,
+                        ArgumentsJson = toolName.Equals("inspect_memory_and_processes", StringComparison.OrdinalIgnoreCase)
+                            ? "{\"topN\":10,\"sortBy\":\"memory\"}"
+                            : "{}",
+                        Thought = $"Scoped component check for [{string.Join(", ", context.TargetScope)}]: running '{toolName}'."
+                    })
+                    .ToList();
+
+                if (scopedCalls.Count > 0)
+                {
+                    return new ReActModelTurnDecision
+                    {
+                        EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                        Thought = $"The user explicitly requested to diagnose [{string.Join(", ", context.TargetScope)}]. Running only the mapped component tool(s): {string.Join(", ", scopedCalls.Select(c => $"'{c.ToolName}'"))}.",
+                        ToolCalls = scopedCalls
+                    };
+                }
+            }
+
             var toolCalls = new List<ReActToolCallRequest>();
             string thought;
 

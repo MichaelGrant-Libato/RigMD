@@ -106,6 +106,23 @@ public class DiagnosticController : ControllerBase
         }
     }
 
+    [HttpGet("preflight")]
+    public IActionResult GetHardwarePreflight()
+    {
+        try
+        {
+            var probe = _profileService.GetHardwarePresenceProbe();
+            return Ok(probe);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Hardware preflight check failed: {ex}");
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { detail = "Hardware preflight check could not be completed." });
+        }
+    }
+
     [HttpPost("local-scan")]
     public async Task<IActionResult> LocalDiagnosis(
         [FromBody] LocalDiagnosisRequest request,
@@ -146,7 +163,7 @@ public class DiagnosticController : ControllerBase
                     .Diagnose(input);
 
             var explanation = result.Explanation;
-            if (_aiExplainer != null)
+            if (_aiExplainer != null && result.ComponentStatus != ComponentStatus.NotPresent)
             {
                 try
                 {
@@ -175,15 +192,17 @@ public class DiagnosticController : ControllerBase
                     {
                         SymptomType = request.Mode == "scenario" && !string.IsNullOrWhiteSpace(request.ScenarioId)
                             ? request.ScenarioId
-                            : request.Mode == "component" && request.ComponentIds.Length > 0
-                                ? $"Component check: {string.Join(", ", request.ComponentIds)}"
+                            : request.Mode == "component" && result.TargetScope.Count > 0
+                                ? $"Component check: {string.Join(", ", result.TargetScope)}"
                                 : "Full computer check",
                         AffectedActivity = $"Mode: {request.Mode}"
                     };
                     var generated = await _aiExplainer.GenerateExplanationAsync(mappedResult, scopeSymptom);
                     if (!string.IsNullOrWhiteSpace(generated))
                     {
-                        explanation = generated;
+                        explanation = string.IsNullOrWhiteSpace(result.IncidentalWarning)
+                            ? generated
+                            : $"{generated}\n\n{result.IncidentalWarning}";
                     }
                 }
                 catch
@@ -205,13 +224,28 @@ public class DiagnosticController : ControllerBase
                         result.ActionCategory,
                         result.ConfidenceLabel,
                         explanation,
-                        "local");
+                        "local",
+                        result.PrimaryResult,
+                        result.IncidentalWarning,
+                        result.ComponentStatus.ToString());
 
             return Ok(
                 new
                 {
                     session_id =
                         sessionId.ToString(),
+
+                    component_status =
+                        result.ComponentStatus.ToString(),
+
+                    target_scope =
+                        result.TargetScope,
+
+                    primary_result =
+                        result.PrimaryResult,
+
+                    incidental_warning =
+                        result.IncidentalWarning,
 
                     diagnosed_category =
                         result.DiagnosedCategory,

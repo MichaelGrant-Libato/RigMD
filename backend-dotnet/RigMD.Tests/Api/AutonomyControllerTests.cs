@@ -439,7 +439,10 @@ public class AutonomyControllerTests
             string actionCategory,
             string confidenceLabel,
             string explanation,
-            string clientId = "")
+            string clientId = "",
+            string? primaryResult = null,
+            string? incidentalWarning = null,
+            string? componentStatus = null)
         {
             return Task.FromResult(Guid.NewGuid());
         }

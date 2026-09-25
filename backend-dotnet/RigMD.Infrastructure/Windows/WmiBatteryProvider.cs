@@ -20,12 +20,26 @@ public class WmiBatteryProvider : IBatteryProvider
 
             foreach (var obj in batteries)
             {
+                var statusObj = obj["BatteryStatus"];
+                var wmiStatusStr = obj["Status"]?.ToString();
+                var statusStr = statusObj?.ToString();
+
+                // Pre-flight presence check: require a valid non-null BatteryStatus (> 0) or WMI Status
+                if (statusObj == null && string.IsNullOrWhiteSpace(wmiStatusStr))
+                {
+                    continue;
+                }
+
+                int.TryParse(statusStr, out int status);
+                if (status <= 0 && string.IsNullOrWhiteSpace(wmiStatusStr))
+                {
+                    continue;
+                }
+
                 var chargeStr = obj["EstimatedChargeRemaining"]?.ToString();
-                var statusStr = obj["BatteryStatus"]?.ToString();
                 var runTimeStr = obj["EstimatedRunTime"]?.ToString();
 
                 int.TryParse(chargeStr, out int charge);
-                int.TryParse(statusStr, out int status);
                 int.TryParse(runTimeStr, out int runTime);
 
                 string description = status switch
@@ -55,7 +69,7 @@ public class WmiBatteryProvider : IBatteryProvider
                     EstimatedRunTime = runTime == 71582788 ? 0 : runTime, // 71582788 usually means calculating
                     IsCharging = isCharging,
                     ChargePercent = charge,
-                    HealthStatus = "Good" // WMI doesn't easily expose health wear without deeper queries, default to Good for now
+                    HealthStatus = "Good"
                 };
             }
         }

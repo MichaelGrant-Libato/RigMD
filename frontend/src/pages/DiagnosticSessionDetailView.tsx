@@ -7,6 +7,7 @@ import {
 import { motion } from 'motion/react';
 
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Clock3,
@@ -62,6 +63,9 @@ interface SessionDetail {
   confidence_label: string;
   ai_explanation?: string;
   recommended_next_step?: string;
+  primary_result?: string;
+  incidental_warning?: string | null;
+  component_status?: string;
   resolution_status?: string;
   resolution_checked_at?: string | null;
   resolution_summary?: string;
@@ -719,6 +723,51 @@ export default function DiagnosticSessionDetailView({
                         {session.severity ||
                           'Not recorded'}
                       </p>
+                    </div>
+                  </div>
+                )}
+
+                {session.primary_result && (
+                  <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2
+                        size={18}
+                        className="mt-0.5 shrink-0 text-emerald-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+                            Primary Result (Scoped Verdict)
+                          </h3>
+                          {session.component_status === 'NotPresent' && (
+                            <span className="rounded border border-amber-400/35 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                              Component Not Present
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 text-sm font-medium leading-relaxed text-slate-100">
+                          {session.primary_result}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {session.incidental_warning && (
+                  <div className="mt-4 rounded-xl border border-amber-400/35 bg-amber-400/10 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle
+                        size={18}
+                        className="mt-0.5 shrink-0 text-amber-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-200">
+                          Incidental Warning (Outside Selected Scope)
+                        </h3>
+                        <p className="mt-1.5 text-sm leading-relaxed text-amber-100">
+                          {session.incidental_warning}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}

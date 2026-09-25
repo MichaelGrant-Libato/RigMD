@@ -60,6 +60,11 @@ public class ReActTurnRecord
 public class ReActConversationContext
 {
     public string SessionId { get; set; } = string.Empty;
+    public string DiagnosisMode { get; set; } = "full";
+    public List<string> TargetScope { get; set; } = new();
+    public string? ScenarioId { get; set; }
+    public List<string> AllowedDiagnosticTools { get; set; } = new();
+    public List<ReActToolCallRequest> RequiredScenarioToolCalls { get; set; } = new();
     public string UserSymptom { get; set; } = string.Empty;
     public string DiagnosedCategory { get; set; } = string.Empty;
     public string InitialSummary { get; set; } = string.Empty;

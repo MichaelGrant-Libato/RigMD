@@ -20,6 +20,15 @@ public sealed class AutomaticDiagnosisInput
 
 public sealed class AutomaticDiagnosisResult
 {
+    public ComponentStatus ComponentStatus { get; init; } = ComponentStatus.Present;
+
+    public IReadOnlyList<string> TargetScope { get; init; } =
+        Array.Empty<string>();
+
+    public string PrimaryResult { get; init; } = string.Empty;
+
+    public string? IncidentalWarning { get; init; }
+
     public string DiagnosedCategory { get; init; } = string.Empty;
 
     public string ActionCategory { get; init; } = string.Empty;

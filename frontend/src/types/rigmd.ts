@@ -10,11 +10,28 @@ export interface AgentStatus {
   isOnline: boolean;
 }
 
+export interface ComponentPresenceInfo {
+  componentId: string;
+  status: 'Present' | 'NotPresent';
+  isSelectable: boolean;
+  badge: string;
+  reason: string;
+}
+
+export interface HardwarePresenceProbe {
+  deviceType: string;
+  hasBattery: boolean;
+  hasGpu: boolean;
+  hasDedicatedGpu: boolean;
+  components: Record<string, ComponentPresenceInfo>;
+}
+
 export interface AgentHardwareSnapshot {
   deviceName: string;
   deviceType?: string;
   activePowerPlan?: string;
   connectedDisplays?: number;
+  presence?: HardwarePresenceProbe | null;
   battery?: {
     isCharging: boolean;
     chargePercent: number;
@@ -66,6 +83,8 @@ export interface AgentHardwareSnapshot {
     type: string;
     driver: string;
     vramGb: number;
+    hasGpu?: boolean;
+    hasDedicatedGpu?: boolean;
     dedicatedMemoryGb?: number;
     sharedMemoryGb?: number;
     driverDate?: string;

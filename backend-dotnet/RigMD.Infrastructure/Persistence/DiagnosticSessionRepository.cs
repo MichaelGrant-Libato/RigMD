@@ -125,7 +125,10 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     string actionCategory,
     string confidenceLabel,
     string explanation,
-    string clientId = "")
+    string clientId = "",
+    string? primaryResult = null,
+    string? incidentalWarning = null,
+    string? componentStatus = null)
     {
         if (string.IsNullOrWhiteSpace(clientId))
         {
@@ -257,6 +260,27 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                     Session = session,
                     QuestionKey = "resolution_status",
                     AnswerValue = "open"
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "primary_result",
+                    AnswerValue = primaryResult ?? string.Empty
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "incidental_warning",
+                    AnswerValue = incidentalWarning ?? string.Empty
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "component_status",
+                    AnswerValue = componentStatus ?? nameof(ComponentStatus.Present)
                 }
             };
 
@@ -804,6 +828,11 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             AgentId = Answer("agent_id"),
             AgentCommandId = Answer("agent_command_id"),
             ClientId = Answer("client_id"),
+            PrimaryResult = Answer("primary_result"),
+            IncidentalWarning = Answer("incidental_warning"),
+            ComponentStatus = string.IsNullOrWhiteSpace(Answer("component_status"))
+                ? nameof(ComponentStatus.Present)
+                : Answer("component_status"),
             CreatedAt = s.CreatedAt.ToString("o"),
             DaysAgo = daysAgo,
             DisplayDate = localTime.ToString("MMM dd, yyyy"),

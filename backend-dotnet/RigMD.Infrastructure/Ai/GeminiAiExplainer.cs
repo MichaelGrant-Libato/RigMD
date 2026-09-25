@@ -142,6 +142,15 @@ public class GeminiAiExplainer : IAiExplainer
             ? string.Join("; ", proofSource.Select(p => $"{p.Label}: {p.Value} ({p.Status})"))
             : "No abnormal telemetry readings detected.";
 
+        var isScopedComponent = symptomPayload.SymptomType.StartsWith("Component check:", StringComparison.OrdinalIgnoreCase);
+        var targetScope = isScopedComponent
+            ? symptomPayload.SymptomType.Replace("Component check:", string.Empty, StringComparison.OrdinalIgnoreCase).Trim()
+            : "Full System";
+
+        var scopedRule = isScopedComponent
+            ? $"\n4. The user has explicitly asked to diagnose: [{targetScope}]. Your PRIMARY verdict must evaluate only these requested components. Do not replace the primary verdict with an unselected component."
+            : string.Empty;
+
         return $@"You are RigMD's Windows hardware and OS diagnostic explanation engine.
 Explain the following diagnostic result to a user in clear, grounded English (2 to 3 concise sentences).
 
@@ -149,6 +158,7 @@ Explain the following diagnostic result to a user in clear, grounded English (2 
 Diagnosed Category: {result.DiagnosedCategory}
 Confidence Level: {result.ConfidenceLabel}
 Recommended Action Tier: {result.ActionCategory}
+TargetScope: [{targetScope}]
 Symptom / Scope: {symptomPayload.SymptomType} ({symptomPayload.AffectedActivity})
 Evidence Factors: {evidenceText}
 Live Telemetry Readings: {proofText}
@@ -158,6 +168,6 @@ Recommended Next Step: {result.RecommendedNextStep}
 STRICT RULES:
 1. Reference the actual telemetry numbers from Live Telemetry Readings so the user sees concrete proof.
 2. Keep the explanation concise: 2 to 3 sentences maximum.
-3. Mention that the user can run the RigMD Autonomous ReAct Agent below to inspect deeper telemetry and preview safe fixes before anything changes.";
+3. Mention that the user can run the RigMD Autonomous ReAct Agent below to inspect deeper telemetry and preview safe fixes before anything changes.{scopedRule}";
     }
 }

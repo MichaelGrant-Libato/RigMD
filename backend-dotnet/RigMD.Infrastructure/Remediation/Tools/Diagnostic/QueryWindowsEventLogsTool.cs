@@ -45,6 +45,12 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                 {
                     Type = "integer",
                     Description = "Time window in hours to search backwards from now (default: 48, max: 168)."
+                },
+                ["eventFocus"] = new()
+                {
+                    Type = "string",
+                    Description = "Optional event filter focus: 'General' (default), 'Boot' (Event 100 / boot performance), or 'BugCheck' (Kernel-Power 41 / BugCheck 1001 / unexpected shutdown 6008).",
+                    EnumValues = new List<string> { "General", "Boot", "BugCheck" }
                 }
             },
             Required = new List<string>()
@@ -74,6 +80,7 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
         CancellationToken cancellationToken = default)
     {
         var rawLogName = ToolArgumentHelper.GetString(arguments, "logName", "System");
+        var eventFocus = ToolArgumentHelper.GetString(arguments, "eventFocus", "General");
         var logName = string.Equals(rawLogName, "Application", StringComparison.OrdinalIgnoreCase)
             ? "Application"
             : "System";
@@ -81,10 +88,14 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
         var maxEvents = Math.Clamp(ToolArgumentHelper.GetInt(arguments, "maxEvents", 12), 1, 25);
         var hoursBack = Math.Clamp(ToolArgumentHelper.GetInt(arguments, "hoursBack", 48), 1, 168);
 
-        progressReporter?.Invoke($"Querying Windows '{logName}' Event Log (last {hoursBack}h, up to {maxEvents} events)...");
+        progressReporter?.Invoke($"Querying Windows '{logName}' Event Log (focus: {eventFocus}, last {hoursBack}h, up to {maxEvents} events)...");
 
         var timeDiffMs = (long)TimeSpan.FromHours(hoursBack).TotalMilliseconds;
-        var xpathQuery = $"*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+        var xpathQuery = string.Equals(eventFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)
+            ? $"*[System[(EventID=41 or EventID=1001 or EventID=6008 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
+            : string.Equals(eventFocus, "Boot", StringComparison.OrdinalIgnoreCase)
+                ? $"*[System[(EventID=100 or EventID=6005 or EventID=6006 or EventID=7000 or EventID=7001 or Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
+                : $"*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
 
         var events = new List<object>();
         string? queryWarning = null;

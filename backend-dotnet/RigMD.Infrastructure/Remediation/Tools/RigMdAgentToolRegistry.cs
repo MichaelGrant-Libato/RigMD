@@ -39,8 +39,23 @@ public class RigMdAgentToolRegistry : IRigMdAgentToolRegistry
             return null;
         }
 
-        return _toolsByName.TryGetValue(name.Trim(), out var tool)
-            ? tool
+        var normalized = name.Trim();
+        if (_toolsByName.TryGetValue(normalized, out var tool))
+        {
+            return tool;
+        }
+
+        var aliasTarget = normalized.ToLowerInvariant() switch
+        {
+            "inspect_gpu_status" => "inspect_gpu_and_displays",
+            "inspect_dns" => "inspect_network_connectivity",
+            "flush_dns" => "flush_dns_cache",
+            "clear_user_temp_files" => "clear_temp_files",
+            _ => null
+        };
+
+        return aliasTarget != null && _toolsByName.TryGetValue(aliasTarget, out var aliasedTool)
+            ? aliasedTool
             : null;
     }
 

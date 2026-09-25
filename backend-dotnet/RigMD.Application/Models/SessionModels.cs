@@ -105,6 +105,15 @@ public class DiagnosticSessionDto
     [JsonPropertyName("client_id")]
     public string ClientId { get; set; } = string.Empty;
 
+    [JsonPropertyName("primary_result")]
+    public string PrimaryResult { get; set; } = string.Empty;
+
+    [JsonPropertyName("incidental_warning")]
+    public string IncidentalWarning { get; set; } = string.Empty;
+
+    [JsonPropertyName("component_status")]
+    public string ComponentStatus { get; set; } = "Present";
+
     [JsonPropertyName("remediation_history")]
     public List<RemediationRunDto> RemediationHistory { get; set; } = new();
 

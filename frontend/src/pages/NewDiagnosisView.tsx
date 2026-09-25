@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -55,6 +56,8 @@ import {
 
 import type {
   AgentSnapshotResponse,
+  ComponentPresenceInfo,
+  HardwarePresenceProbe,
 } from '../types/rigmd';
 
 import type {
@@ -98,6 +101,11 @@ interface DiagnosticReport {
   confidence_label: string;
   ai_explanation: string;
   recommended_next_step: string;
+
+  component_status?: 'Present' | 'NotPresent' | string;
+  target_scope?: string;
+  primary_result?: string;
+  incidental_warning?: string | null;
 
   proof?: DiagnosticProof[];
 
@@ -844,6 +852,119 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   ] =
     useState(false);
 
+  const [
+    preflightProbe,
+    setPreflightProbe,
+  ] =
+    useState<HardwarePresenceProbe | null>(
+      null,
+    );
+
+  useEffect(() => {
+    let active = true;
+
+    apiGet<HardwarePresenceProbe>(
+      '/api/diagnosis/preflight',
+      {
+        headers: {
+          'X-Client-ID':
+            AGENT_ID || 'local',
+        },
+      },
+    )
+      .then((res) => {
+        if (active && res.data) {
+          setPreflightProbe(
+            res.data,
+          );
+          setSelectedComponents(
+            (current) =>
+              current.filter(
+                (id) => {
+                  const comp =
+                    res.data
+                      ?.components?.[
+                      id
+                    ];
+                  return comp
+                    ? comp.isSelectable !==
+                        false &&
+                        comp.status !==
+                          'NotPresent'
+                    : true;
+                },
+              ),
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn(
+          'Pre-flight hardware probe warning:',
+          err,
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const getComponentPresence = (
+    componentId: string,
+  ):
+    | ComponentPresenceInfo
+    | undefined => {
+    const probe =
+      preflightProbe ??
+      snapshot?.hardware?.presence;
+
+    if (
+      probe?.components?.[
+        componentId
+      ]
+    ) {
+      return probe.components[
+        componentId
+      ];
+    }
+
+    if (
+      componentId === 'battery' &&
+      snapshot?.hardware &&
+      snapshot.hardware.battery ===
+        null
+    ) {
+      return {
+        componentId: 'battery',
+        status: 'NotPresent',
+        isSelectable: false,
+        badge:
+          'Not Present (Desktop PC)',
+        reason:
+          'No battery detected on this device',
+      };
+    }
+
+    return undefined;
+  };
+
+  const isComponentDisabled = (
+    componentId: string,
+  ): boolean => {
+    const presence =
+      getComponentPresence(
+        componentId,
+      );
+
+    return Boolean(
+      presence &&
+        (presence.status ===
+          'NotPresent' ||
+          presence.isSelectable ===
+            false),
+    );
+  };
+
   const allComponents =
     useMemo(
       () =>
@@ -853,6 +974,19 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
         ),
       [],
     );
+
+  const selectableComponentIds =
+    allComponents
+      .map(
+        (component) =>
+          component.id,
+      )
+      .filter(
+        (id) =>
+          !isComponentDisabled(
+            id,
+          ),
+      );
 
   const activeMode =
     DIAGNOSIS_MODES.find(
@@ -867,6 +1001,12 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
   const selectedComponentDetails =
     selectedComponents
+      .filter(
+        (componentId) =>
+          !isComponentDisabled(
+            componentId,
+          ),
+      )
       .map((componentId) =>
         allComponents.find(
           (component) =>
@@ -900,7 +1040,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       ? true
       : diagnosisMode ===
           'component'
-        ? selectedComponents.length >
+        ? selectedComponentDetails.length >
           0
         : Boolean(
             selectedScenarioId,
@@ -1011,7 +1151,12 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   const toggleComponent = (
     componentId: string,
   ) => {
-    if (diagnosisBusy) {
+    if (
+      diagnosisBusy ||
+      isComponentDisabled(
+        componentId,
+      )
+    ) {
       return;
     }
 
@@ -1049,23 +1194,20 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
         return;
       }
 
-      const allIds =
-        allComponents.map(
-          (component) =>
-            component.id,
-        );
-
       const alreadyAllSelected =
-        allIds.every((id) =>
-          selectedComponents.includes(
-            id,
-          ),
+        selectableComponentIds.length >
+          0 &&
+        selectableComponentIds.every(
+          (id) =>
+            selectedComponents.includes(
+              id,
+            ),
         );
 
       setSelectedComponents(
         alreadyAllSelected
           ? []
-          : allIds,
+          : selectableComponentIds,
       );
 
       setSnapshot(null);
@@ -1127,11 +1269,21 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
       try {
         setDiagnosisStage('scanning');
 
+        const safeComponentIds =
+          diagnosisMode === 'component'
+            ? selectedComponents.filter(
+                (id) =>
+                  !isComponentDisabled(
+                    id,
+                  ),
+              )
+            : [];
+
         const localResponse = await apiPost<DiagnosticReport>(
           '/api/diagnosis/local-scan',
           {
             mode: diagnosisMode,
-            componentIds: diagnosisMode === 'component' ? selectedComponents : [],
+            componentIds: safeComponentIds,
             scenarioId: diagnosisMode === 'scenario' ? selectedScenarioId : null,
           },
           {
@@ -1687,7 +1839,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         </h3>
 
                         <p className="mt-1 text-sm text-slate-400">
-                          Select one or more subsystems to focus the diagnosis.
+                          Select one or more subsystems to focus the diagnosis. Absent hardware is automatically gated.
                         </p>
                       </div>
 
@@ -1697,8 +1849,14 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         onClick={selectAllComponents}
                         className="rounded-lg border border-teal-300/30 bg-teal-300/10 px-3 py-2 text-xs font-bold text-teal-200 transition hover:bg-teal-300/15 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {selectedComponents.length ===
-                        allComponents.length
+                        {selectableComponentIds.length >
+                          0 &&
+                        selectableComponentIds.every(
+                          (id) =>
+                            selectedComponents.includes(
+                              id,
+                            ),
+                        )
                           ? 'Clear all'
                           : 'Select all'}
                       </button>
@@ -1715,7 +1873,18 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
                               {group.items.map(
                                 (component) => {
+                                  const presence =
+                                    getComponentPresence(
+                                      component.id,
+                                    );
+
+                                  const isNotPresent =
+                                    isComponentDisabled(
+                                      component.id,
+                                    );
+
                                   const selected =
+                                    !isNotPresent &&
                                     selectedComponents.includes(
                                       component.id,
                                     );
@@ -1730,7 +1899,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                       }
                                       type="button"
                                       disabled={
-                                        diagnosisBusy
+                                        diagnosisBusy ||
+                                        isNotPresent
                                       }
                                       onClick={() =>
                                         toggleComponent(
@@ -1738,20 +1908,27 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                         )
                                       }
                                       whileTap={
-                                        diagnosisBusy
+                                        diagnosisBusy ||
+                                        isNotPresent
                                           ? undefined
                                           : buttonTap
                                       }
-                                      className={`flex min-h-[106px] items-start gap-3 rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                                        selected
-                                          ? selectedCardStyle
-                                          : unselectedCardStyle
+                                      className={`flex min-h-[106px] items-start gap-3 rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed ${
+                                        isNotPresent
+                                          ? 'border-slate-700/45 bg-[#0c1219] text-slate-500 opacity-75'
+                                          : selected
+                                            ? selectedCardStyle
+                                            : `${unselectedCardStyle} disabled:opacity-60`
                                       }`}
                                     >
                                       <span
-                                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${iconBoxStyle(
-                                          selected,
-                                        )}`}
+                                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
+                                          isNotPresent
+                                            ? 'border-slate-700/50 bg-slate-800/40 text-slate-500'
+                                            : iconBoxStyle(
+                                                selected,
+                                              )
+                                        }`}
                                       >
                                         <Icon
                                           size={18}
@@ -1759,19 +1936,36 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                       </span>
 
                                       <span className="min-w-0 flex-1">
-                                        <span className="flex items-start justify-between gap-2">
-                                          <span className="font-bold text-white">
+                                        <span className="flex flex-wrap items-start justify-between gap-2">
+                                          <span
+                                            className={`font-bold ${
+                                              isNotPresent
+                                                ? 'text-slate-400'
+                                                : 'text-white'
+                                            }`}
+                                          >
                                             {
                                               component.title
                                             }
                                           </span>
 
-                                          {selected && (
+                                          {isNotPresent ? (
+                                            <span className="shrink-0 rounded-full border border-amber-400/35 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                                              {presence?.badge ||
+                                                'Not Present (Desktop PC)'}
+                                            </span>
+                                          ) : selected ? (
                                             <Check
                                               size={15}
                                               className="shrink-0 text-teal-300"
                                             />
-                                          )}
+                                          ) : presence?.badge ? (
+                                            <span className="shrink-0 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                                              {
+                                                presence.badge
+                                              }
+                                            </span>
+                                          ) : null}
                                         </span>
 
                                         <span className="mt-1 block text-xs leading-relaxed text-slate-400">
@@ -1779,6 +1973,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                             component.description
                                           }
                                         </span>
+
+                                        {isNotPresent && (
+                                          <span className="mt-1.5 block text-[11px] font-medium text-amber-300/85">
+                                            {presence?.reason ||
+                                              'No battery detected on this device'}
+                                          </span>
+                                        )}
                                       </span>
                                     </motion.button>
                                   );
@@ -2177,6 +2378,18 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           Check complete
                         </span>
 
+                        {report.target_scope && (
+                          <span className="rounded border border-teal-400/30 bg-teal-400/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-teal-200">
+                            Scope: {report.target_scope}
+                          </span>
+                        )}
+
+                        {report.component_status === 'NotPresent' && (
+                          <span className="rounded border border-amber-400/35 bg-amber-400/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-amber-300">
+                            Component Not Present
+                          </span>
+                        )}
+
                         <span
                           className={`rounded border px-2.5 py-1 text-xs font-bold uppercase tracking-wider ${getActionTone(report.action_category).badge}`}
                         >
@@ -2237,6 +2450,51 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
                   </div>
                 </div>
+
+                {report.primary_result && (
+                  <section className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2
+                        size={18}
+                        className="mt-0.5 shrink-0 text-emerald-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+                            Primary Result (Scoped Verdict)
+                          </h4>
+                          {report.target_scope && (
+                            <span className="rounded border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                              {report.target_scope}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 text-sm font-medium leading-relaxed text-slate-100">
+                          {report.primary_result}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {report.incidental_warning && (
+                  <section className="rounded-xl border border-amber-400/35 bg-amber-400/10 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle
+                        size={18}
+                        className="mt-0.5 shrink-0 text-amber-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-amber-200">
+                          Incidental Warning (Outside Selected Scope)
+                        </h4>
+                        <p className="mt-1.5 text-sm leading-relaxed text-amber-100">
+                          {report.incidental_warning}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
 
                   <section className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4">
                     <h4 className="font-semibold text-cyan-200">What to do next</h4>
