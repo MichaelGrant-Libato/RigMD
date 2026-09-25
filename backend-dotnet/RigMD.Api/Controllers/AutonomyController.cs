@@ -139,7 +139,15 @@ public class AutonomyController : ControllerBase
         var result =
             await _orchestrator.RunDryRunCycleAsync(
                 diagnostic,
-                hardware);
+                hardware,
+                progressReporter: msg =>
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveProgress", msg);
+                },
+                stepReporter: step =>
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveReActStep", step);
+                });
 
         if (result.Plan != null)
         {
@@ -371,11 +379,13 @@ public class AutonomyController : ControllerBase
         public string SessionId { get; set; } = string.Empty;
         public string DiagnosedCategory { get; set; } = string.Empty;
         public bool UserConsentProvided { get; set; }
+        public string? ToolName { get; set; }
+        public string? ToolArgumentsJson { get; set; }
     }
 
     /// <summary>
     /// Runs a REAL remediation cycle:
-    /// Plan -> Safety Check -> Execute -> Verify -> Rollback/Pivot/Escalate.
+    /// Pre-Execution Verification Snapshot -> Tool Execution -> Post-Execution Verification.
     /// </summary>
     [HttpPost("execute")]
     public async Task<IActionResult> Execute([FromBody] ExecuteRequest request)
@@ -408,9 +418,15 @@ public class AutonomyController : ControllerBase
                 diagnostic,
                 hardware,
                 request.UserConsentProvided,
-                progressReporter: msg => 
+                progressReporter: msg =>
                 {
                     _ = _hubContext.Clients.All.SendAsync("ReceiveProgress", msg);
+                },
+                requestedToolName: request.ToolName,
+                requestedArgumentsJson: request.ToolArgumentsJson,
+                stepReporter: step =>
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveReActStep", step);
                 });
 
         if (result.Plan != null)

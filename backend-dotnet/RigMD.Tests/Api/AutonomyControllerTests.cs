@@ -315,7 +315,10 @@ public class AutonomyControllerTests
         public Task<OrchestrationResult>
             RunDryRunCycleAsync(
                 DiagnosticOutput diagnostic,
-                HardwareProfileDto hardware)
+                HardwareProfileDto hardware,
+                Action<string>? progressReporter = null,
+                Action<ReActTraceStep>? stepReporter = null,
+                CancellationToken cancellationToken = default)
         {
             return Task.FromResult(
                 PreviewResult);
@@ -326,7 +329,11 @@ public class AutonomyControllerTests
                 DiagnosticOutput diagnostic,
                 HardwareProfileDto hardware,
                 bool userConsentProvided = false,
-                Action<string>? progressCallback = null)
+                Action<string>? progressCallback = null,
+                string? requestedToolName = null,
+                string? requestedArgumentsJson = null,
+                Action<ReActTraceStep>? stepReporter = null,
+                CancellationToken cancellationToken = default)
         {
             return Task.FromResult(
                 ExecutionResult);

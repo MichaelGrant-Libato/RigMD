@@ -11,6 +11,8 @@ public class RemediationActionDef
     public string Description { get; set; } = string.Empty;
     public List<string> SupportedDiagnosisCategories { get; set; } = new();
     public string RiskLevel { get; set; } = string.Empty;
+    public string SafetyTier { get; set; } = string.Empty;
+    public string ToolArgumentsJson { get; set; } = "{}";
     public bool IsReversible { get; set; }
     public bool RequiresUserConfirmation { get; set; }
 }
@@ -57,6 +59,10 @@ public enum VerificationStatus
 
 public class OrchestrationResult
 {
+    public string EngineMode { get; set; } = "ReAct-Agent";
+
+    public string RootCauseAnalysis { get; set; } = string.Empty;
+
     public RemediationPlan? Plan { get; set; }
 
     public SafetyEvaluation? Safety { get; set; }
@@ -66,6 +72,14 @@ public class OrchestrationResult
     public VerificationStatus? Verification { get; set; }
 
     public List<RemediationAttempt> Attempts { get; set; } = new();
+
+    public List<ReActTraceStep> ReasoningSteps { get; set; } = new();
+
+    public ProposedToolInvocation? ProposedTool { get; set; }
+
+    public ToolDryRunPreview? DryRunPreview { get; set; }
+
+    public PostExecutionVerificationReport? VerificationReport { get; set; }
 
     public bool Escalated { get; set; }
 
