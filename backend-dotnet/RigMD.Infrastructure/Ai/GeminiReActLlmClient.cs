@@ -259,29 +259,45 @@ public class GeminiReActLlmClient : IReActLlmClient
         };
 
         var jsonPayload = JsonSerializer.Serialize(requestBody);
-        var models = new[] { "gemini-2.5-flash", "gemini-2.0-flash" };
+        var configuredModel = _configuration["Gemini:Model"]?.Trim();
+        var defaultModels = new[]
+        {
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-flash-latest",
+            "gemini-2.5-flash"
+        };
+
+        var models = !string.IsNullOrWhiteSpace(configuredModel)
+            ? new[] { configuredModel }.Concat(defaultModels).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : defaultModels;
 
         foreach (var model in models)
         {
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
-            using var resp = await client.PostAsync(
-                url,
-                new StringContent(jsonPayload, Encoding.UTF8, "application/json"),
-                cancellationToken);
-
-            if (!resp.IsSuccessStatusCode)
+            try
             {
-                continue;
-            }
+                using var perModelCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                perModelCts.CancelAfter(TimeSpan.FromSeconds(6));
 
-            var respJson = await resp.Content.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(respJson);
+                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+                using var resp = await client.PostAsync(
+                    url,
+                    new StringContent(jsonPayload, Encoding.UTF8, "application/json"),
+                    perModelCts.Token);
 
-            if (!doc.RootElement.TryGetProperty("candidates", out var candidates) ||
-                candidates.GetArrayLength() == 0)
-            {
-                continue;
-            }
+                if (!resp.IsSuccessStatusCode)
+                {
+                    continue;
+                }
+
+                var respJson = await resp.Content.ReadAsStringAsync(perModelCts.Token);
+                using var doc = JsonDocument.Parse(respJson);
+
+                if (!doc.RootElement.TryGetProperty("candidates", out var candidates) ||
+                    candidates.GetArrayLength() == 0)
+                {
+                    continue;
+                }
 
             var firstCandidate = candidates[0];
             if (!firstCandidate.TryGetProperty("content", out var contentEl) ||
@@ -349,9 +365,17 @@ public class GeminiReActLlmClient : IReActLlmClient
                     ? $"Invoking {string.Join(", ", decision.ToolCalls.Select(c => c.ToolName))} to gather live telemetry."
                     : "Synthesizing live diagnostic observations.";
 
-            if (decision.ToolCalls.Count > 0 || decision.FinalProposal != null)
+                if (decision.ToolCalls.Count > 0 || decision.FinalProposal != null)
+                {
+                    return decision;
+                }
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
-                return decision;
+                _logger.LogDebug(
+                    ex,
+                    "GeminiReActLlmClient: Model candidate {Model} unavailable or timed out; trying next Flash model.",
+                    model);
             }
         }
 

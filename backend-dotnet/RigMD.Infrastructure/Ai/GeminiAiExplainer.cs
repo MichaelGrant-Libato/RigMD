@@ -12,15 +12,17 @@ using RigMD.Domain.Rules;
 namespace RigMD.Infrastructure.Ai;
 
 /// <summary>
-/// Free-tier Google Gemini diagnostic explainer (gemini-2.5-flash / gemini-2.0-flash)
+/// Free-tier Google Gemini diagnostic explainer (gemini-3.5-flash / gemini-3-flash-preview / gemini-flash-latest)
 /// with automatic zero-cost fallback to OfflineAiExplainer when offline or unconfigured.
 /// </summary>
 public class GeminiAiExplainer : IAiExplainer
 {
     private static readonly string[] CandidateModels =
     [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash"
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-2.5-flash"
     ];
 
     private readonly HttpClient _httpClient;
@@ -68,21 +70,26 @@ public class GeminiAiExplainer : IAiExplainer
         };
 
         var jsonBody = JsonSerializer.Serialize(requestBody);
+        var configuredModel = _configuration["Gemini:Model"]?.Trim();
+        var models = !string.IsNullOrWhiteSpace(configuredModel)
+            ? new[] { configuredModel }.Concat(CandidateModels).Distinct(StringComparer.OrdinalIgnoreCase)
+            : CandidateModels;
 
-        foreach (var model in CandidateModels)
+        foreach (var model in models)
         {
             try
             {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(6));
                 var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
                 using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-                using var response = await _httpClient.PostAsync(url, content);
+                using var response = await _httpClient.PostAsync(url, content, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     continue;
                 }
 
-                var responseJson = await response.Content.ReadAsStringAsync();
+                var responseJson = await response.Content.ReadAsStringAsync(cts.Token);
                 using var doc = JsonDocument.Parse(responseJson);
 
                 if (doc.RootElement.TryGetProperty("candidates", out var candidates) &&
