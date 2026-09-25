@@ -86,6 +86,7 @@ public class AutonomyController : ControllerBase
     private readonly IRemediationRepository _remediationRepository;
     private readonly IHubContext<RemediationHub> _hubContext;
     private readonly ILogger<AutonomyController> _logger;
+    private readonly IRigMdAgentToolRegistry? _toolRegistry;
 
     public AutonomyController(
         IAutonomousOrchestrator orchestrator,
@@ -93,7 +94,8 @@ public class AutonomyController : ControllerBase
         IDiagnosticSessionRepository sessionRepository,
         IRemediationRepository remediationRepository,
         IHubContext<RemediationHub> hubContext,
-        ILogger<AutonomyController> logger)
+        ILogger<AutonomyController> logger,
+        IRigMdAgentToolRegistry? toolRegistry = null)
     {
         _orchestrator = orchestrator;
         _profileService = profileService;
@@ -101,6 +103,7 @@ public class AutonomyController : ControllerBase
         _remediationRepository = remediationRepository;
         _hubContext = hubContext;
         _logger = logger;
+        _toolRegistry = toolRegistry;
     }
 
     public class PreviewRequest
@@ -949,6 +952,84 @@ public class AutonomyController : ControllerBase
         {
             return StatusCode(500, new { success = false, summary = ex.Message });
         }
+    }
+
+    public class ToolInvocationRequest
+    {
+        public string ToolName { get; set; } = string.Empty;
+        public JsonElement Arguments { get; set; }
+        public string? SessionId { get; set; }
+    }
+
+    [HttpGet("tools")]
+    public IActionResult GetRegisteredTools()
+    {
+        if (_toolRegistry == null)
+        {
+            return Ok(Array.Empty<object>());
+        }
+
+        var tools = _toolRegistry.GetAllTools().Select(t => new
+        {
+            name = t.Name,
+            displayName = t.DisplayName,
+            description = t.Description,
+            safetyTier = t.SafetyTier.ToString(),
+            functionDeclaration = t.GetFunctionDeclaration()
+        });
+
+        return Ok(tools);
+    }
+
+    [HttpPost("tools/preview")]
+    public async Task<IActionResult> PreviewTool(
+        [FromBody] ToolInvocationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_toolRegistry == null)
+        {
+            return StatusCode(503, new { message = "Tool registry is not configured." });
+        }
+
+        var tool = _toolRegistry.GetTool(request.ToolName);
+        if (tool == null)
+        {
+            return NotFound(new { message = $"Tool '{request.ToolName}' is not registered." });
+        }
+
+        var preview = await tool.PreviewImpactAsync(request.Arguments, cancellationToken);
+        return Ok(preview);
+    }
+
+    [HttpPost("tools/execute")]
+    public async Task<IActionResult> ExecuteTool(
+        [FromBody] ToolInvocationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_toolRegistry == null)
+        {
+            return StatusCode(503, new { message = "Tool registry is not configured." });
+        }
+
+        var tool = _toolRegistry.GetTool(request.ToolName);
+        if (tool == null)
+        {
+            return NotFound(new { message = $"Tool '{request.ToolName}' is not registered." });
+        }
+
+        Action<string>? progressReporter = null;
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            progressReporter = msg =>
+            {
+                _ = _hubContext.Clients
+                    .Group(request.SessionId)
+                    .SendAsync("ReceiveProgressUpdate", msg, cancellationToken);
+            };
+        }
+
+        var result = await tool.ExecuteAsync(request.Arguments, progressReporter, cancellationToken);
+        return Ok(result);
     }
 
     private sealed class CloseAppOutcome

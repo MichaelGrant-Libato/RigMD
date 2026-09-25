@@ -37,41 +37,42 @@ public class RunSfcScanAction
         {
             var processInfo = new ProcessStartInfo
             {
-                FileName = "sfc",
+                FileName = "sfc.exe",
                 Arguments = "/scannow",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.Unicode,
+                StandardErrorEncoding = System.Text.Encoding.Unicode,
                 CreateNoWindow = true
             };
 
+            var outputLines = new List<string>();
             using var process = new Process { StartInfo = processInfo };
 
-            if (progressReporter != null)
+            process.OutputDataReceived += (sender, e) =>
             {
-                process.OutputDataReceived += (sender, e) =>
+                if (!string.IsNullOrWhiteSpace(e.Data))
                 {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
+                    var cleaned = e.Data.Replace("\0", string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(cleaned))
                     {
-                        progressReporter($"[SFC] {e.Data}");
+                        outputLines.Add(cleaned);
+                        progressReporter?.Invoke($"[SFC] {cleaned}");
                     }
-                };
-            }
+                }
+            };
 
             process.Start();
-            
-            if (progressReporter != null)
-            {
-                process.BeginOutputReadLine();
-            }
+            process.BeginOutputReadLine();
 
-            // SFC can take a while, wait indefinitely or set a high timeout (e.g. 1 hour)
             await process.WaitForExitAsync();
 
             var exitCode = process.ExitCode;
+            var fullOutput = string.Join(Environment.NewLine, outputLines);
             var success = exitCode == 0;
             var status = success ? "Scanned" : "Failed";
-            var meaning = success 
+            var meaning = success
                 ? "Windows System File Checker completed the scan."
                 : $"SFC scan exited with code {exitCode}. Administrator privileges may be required.";
 
@@ -83,18 +84,20 @@ public class RunSfcScanAction
             {
                 Success = success,
 
-                Summary = success 
+                Summary = success
                     ? "System File Checker scan completed successfully."
                     : $"System File Checker scan failed with exit code {exitCode}.",
 
-                OutputLog = $"SFC Exit Code: {exitCode}",
+                OutputLog = string.IsNullOrWhiteSpace(fullOutput)
+                    ? $"SFC Exit Code: {exitCode}"
+                    : fullOutput,
 
                 Proof = new List<ExecutionProof>
                 {
                     new()
                     {
                         Label = "System File Integrity",
-                        Before = "Unknown",
+                        Before = "Unverified",
                         After = status,
                         Status = status,
                         Meaning = meaning

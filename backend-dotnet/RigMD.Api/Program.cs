@@ -85,10 +85,30 @@ builder.Services.AddScoped<RecurringPatternService>();
 builder.Services.AddScoped<WarningSignService>();
 
 // ---------------------------------------------------------------
-// Autonomy (Phase 1 Reset — Real OS Executor retained)
+// Autonomy & Agent Tooling Layer (Phase 2)
 // ---------------------------------------------------------------
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor,    RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
+
+// Tier 0: Read-Only Diagnostic Tools
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectCpuAndThermalsTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectMemoryAndProcessesTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectStorageHealthTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectGpuAndDisplaysTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectNetworkConnectivityTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectBatteryAndPowerTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.QueryWindowsEventLogsTool>();
+
+// Tier 1 & Tier 2: OS Remediation Tools
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.TerminateProcessesTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearTempFilesTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearBrowserCacheTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.FlushDnsCacheTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RestartWindowsExplorerTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearWindowsUpdateCacheTool>();
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RunSystemFileCheckerTool>();
+
+builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentToolRegistry, RigMD.Infrastructure.Remediation.Tools.RigMdAgentToolRegistry>();
 
 builder.Services.AddHostedService<RigMD.Api.Services.TelemetryBackgroundService>();
 

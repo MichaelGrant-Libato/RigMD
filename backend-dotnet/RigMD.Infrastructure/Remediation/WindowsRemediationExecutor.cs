@@ -44,10 +44,10 @@ public class WindowsRemediationExecutor :
 
         return action.Id switch
         {
-            "clear_user_temp_files" =>
+            "clear_user_temp_files" or "clear_temp_files" =>
                 await ExecuteClearTempFiles(progressReporter),
 
-            "flush_dns" =>
+            "flush_dns" or "flush_dns_cache" =>
                 await ExecuteFlushDns(),
 
             "clear_browser_cache" =>
@@ -59,8 +59,11 @@ public class WindowsRemediationExecutor :
             "run_disk_cleanup" =>
                 await ExecuteRunDiskCleanup(progressReporter),
 
-            "run_sfc_scan" =>
+            "run_sfc_scan" or "run_system_file_checker" =>
                 await ExecuteRunSfcScan(progressReporter),
+
+            "restart_windows_explorer" =>
+                await ExecuteRestartExplorer(progressReporter),
 
             _ =>
                 CreateUnsupportedActionResult(
@@ -150,6 +153,19 @@ public class WindowsRemediationExecutor :
 
         var action =
             new RunSfcScanAction(actionLogger);
+
+        return await action.ExecuteAsync(progressReporter);
+    }
+
+    private async Task<ExecutionResult>
+        ExecuteRestartExplorer(Action<string>? progressReporter)
+    {
+        var actionLogger =
+            _loggerFactory
+                .CreateLogger<RestartExplorerAction>();
+
+        var action =
+            new RestartExplorerAction(actionLogger);
 
         return await action.ExecuteAsync(progressReporter);
     }
