@@ -1,0 +1,1 @@
+/^postgres(?:ql)?:\/\//i.test(``);var e=`Supabase authentication is not configured yet.`;function t(e){return!!(e?.email_confirmed_at||e?.confirmed_at)}function n(e){return typeof window>`u`?e:`${window.location.origin}${e}`}export{t as n,e as r,n as t};
