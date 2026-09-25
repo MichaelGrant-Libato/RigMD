@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -736,7 +736,14 @@ export default function RecurringPatternsView({
   const [patternPendingDelete, setPatternPendingDelete] =
     useState<RecurringPattern | null>(null);
 
+  const isFetchingPatternsRef = useRef(false);
+
   const fetchPatterns = useCallback(async () => {
+    if (isFetchingPatternsRef.current) {
+      return;
+    }
+
+    isFetchingPatternsRef.current = true;
     setIsLoading(true);
 
     try {
@@ -766,6 +773,7 @@ export default function RecurringPatternsView({
       setData(emptyRecurring);
       setLoadError('Repeated problem data is not available right now. Try again after RigMD finishes syncing.');
     } finally {
+      isFetchingPatternsRef.current = false;
       setIsLoading(false);
     }
   }, []);
@@ -773,7 +781,12 @@ export default function RecurringPatternsView({
   useEffect(() => {
     fetchPatterns();
 
-    const interval = window.setInterval(fetchPatterns, 5000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      fetchPatterns();
+    }, 15000);
 
     return () => window.clearInterval(interval);
   }, [fetchPatterns]);

@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Services;
@@ -15,12 +16,72 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 builder.Services.AddSignalR();
 
-// Add CORS policy to allow the React frontend
+// Add server-side Rate Limiting to guard against F12 console spam, DoS, and API quota exhaustion
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        context.HttpContext.Response.Headers["Retry-After"] = "10";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"detail\":\"Rate limit exceeded. Please wait a few seconds before sending additional requests.\"}",
+            cancellationToken);
+    };
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+    {
+        var path = httpContext.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
+
+        // Static assets and SignalR hubs are not subject to REST API rate limiting
+        if (!path.StartsWith("/api/"))
+        {
+            return RateLimitPartition.GetNoLimiter("static-or-hub");
+        }
+
+        var clientKey = httpContext.Request.Headers["X-Client-ID"].FirstOrDefault()
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "local-client";
+
+        // Strict tier for heavy AI / WMI / ReAct autonomy endpoints (protects Gemini free-tier quota & WMI)
+        if (path.StartsWith("/api/autonomy/") ||
+            path.Contains("/diagnosis/local-scan") ||
+            path.Contains("/diagnosis/analyze"))
+        {
+            return RateLimitPartition.GetFixedWindowLimiter(
+                $"heavy:{clientKey}",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 8,
+                    Window = TimeSpan.FromSeconds(30),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        }
+
+        // Standard tier for live telemetry and summary polling endpoints
+        return RateLimitPartition.GetFixedWindowLimiter(
+            $"standard:{clientKey}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 45,
+                Window = TimeSpan.FromSeconds(15),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+    });
+});
+
+// Add CORS policy to allow only local React frontend origins
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReact", policy =>
     {
-        policy.WithOrigins("http://localhost:5273", "http://localhost:5173")
+        policy.WithOrigins(
+                  "http://localhost:5273",
+                  "http://localhost:5173",
+                  "http://127.0.0.1:5273",
+                  "http://127.0.0.1:5173")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -146,6 +207,16 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowReact");
 app.UseHttpsRedirection();
 
+// Anti-penetration security headers (prevents MIME sniffing, clickjacking, and referrer leakage)
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["X-Permitted-Cross-Domain-Policies"] = "none";
+    await next();
+});
+
 // ---------------------------------------------------------------
 // Serve React Frontend
 // ---------------------------------------------------------------
@@ -163,6 +234,7 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 
+app.UseRateLimiter();
 app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
 app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");

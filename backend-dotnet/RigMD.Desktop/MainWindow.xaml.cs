@@ -32,6 +32,14 @@ public partial class MainWindow : Window
 
             await Browser.EnsureCoreWebView2Async(environment);
 
+#if !DEBUG
+            // Lock down F12 DevTools, right-click Inspect, and browser accelerator keys in Release/Installed builds
+            Browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            Browser.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
+#endif
+
             Browser.Source = new Uri(
                 "http" + Uri.SchemeDelimiter + "localhost:5273");
 

@@ -47,6 +47,10 @@ Source: "Uninstall-RigMD.bat"; \
     DestName: "uninstall.bat"; \
     Flags: ignoreversion
 
+Source: "uninstall-rigmd.ps1"; \
+    DestDir: "{app}"; \
+    Flags: ignoreversion
+
 [Tasks]
 Name: "desktopicon"; \
     Description: "Create a desktop shortcut"; \

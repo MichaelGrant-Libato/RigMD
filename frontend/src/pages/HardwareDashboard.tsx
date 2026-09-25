@@ -1,6 +1,6 @@
 //HardwareDashboard.tsx
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Wrench } from 'lucide-react';
 import HomeDashboardContent from '../components/HomeDashboardContent';
@@ -560,8 +560,15 @@ export default function HardwareDashboard() {
   ]);
 
   const deviceName = stats?.device_name?.trim() || 'Detecting Device';
+  const isFetchingHardwareRef = useRef(false);
+  const isFetchingDashboardRef = useRef(false);
 
   const fetchHardware = useCallback(async () => {
+    if (isFetchingHardwareRef.current) {
+      return;
+    }
+
+    isFetchingHardwareRef.current = true;
     try {
       const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
       setStats(liveResponse.data);
@@ -570,6 +577,8 @@ export default function HardwareDashboard() {
     } catch {
       setAgentStatus(null);
       setError('Unable to retrieve Windows hardware telemetry.');
+    } finally {
+      isFetchingHardwareRef.current = false;
     }
   }, []);
 
@@ -586,13 +595,27 @@ export default function HardwareDashboard() {
   useEffect(() => {
     fetchHardware();
 
-    const interval = window.setInterval(fetchHardware, 10000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      fetchHardware();
+    }, 10000);
 
     return () => window.clearInterval(interval);
   }, [fetchHardware]);
 
   useEffect(() => {
+    if (activePage !== 'home') {
+      return;
+    }
+
     const fetchDashboard = async () => {
+      if (isFetchingDashboardRef.current) {
+        return;
+      }
+
+      isFetchingDashboardRef.current = true;
       try {
         const response = await apiGet<DashboardSummary | LegacyDashboardSummary>('/api/dashboard/summary');
         let sessions: SessionSummary[] = [];
@@ -611,15 +634,22 @@ export default function HardwareDashboard() {
         setDashboard(normalizeDashboardSummary(response.data, sessions));
       } catch {
         setDashboard(emptyDashboard);
+      } finally {
+        isFetchingDashboardRef.current = false;
       }
     };
 
     fetchDashboard();
 
-    const interval = window.setInterval(fetchDashboard, 5000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      fetchDashboard();
+    }, 15000);
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [activePage]);
 
   const handleSetActivePage = (page: PageKey) => {
   if (page === 'diagnosticHistory') {
