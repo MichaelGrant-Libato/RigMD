@@ -160,40 +160,41 @@ export default function SystemProfileView({
   const [liveCpuTemp, setLiveCpuTemp] = useState<number | null>(null);
   const [liveGpuTemp, setLiveGpuTemp] = useState<number | null>(null);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
+  const hasStats = Boolean(stats);
 
   useEffect(() => {
-    if (!stats) return;
+    if (!hasStats) return;
 
-    const connectSignalR = async () => {
-      const hubUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5273'}/hubs/telemetry`;
-      
-      const connection = new signalR.HubConnectionBuilder()
-        .withUrl(hubUrl)
-        .withAutomaticReconnect()
-        .build();
+    let disposed = false;
+    const hubUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5273'}/hubs/telemetry`;
 
-      connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number; gpuTempCelsius?: number }) => {
-        if (telemetry.cpuTempCelsius !== undefined) setLiveCpuTemp(telemetry.cpuTempCelsius);
-        if (telemetry.gpuTempCelsius !== undefined) setLiveGpuTemp(telemetry.gpuTempCelsius);
-      });
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl)
+      .withAutomaticReconnect()
+      .build();
 
-      try {
-        await connection.start();
-        connectionRef.current = connection;
-      } catch (err) {
+    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number; gpuTempCelsius?: number }) => {
+      if (disposed) return;
+      if (telemetry.cpuTempCelsius !== undefined) setLiveCpuTemp(telemetry.cpuTempCelsius);
+      if (telemetry.gpuTempCelsius !== undefined) setLiveGpuTemp(telemetry.gpuTempCelsius);
+    });
+
+    connectionRef.current = connection;
+
+    connection.start().catch((err) => {
+      if (!disposed) {
         console.error('SignalR Connection Error (SystemProfile): ', err);
       }
-    };
-
-    connectSignalR();
+    });
 
     return () => {
+      disposed = true;
       if (connectionRef.current) {
         connectionRef.current.stop();
         connectionRef.current = null;
       }
     };
-  }, [stats]);
+  }, [hasStats]);
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

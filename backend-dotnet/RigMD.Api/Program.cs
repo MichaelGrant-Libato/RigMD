@@ -84,7 +84,8 @@ builder.Services.AddCors(options =>
                   "http://127.0.0.1:5173")
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials()
+              .SetPreflightMaxAge(TimeSpan.FromHours(1));
     });
 });
 

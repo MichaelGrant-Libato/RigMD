@@ -77,6 +77,10 @@ Write-Host "[2/7] Building React frontend..."
 Push-Location $FrontendDirectory
 try
 {
+    $env:VITE_PUBLIC_DOWNLOAD_SITE = "false"
+    $env:VITE_SUPABASE_URL = ""
+    $env:VITE_SUPABASE_PUBLISHABLE_KEY = ""
+    $env:VITE_SUPABASE_ANON_KEY = ""
     & cmd.exe /c "npm run build"
     if ($LASTEXITCODE -ne 0)
     {

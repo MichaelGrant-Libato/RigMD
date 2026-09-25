@@ -600,7 +600,7 @@ export default function HardwareDashboard() {
         return;
       }
       fetchHardware();
-    }, 10000);
+    }, 30000);
 
     return () => window.clearInterval(interval);
   }, [fetchHardware]);
@@ -646,7 +646,7 @@ export default function HardwareDashboard() {
         return;
       }
       fetchDashboard();
-    }, 15000);
+    }, 30000);
 
     return () => window.clearInterval(interval);
   }, [activePage]);
