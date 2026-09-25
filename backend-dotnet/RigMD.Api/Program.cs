@@ -275,13 +275,47 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowReact");
 app.UseHttpsRedirection();
 
-// Anti-penetration security headers (prevents MIME sniffing, clickjacking, and referrer leakage)
+// Anti-penetration security headers & localhost cross-site request guard
+// (prevents MIME sniffing, clickjacking, referrer leakage, and cross-site port abuse from external websites)
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     context.Response.Headers["X-Permitted-Cross-Domain-Policies"] = "none";
+
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+    {
+        // Block requests initiated by external websites open in the user's browser
+        if (context.Request.Headers.TryGetValue("Origin", out var originValues))
+        {
+            var origin = originValues.FirstOrDefault() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(origin) &&
+                !origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) &&
+                !origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase) &&
+                !origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) &&
+                !origin.StartsWith("https://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync("{\"detail\":\"Cross-origin requests from external domains are forbidden.\"}");
+                return;
+            }
+        }
+
+        if (context.Request.Headers.TryGetValue("Sec-Fetch-Site", out var fetchSiteValues))
+        {
+            var fetchSite = fetchSiteValues.FirstOrDefault() ?? string.Empty;
+            if (string.Equals(fetchSite, "cross-site", StringComparison.OrdinalIgnoreCase) &&
+                !context.Request.Headers.ContainsKey("X-Client-ID"))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync("{\"detail\":\"Cross-site browser requests without local client authentication are forbidden.\"}");
+                return;
+            }
+        }
+    }
+
     await next();
 });
 
