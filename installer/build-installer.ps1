@@ -208,7 +208,9 @@ $SensitivePatterns = @(
     "*.db",
     "*.db-shm",
     "*.db-wal",
-    "*.pdb"
+    "*.pdb",
+    "*.sys",
+    "LibreHardwareMonitorLib.dll"
 )
 
 foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory))

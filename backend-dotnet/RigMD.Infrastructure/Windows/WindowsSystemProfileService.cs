@@ -87,8 +87,15 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             try
             {
                 _hardwareMonitor.Tick();
-                cpuStats.TemperatureCelsius = _hardwareMonitor.GetCpuTemperature();
-                gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature();
+                cpuStats.TemperatureCelsius = _hardwareMonitor.GetCpuTemperature() ?? cpuStats.TemperatureCelsius;
+                gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature() ?? gpuStats.TemperatureCelsius;
+
+                var totalVramGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();
+                if (totalVramGb.HasValue && totalVramGb.Value > gpuStats.VramGb)
+                {
+                    gpuStats.VramGb = Math.Round(totalVramGb.Value, 1);
+                    gpuStats.DedicatedMemoryGb = gpuStats.VramGb;
+                }
             }
             catch { }
         }

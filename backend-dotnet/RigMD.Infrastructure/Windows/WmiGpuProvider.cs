@@ -55,6 +55,13 @@ public class WmiGpuProvider : IGpuProvider
                     candidate.DedicatedMemoryGb = candidate.VramGb;
                 }
 
+                var registryVramGb = HardwareMonitorService.ReadRegistryMaxGpuVramGb(name);
+                if (registryVramGb.HasValue && registryVramGb.Value > candidate.VramGb)
+                {
+                    candidate.VramGb = registryVramGb.Value;
+                    candidate.DedicatedMemoryGb = registryVramGb.Value;
+                }
+
                 var pnpId = obj["PNPDeviceID"]?.ToString() ?? "";
                 if (pnpId.StartsWith("PCI\\", StringComparison.OrdinalIgnoreCase))
                 {

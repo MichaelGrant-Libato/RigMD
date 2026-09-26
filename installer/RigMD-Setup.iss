@@ -26,15 +26,21 @@ SetupLogging=yes
 CloseApplications=yes
 RestartApplications=no
 
+[InstallDelete]
+Type: files; Name: "{app}\Api\*.sys"
+Type: files; Name: "{app}\Desktop\*.sys"
+Type: files; Name: "{app}\Api\LibreHardwareMonitorLib.dll"
+Type: files; Name: "{app}\Desktop\LibreHardwareMonitorLib.dll"
+
 [Files]
 Source: "..\backend-dotnet\RigMD.Desktop\bin\Release\net10.0-windows\win-x64\publish\*"; \
     DestDir: "{app}\Desktop"; \
-    Excludes: "*.pdb,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
+    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "..\backend-dotnet\RigMD.Api\bin\Release\net10.0-windows\win-x64\publish\*"; \
     DestDir: "{app}\Api"; \
-    Excludes: "*.pdb,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
+    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "Uninstall-RigMD.bat"; \

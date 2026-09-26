@@ -150,6 +150,8 @@ public class WmiCpuProvider : ICpuProvider
 
             break;
         }
+
+        dto.TemperatureCelsius ??= HardwareMonitorService.ReadThermalZoneTemperatureCelsius();
     }
 
     private static double TryConvertToDouble(
