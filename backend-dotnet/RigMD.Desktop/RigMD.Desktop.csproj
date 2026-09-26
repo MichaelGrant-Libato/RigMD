@@ -8,6 +8,7 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\rigmd-logo.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.3.0</Version>
     <DeleteExistingFiles>true</DeleteExistingFiles>
   </PropertyGroup>
 

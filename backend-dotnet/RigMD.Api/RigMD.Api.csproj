@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>de6a4acc-2cac-4706-9aad-aa07d4807396</UserSecretsId>
+    <Version>0.3.0</Version>
     <DeleteExistingFiles>true</DeleteExistingFiles>
   </PropertyGroup>
 
