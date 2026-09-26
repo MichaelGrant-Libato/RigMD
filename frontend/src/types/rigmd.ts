@@ -367,6 +367,7 @@ export interface DashboardSummary {
 
 export type PageKey =
   | 'home'
+  | 'aiAgent'
   | 'systemProfile'
   | 'newDiagnosis'
   | 'diagnosticHistory'

@@ -15,6 +15,8 @@ import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated mod
 import HelpScopeView from './HelpScopeView';
 import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 import ShareReportView from './ShareReportView';
+import AiAgentDoctorView from './AiAgentDoctorView';
+import SettingsView from './SettingsView';
 
 import {
   cardTransition,
@@ -674,6 +676,19 @@ export default function HardwareDashboard() {
           />
         );
 
+      case 'aiAgent':
+        return (
+          <AiAgentDoctorView
+            stats={stats}
+            dashboard={dashboard}
+            setActivePage={setActivePage}
+            onViewSession={(sessionId) => {
+              setSelectedSessionId(sessionId);
+              setActivePage('diagnosticHistory');
+            }}
+          />
+        );
+
       case 'systemProfile':
         return (
           <SystemProfileView
@@ -725,7 +740,7 @@ export default function HardwareDashboard() {
         );
 
       case 'settings':
-        return <PlaceholderView title="Settings" subtitle="Application preferences and configuration" />;
+        return <SettingsView />;
 
       case 'help':
         return <HelpScopeView />;

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Models;
+using RigMD.Application.Services;
 
 namespace RigMD.Infrastructure.Ai;
 
@@ -70,19 +71,7 @@ public class GeminiReActLlmClient : IReActLlmClient
 
     private string? ResolveApiKey()
     {
-        var fromConfig = _configuration["Gemini:ApiKey"];
-        if (!string.IsNullOrWhiteSpace(fromConfig))
-        {
-            return fromConfig.Trim();
-        }
-
-        var fromEnv = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
-        if (!string.IsNullOrWhiteSpace(fromEnv))
-        {
-            return fromEnv.Trim();
-        }
-
-        return null;
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
     }
 
     private async Task<ReActModelTurnDecision?> CallGeminiFunctionCallingAsync(
@@ -391,8 +380,8 @@ public class GeminiReActLlmClient : IReActLlmClient
         IReadOnlyList<AgentToolFunctionDeclaration> availableTools)
     {
         var combinedText = $"{context.DiagnosedCategory} {context.UserSymptom} {context.InitialSummary}".ToLowerInvariant();
-        var calledTools = new HashSet<string>(
-            context.History.Select(h => h.ToolName),
+        var availableSet = new HashSet<string>(
+            availableTools.Select(t => t.Name),
             StringComparer.OrdinalIgnoreCase);
 
         // Turn 0: Issue targeted Tier 0 read-only diagnostic tool calls based on scenario, component scope, or symptom context
@@ -442,10 +431,44 @@ public class GeminiReActLlmClient : IReActLlmClient
             var toolCalls = new List<ReActToolCallRequest>();
             string thought;
 
+            void AppendWholeSystemMemoryTools()
+            {
+                if (availableSet.Contains("inspect_full_device_profile"))
+                {
+                    toolCalls.Add(new ReActToolCallRequest
+                    {
+                        ToolName = "inspect_full_device_profile",
+                        ArgumentsJson = "{}",
+                        Thought = "Reading full Windows Device Info & hardware baseline."
+                    });
+                }
+
+                if (availableSet.Contains("query_past_checks_and_remediations"))
+                {
+                    toolCalls.Add(new ReActToolCallRequest
+                    {
+                        ToolName = "query_past_checks_and_remediations",
+                        ArgumentsJson = "{\"maxSessions\":8}",
+                        Thought = "Querying SQLite Past Checks and historical remediation outcomes."
+                    });
+                }
+
+                if (availableSet.Contains("query_recurring_problems_and_warnings"))
+                {
+                    toolCalls.Add(new ReActToolCallRequest
+                    {
+                        ToolName = "query_recurring_problems_and_warnings",
+                        ArgumentsJson = "{}",
+                        Thought = "Analyzing Repeated Problems and Active Warning Signs across PC history."
+                    });
+                }
+            }
+
             if (combinedText.Contains("network") || combinedText.Contains("dns") || combinedText.Contains("internet") || combinedText.Contains("ping") || combinedText.Contains("wifi") || combinedText.Contains("latency"))
             {
                 thought =
                     "Symptom indicates network connectivity or DNS latency issues. I will first call 'inspect_network_connectivity' to probe live DNS resolution and ICMP ping, and 'query_windows_event_logs' to check for recent network/DNS client warnings.";
+                AppendWholeSystemMemoryTools();
                 toolCalls.Add(new ReActToolCallRequest
                 {
                     ToolName = "inspect_network_connectivity",
@@ -463,6 +486,7 @@ public class GeminiReActLlmClient : IReActLlmClient
             {
                 thought =
                     "Symptom points to storage capacity, cache bloat, or disk I/O pressure. I will first invoke 'inspect_storage_health' to measure volume free space and exact reclaimable bytes in %TEMP%, Browser Caches, and Windows Update cache, plus 'inspect_memory_and_processes' to check active I/O/memory load.";
+                AppendWholeSystemMemoryTools();
                 toolCalls.Add(new ReActToolCallRequest
                 {
                     ToolName = "inspect_storage_health",
@@ -480,6 +504,7 @@ public class GeminiReActLlmClient : IReActLlmClient
             {
                 thought =
                     "Symptom indicates system responsiveness, RAM pressure, or background process contention. I will invoke 'inspect_memory_and_processes' to identify the top memory-consuming processes and 'inspect_cpu_and_thermals' + 'inspect_storage_health' to check CPU load, temperatures, and reclaimable temp/browser caches.";
+                AppendWholeSystemMemoryTools();
                 toolCalls.Add(new ReActToolCallRequest
                 {
                     ToolName = "inspect_memory_and_processes",
@@ -502,7 +527,8 @@ public class GeminiReActLlmClient : IReActLlmClient
             else
             {
                 thought =
-                    "Starting multi-sensor diagnostic investigation. I will invoke 'inspect_cpu_and_thermals', 'inspect_memory_and_processes', and 'inspect_storage_health' to collect live baseline observations across CPU, RAM, processes, and storage caches.";
+                    "Starting multi-sensor diagnostic investigation across Device Info, Past Checks, Repeated Problems, CPU thermals, RAM/processes, and storage caches.";
+                AppendWholeSystemMemoryTools();
                 toolCalls.Add(new ReActToolCallRequest
                 {
                     ToolName = "inspect_cpu_and_thermals",
@@ -540,6 +566,8 @@ public class GeminiReActLlmClient : IReActLlmClient
         var memObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_memory_and_processes", StringComparison.OrdinalIgnoreCase));
         var netObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_network_connectivity", StringComparison.OrdinalIgnoreCase));
         var cpuObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_cpu_and_thermals", StringComparison.OrdinalIgnoreCase));
+        var historyObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_past_checks_and_remediations", StringComparison.OrdinalIgnoreCase));
+        var recurringObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_recurring_problems_and_warnings", StringComparison.OrdinalIgnoreCase));
 
         double userTempMb = ExtractNestedDouble(storageObs?.ObservationJson, "reclaimableCaches", "userTemp", "sizeMb");
         double chromeCacheMb = ExtractNestedDouble(storageObs?.ObservationJson, "reclaimableCaches", "chromeCache", "sizeMb");
@@ -627,6 +655,8 @@ public class GeminiReActLlmClient : IReActLlmClient
         if (cpuObs != null) rootCauseParts.Add(cpuObs.ObservationSummary);
         if (memObs != null) rootCauseParts.Add(memObs.ObservationSummary);
         if (storageObs != null) rootCauseParts.Add(storageObs.ObservationSummary);
+        if (historyObs != null) rootCauseParts.Add(historyObs.ObservationSummary);
+        if (recurringObs != null) rootCauseParts.Add(recurringObs.ObservationSummary);
 
         var rootCause = rootCauseParts.Count > 0
             ? string.Join(" ", rootCauseParts)

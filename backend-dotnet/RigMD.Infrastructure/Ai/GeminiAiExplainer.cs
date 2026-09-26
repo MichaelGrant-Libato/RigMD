@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Contracts.Ai;
+using RigMD.Application.Services;
 using RigMD.Domain.Rules;
 
 namespace RigMD.Infrastructure.Ai;
@@ -120,20 +121,7 @@ public class GeminiAiExplainer : IAiExplainer
 
     private string? ResolveApiKey()
     {
-        var fromConfig = _configuration["Gemini:ApiKey"];
-        if (!string.IsNullOrWhiteSpace(fromConfig) &&
-            !fromConfig.Contains("USE_DOTNET_USER_SECRETS", StringComparison.OrdinalIgnoreCase))
-        {
-            return fromConfig.Trim();
-        }
-
-        var fromEnv = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
-        if (!string.IsNullOrWhiteSpace(fromEnv))
-        {
-            return fromEnv.Trim();
-        }
-
-        return null;
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
     }
 
     private static string BuildPrompt(

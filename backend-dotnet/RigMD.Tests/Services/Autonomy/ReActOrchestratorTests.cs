@@ -419,4 +419,85 @@ public class ReActOrchestratorTests
         Assert.Contains("query_startup_apps", calledTools);
         Assert.Contains("query_windows_event_logs", calledTools);
     }
+
+    private sealed class StubSystemProfileService : IWindowsSystemProfileService
+    {
+        public HardwareProfileDto GetLiveSystemProfile() => new()
+        {
+            DeviceName = "RIGMD-TEST-PC",
+            DeviceType = "Desktop",
+            OsVersion = "Windows 11 Pro 24H2",
+            PrimaryStorageType = "NVMe SSD",
+            Cpu = new CpuStatsDto { Name = "Intel Core i7-13700K", UsagePercent = 38.0, Cores = 16, Threads = 24 },
+            Ram = new MemoryStatsDto { TotalGb = 32, UsedGb = 19.0, UsagePercent = 59.4 },
+            Gpu = new GpuStatsDto { Name = "NVIDIA GeForce RTX 4070 Ti", HasGpu = true, HasDedicatedGpu = true, VramGb = 12 }
+        };
+    }
+
+    [Fact]
+    public async Task WholeSystemAutonomousDoctor_ExecutesDeviceAndHistoricalMemoryTools_OnTurn0()
+    {
+        var profileTool = new InspectFullDeviceProfileTool(new StubSystemProfileService());
+        using var emptyArgs = JsonDocument.Parse("{}");
+        var profileExec = await profileTool.ExecuteAsync(emptyArgs.RootElement);
+
+        Assert.True(profileExec.Success);
+        Assert.Contains("RIGMD-TEST-PC", profileExec.DataJson);
+        Assert.Contains("Intel Core i7-13700K", profileExec.DataJson);
+
+        var (orchestrator, _) = CreateOrchestratorWithTools();
+        var providers = new StubProviders();
+        var loggerFactory = NullLoggerFactory.Instance;
+        var fakeTempTool = new FakeSafeRemediationTool();
+
+        // Register InspectFullDeviceProfileTool in a whole-system registry
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
+        {
+            profileTool,
+            new InspectCpuAndThermalsTool(providers),
+            new InspectMemoryAndProcessesTool(providers, providers),
+            new InspectStorageHealthTool(providers),
+            new InspectGpuAndDisplaysTool(providers, providers),
+            new InspectNetworkConnectivityTool(providers),
+            new InspectBatteryAndPowerTool(providers, providers, providers),
+            new QueryWindowsEventLogsTool(),
+            new QueryStartupAppsTool(),
+            fakeTempTool
+        });
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" })
+            .Build();
+        var llmClient = new GeminiReActLlmClient(new HttpClient(), config, NullLogger<GeminiReActLlmClient>.Instance);
+        var executor = new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, loggerFactory);
+        var wholeSystemOrchestrator = new AutonomousOrchestrator(executor, registry, llmClient);
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "Storage & Temp Cache Pressure",
+            AiExplanation = "System storage check.\n[AUTONOMOUS DOCTOR WHOLE-SYSTEM SCAN]"
+        };
+
+        var result = await wholeSystemOrchestrator.RunDryRunCycleAsync(
+            diagnostic,
+            new StubSystemProfileService().GetLiveSystemProfile());
+
+        var calledTools = result.ReasoningSteps
+            .Where(s => s.StepType == nameof(ReActStepType.ToolCall))
+            .Select(s => s.ToolName)
+            .ToList();
+
+        Assert.Contains("inspect_full_device_profile", calledTools);
+        Assert.NotNull(result.ProposedTool);
+    }
+
+    [Fact]
+    public void RuntimeSettingsStore_MasksApiKey_AndRespectsLocalOnlyMode()
+    {
+        var masked = RigMD.Application.Services.RigMdAgentRuntimeSettingsStore.MaskApiKey("AIzaSyTestKey123456789XYZ");
+        Assert.Equal("AIza••••••••9XYZ", masked);
+        Assert.Equal(string.Empty, RigMD.Application.Services.RigMdAgentRuntimeSettingsStore.MaskApiKey(null));
+    }
 }

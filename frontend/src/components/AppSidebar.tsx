@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  Bot,
   FileText,
   HelpCircle,
   History,
@@ -269,6 +270,15 @@ export default function AppSidebar({
             collapsed={collapsed}
             active={activePage === 'home'}
             onClick={() => navigate('home')}
+          />
+
+          <SidebarItem
+            icon={Bot}
+            label="AI Agent Doctor"
+            badge="AUTO"
+            collapsed={collapsed}
+            active={activePage === 'aiAgent'}
+            onClick={() => navigate('aiAgent')}
           />
         </div>
 

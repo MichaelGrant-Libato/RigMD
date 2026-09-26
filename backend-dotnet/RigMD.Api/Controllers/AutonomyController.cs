@@ -7,6 +7,7 @@ using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
+using RigMD.Application.Services;
 using RigMD.Domain.Entities;
 
 namespace RigMD.Api.Controllers;
@@ -87,6 +88,8 @@ public class AutonomyController : ControllerBase
     private readonly IHubContext<RemediationHub> _hubContext;
     private readonly ILogger<AutonomyController> _logger;
     private readonly IRigMdAgentToolRegistry? _toolRegistry;
+    private readonly IAutomaticDiagnosisService? _automaticDiagnosisService;
+    private readonly IConfiguration? _configuration;
 
     public AutonomyController(
         IAutonomousOrchestrator orchestrator,
@@ -95,7 +98,9 @@ public class AutonomyController : ControllerBase
         IRemediationRepository remediationRepository,
         IHubContext<RemediationHub> hubContext,
         ILogger<AutonomyController> logger,
-        IRigMdAgentToolRegistry? toolRegistry = null)
+        IRigMdAgentToolRegistry? toolRegistry = null,
+        IAutomaticDiagnosisService? automaticDiagnosisService = null,
+        IConfiguration? configuration = null)
     {
         _orchestrator = orchestrator;
         _profileService = profileService;
@@ -104,6 +109,8 @@ public class AutonomyController : ControllerBase
         _hubContext = hubContext;
         _logger = logger;
         _toolRegistry = toolRegistry;
+        _automaticDiagnosisService = automaticDiagnosisService;
+        _configuration = configuration;
     }
 
     public class PreviewRequest
@@ -1046,6 +1053,255 @@ public class AutonomyController : ControllerBase
 
         var result = await tool.ExecuteAsync(request.Arguments, progressReporter, cancellationToken);
         return Ok(result);
+    }
+
+    public sealed class UpdateAgentSettingsRequest
+    {
+        public string? PreferredMode { get; set; }
+        public bool? AutoExecuteSafeTier1 { get; set; }
+        public string? GeminiApiKey { get; set; }
+        public bool ClearGeminiApiKey { get; set; }
+    }
+
+    [HttpGet("settings")]
+    public IActionResult GetAgentSettings()
+    {
+        var settings = RigMdAgentRuntimeSettingsStore.Load();
+        var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
+        var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var rawKey = !string.IsNullOrWhiteSpace(settings.GeminiApiKey)
+            ? settings.GeminiApiKey
+            : _configuration?["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+
+        return Ok(new
+        {
+            preferredMode = settings.PreferredMode,
+            autoExecuteSafeTier1 = settings.AutoExecuteSafeTier1,
+            hasGeminiApiKey = !string.IsNullOrWhiteSpace(rawKey),
+            maskedGeminiApiKey = RigMdAgentRuntimeSettingsStore.MaskApiKey(rawKey),
+            activeEngine = hasKey
+                ? "Gemini 3.5 Flash Cascade + Local ReAct Fallback"
+                : "Local Deterministic ReAct Engine (100% Offline)",
+            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0,
+            settingsFilePath = RigMdAgentRuntimeSettingsStore.GetSettingsFilePath()
+        });
+    }
+
+    [HttpPost("settings")]
+    public IActionResult UpdateAgentSettings([FromBody] UpdateAgentSettingsRequest request)
+    {
+        var saved = RigMdAgentRuntimeSettingsStore.Save(
+            request.PreferredMode,
+            request.AutoExecuteSafeTier1,
+            request.GeminiApiKey,
+            request.ClearGeminiApiKey);
+
+        var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
+        var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var rawKey = !string.IsNullOrWhiteSpace(saved.GeminiApiKey)
+            ? saved.GeminiApiKey
+            : _configuration?["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+
+        return Ok(new
+        {
+            preferredMode = saved.PreferredMode,
+            autoExecuteSafeTier1 = saved.AutoExecuteSafeTier1,
+            hasGeminiApiKey = !string.IsNullOrWhiteSpace(rawKey),
+            maskedGeminiApiKey = RigMdAgentRuntimeSettingsStore.MaskApiKey(rawKey),
+            activeEngine = hasKey
+                ? "Gemini 3.5 Flash Cascade + Local ReAct Fallback"
+                : "Local Deterministic ReAct Engine (100% Offline)",
+            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0,
+            settingsFilePath = RigMdAgentRuntimeSettingsStore.GetSettingsFilePath()
+        });
+    }
+
+    public sealed class AutonomousDoctorRequest
+    {
+        public string? UserPrompt { get; set; }
+        public bool? AutoExecuteSafeFixes { get; set; }
+    }
+
+    private static readonly HashSet<string> SafeAutoPilotTier1Tools =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "clear_temp_files",
+            "clear_browser_cache",
+            "flush_dns_cache"
+        };
+
+    [HttpPost("autonomous-doctor")]
+    public async Task<IActionResult> RunAutonomousDoctor(
+        [FromBody] AutonomousDoctorRequest? request,
+        CancellationToken cancellationToken)
+    {
+        request ??= new AutonomousDoctorRequest();
+        var runtimeSettings = RigMdAgentRuntimeSettingsStore.Load();
+        var autoExecuteSafe = request.AutoExecuteSafeFixes ?? runtimeSettings.AutoExecuteSafeTier1;
+
+        _ = _hubContext.Clients.All.SendAsync(
+            "ReceiveProgress",
+            "[AUTO-DOCTOR] Collecting live hardware telemetry, past check history, and recurring pattern memory...",
+            cancellationToken);
+
+        var hardware = _profileService.GetLiveSystemProfile();
+        var capturedAt = DateTimeOffset.UtcNow;
+
+        string diagnosedCategory = "OS performance degradation";
+        string actionCategory = "Troubleshoot";
+        string confidenceLabel = "High";
+        string explanation = "Autonomous whole-system PC checkup initiated.";
+        string primaryResult = "OS performance degradation";
+        string? incidentalWarning = null;
+        string componentStatus = "Present";
+
+        if (_automaticDiagnosisService != null)
+        {
+            var autoDiag = _automaticDiagnosisService.Diagnose(new AutomaticDiagnosisInput
+            {
+                AgentId = "local-autonomous-doctor",
+                CommandId = Guid.Empty,
+                Mode = "full",
+                ComponentIds = Array.Empty<string>(),
+                ScenarioId = string.IsNullOrWhiteSpace(request.UserPrompt) ? null : request.UserPrompt.Trim(),
+                CapturedAt = capturedAt,
+                Hardware = hardware
+            });
+
+            diagnosedCategory = autoDiag.DiagnosedCategory;
+            actionCategory = autoDiag.ActionCategory;
+            confidenceLabel = autoDiag.ConfidenceLabel;
+            explanation = autoDiag.Explanation;
+            primaryResult = autoDiag.PrimaryResult;
+            incidentalWarning = autoDiag.IncidentalWarning;
+            componentStatus = autoDiag.ComponentStatus.ToString();
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.UserPrompt))
+        {
+            explanation = $"{explanation}\n\n[AUTONOMOUS DOCTOR WHOLE-SYSTEM SCAN] User context: {request.UserPrompt.Trim()}";
+        }
+        else
+        {
+            explanation = $"{explanation}\n\n[AUTONOMOUS DOCTOR WHOLE-SYSTEM SCAN]";
+        }
+
+        var sessionId = await _sessionRepository.SaveAutomaticDiagnosisAsync(
+            hardware,
+            "full",
+            Array.Empty<string>(),
+            request.UserPrompt,
+            Guid.Empty,
+            "local-autonomous-doctor",
+            diagnosedCategory,
+            actionCategory,
+            confidenceLabel,
+            explanation,
+            "local",
+            primaryResult,
+            incidentalWarning,
+            componentStatus);
+
+        var diagnosticOutput = await _sessionRepository.GetDiagnosticOutputAsync(sessionId)
+            ?? new DiagnosticOutput
+            {
+                Id = sessionId,
+                DiagnosticSessionId = sessionId,
+                DiagnosedCategory = diagnosedCategory,
+                ActionCategory = actionCategory,
+                ConfidenceLabel = confidenceLabel,
+                AiExplanation = explanation
+            };
+
+        var currentAiExplanation = diagnosticOutput.AiExplanation ?? string.Empty;
+        if (!currentAiExplanation.Contains("[AUTONOMOUS DOCTOR WHOLE-SYSTEM SCAN]", StringComparison.OrdinalIgnoreCase))
+        {
+            diagnosticOutput.AiExplanation = $"{currentAiExplanation}\n[AUTONOMOUS DOCTOR WHOLE-SYSTEM SCAN]";
+        }
+
+        var orchestrationResult = await _orchestrator.RunDryRunCycleAsync(
+            diagnosticOutput,
+            hardware,
+            progressReporter: msg =>
+            {
+                _ = _hubContext.Clients.All.SendAsync("ReceiveProgress", msg, cancellationToken);
+            },
+            stepReporter: step =>
+            {
+                _ = _hubContext.Clients.All.SendAsync("ReceiveReActStep", step, cancellationToken);
+            });
+
+        if (orchestrationResult.Plan != null)
+        {
+            orchestrationResult.Plan.SessionId = sessionId.ToString();
+        }
+
+        var autoExecuted = false;
+        var primaryTool = orchestrationResult.Plan?.PlannedActions.FirstOrDefault();
+
+        if (autoExecuteSafe &&
+            primaryTool != null &&
+            SafeAutoPilotTier1Tools.Contains(primaryTool.Id))
+        {
+            _ = _hubContext.Clients.All.SendAsync(
+                "ReceiveProgress",
+                $"[AUTO-DOCTOR] Safe Auto-Pilot enabled: automatically executing Tier-1 tool '{primaryTool.Name}' ({primaryTool.Id})...",
+                cancellationToken);
+
+            var execResult = await _orchestrator.RunExecutionCycleAsync(
+                diagnosticOutput,
+                hardware,
+                userConsentProvided: true,
+                progressReporter: msg =>
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveProgress", msg, cancellationToken);
+                },
+                requestedToolName: primaryTool.Id,
+                requestedArgumentsJson: primaryTool.ToolArgumentsJson,
+                stepReporter: step =>
+                {
+                    _ = _hubContext.Clients.All.SendAsync("ReceiveReActStep", step, cancellationToken);
+                });
+
+            if (execResult.Plan != null)
+            {
+                execResult.Plan.SessionId = sessionId.ToString();
+            }
+
+            if (execResult.Attempts.Any(a => a.Action != null && a.Execution != null))
+            {
+                try
+                {
+                    var run = BuildRemediationRun(diagnosticOutput.Id, execResult, hardware);
+                    await _remediationRepository.SaveRunAsync(run);
+                    execResult.Trace += $"\n[PERSISTENCE] Autonomous remediation run saved: {run.Id}";
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Autonomous Doctor remediation completed but history could not be persisted.");
+                }
+            }
+
+            orchestrationResult = execResult;
+            autoExecuted = true;
+        }
+
+        var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
+        var activeEngine = !string.IsNullOrWhiteSpace(effectiveKey)
+            ? "Gemini 3.5 Flash Cascade + Local ReAct Fallback"
+            : "Local Deterministic ReAct Engine (100% Offline)";
+
+        return Ok(new
+        {
+            sessionId = sessionId.ToString(),
+            diagnosedCategory,
+            actionCategory,
+            confidenceLabel,
+            aiExplanation = explanation,
+            autoExecuted,
+            activeEngine,
+            orchestration = orchestrationResult
+        });
     }
 
     private sealed class CloseAppOutcome
