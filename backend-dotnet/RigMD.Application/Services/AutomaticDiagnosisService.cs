@@ -9,7 +9,7 @@ namespace RigMD.Application.Services;
 /// <summary>
 /// Live-telemetry intake evaluator supporting full, component, and scenario modes.
 /// Enforces hardware presence gating (ComponentStatus.NotPresent), strict scoped primary verdicts,
-/// out-of-scope incidental warnings, and grounded telemetry proof items.
+/// and grounded telemetry proof items without cross-mode hijacking.
 /// </summary>
 public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 {
@@ -99,9 +99,6 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             }
         }
 
-        bool EvalComponent(params string[] ids) =>
-            mode != "component" || selectedComponents.Count == 0 || ids.Any(selectedComponents.Contains);
-
         var cpuUsage = hw.Cpu.UsagePercent;
         var cpuTemp = hw.Cpu.TemperatureCelsius;
         var ramUsage = hw.Ram.UsagePercent;
@@ -117,6 +114,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         var proof = BuildTelemetryProof(
             hw,
             mode,
+            scenarioId,
             selectedComponents,
             cpuUsage,
             cpuTemp,
@@ -127,21 +125,27 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             browserMemoryMb,
             browserProcs);
 
-        var incidentalWarning = BuildIncidentalWarning(
-            hw,
-            mode,
-            selectedComponents,
-            targetScopeLabels,
-            cpuUsage,
-            cpuTemp,
-            ramUsage,
-            maxDiskUsage,
-            smartFailing,
-            hasDeviceErrors,
-            memLeakWarning,
-            absentComponentNote);
+        // 1. Scenario-driven investigation runs FIRST when user explicitly picked a problem scenario
+        // so general RAM/browser workload never hijacks a targeted Scenario Scan.
+        if (mode == "scenario" && !string.IsNullOrWhiteSpace(scenarioId))
+        {
+            return BuildScenarioDiagnosis(
+                scenarioId,
+                targetScopeLabels,
+                hw,
+                cpuUsage,
+                cpuTemp,
+                ramUsage,
+                maxDiskUsage,
+                smartFailing,
+                hasDeviceErrors,
+                proof);
+        }
 
-        // 1. Hardware health critical checks (SMART failure / PnP device error codes)
+        bool EvalComponent(params string[] ids) =>
+            mode == "full" || (mode == "component" && selectedComponents.Count > 0 && ids.Any(selectedComponents.Contains));
+
+        // 2. Hardware health critical checks (SMART failure / PnP device error codes)
         if (EvalComponent("storage") && smartFailing)
         {
             var primary = "Live S.M.A.R.T. telemetry indicates a storage drive health warning. Back up important files immediately before running disk repairs.";
@@ -150,12 +154,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Storage health behavior",
                 ActionCategory = "Escalate",
                 ConfidenceLabel = "High",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Back up critical files first, then use the Autonomous ReAct Agent to inspect drive health and Windows Event Logs.",
+                Explanation = primary,
+                RecommendedNextStep = "Back up important files first, then run the guided inspection below to review drive health and Windows Event Logs.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -169,29 +173,29 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (EvalComponent("drivers", "gpu", "display") && hasDeviceErrors)
         {
             var firstErr = hw.DeviceErrors.First();
-            var primary = $"Windows PnP Device Manager reported hardware error code {firstErr.ErrorCode} on '{firstErr.Name}'.";
+            var primary = $"Windows Device Manager reported error code {firstErr.ErrorCode} on '{firstErr.Name}'.";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Driver conflict",
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = "High",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to inspect Windows System Event Logs and driver telemetry.",
+                Explanation = primary,
+                RecommendedNextStep = "Open Windows Device Manager or run the guided inspection below to check driver status and system error logs.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
                     Target = "device_manager",
                     Label = "Windows Device Manager",
-                    Description = "Inspect devices reporting non-zero ConfigManagerErrorCode."
+                    Description = "Inspect devices reporting non-zero error codes."
                 }
             };
         }
 
-        // 2. Combined severe system thrashing (only when CPU, Memory, and Storage are all in scope)
+        // 3. Combined severe system thrashing (only when CPU, Memory, and Storage are all in scope)
         if (EvalComponent("cpu") && EvalComponent("memory") && EvalComponent("storage") &&
             cpuUsage >= 85 && ramUsage >= 85 && maxDiskUsage >= 85)
         {
@@ -201,12 +205,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Severe System Resource Exhaustion",
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = "High",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to identify and close runaway processes or clear disk caches.",
+                Explanation = primary,
+                RecommendedNextStep = "Run the guided inspection below to close heavy background apps or clear temporary disk caches.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -217,7 +221,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 3. CPU & Thermal checks
+        // 4. CPU & Thermal checks
         if (EvalComponent("cpu", "thermal") && (hw.Cpu.IsThermallyThrottling || (cpuTemp.HasValue && cpuTemp.Value >= 85)))
         {
             var primary = $"Thermal pressure detected on {hw.Cpu.Name} ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermal throttling active")}).";
@@ -226,12 +230,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Thermal condition",
                 ActionCategory = "Maintain",
                 ConfidenceLabel = "High",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to inspect CPU thermals and background workloads.",
+                Explanation = primary,
+                RecommendedNextStep = "Check airflow and cooling, or run the guided inspection below to review processor temperatures and heavy background tasks.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -250,12 +254,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Elevated CPU Utilization",
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = cpuUsage >= 90 ? "High" : "Medium",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to inspect top CPU/memory processes and safely terminate non-essential background tasks.",
+                Explanation = primary,
+                RecommendedNextStep = "Run the guided inspection below to identify high-CPU processes and safely close non-essential background tasks.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -266,7 +270,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 4. Memory & Process Workload checks
+        // 5. Memory & Process Workload checks (strictly for Full Scan or explicit Memory/OS Component Scan)
         if (EvalComponent("memory", "os") && (!string.IsNullOrWhiteSpace(memLeakWarning) || ramUsage >= 80 || (ramUsage >= 68 && browserMemoryMb >= 1500)))
         {
             var category = ramUsage >= 80
@@ -275,18 +279,18 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     ? "OS performance degradation"
                     : "Elevated Memory Pressure From Active Workloads";
 
-            var primary = $"Memory (RAM) shows elevated utilization at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB) with {browserMemoryMb:0.#} MB across {browserProcs} browser processes.";
+            var primary = $"Memory (RAM) is at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB) with {browserMemoryMb:0.#} MB across {browserProcs} browser processes.";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = category,
                 ActionCategory = ramUsage >= 85 ? "Troubleshoot" : "Maintain",
                 ConfidenceLabel = ramUsage >= 85 ? "High" : "Medium",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Use the Autonomous ReAct Agent below to inspect memory-heavy processes or clear browser/temporary caches.",
+                Explanation = primary,
+                RecommendedNextStep = "Close unused browser tabs or run the guided inspection below to review memory-heavy apps and clear caches.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -297,21 +301,21 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 5. Storage utilization check
+        // 6. Storage utilization check
         if (EvalComponent("storage") && maxDiskUsage >= 80)
         {
-            var primary = $"Storage volume utilization is elevated at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType}.";
+            var primary = $"Storage volume usage is elevated at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType}.";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = maxDiskUsage >= 90 ? "Low Available Storage Space" : "Elevated Storage Utilization",
                 ActionCategory = "Maintain",
                 ConfidenceLabel = maxDiskUsage >= 90 ? "High" : "Medium",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to preview and clear temporary files, browser caches, or Windows Update caches.",
+                Explanation = primary,
+                RecommendedNextStep = "Run the guided inspection below to preview and clean temporary files, browser caches, or Windows Update caches.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -322,25 +326,25 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 6. Network connectivity check
+        // 7. Network connectivity check
         if (EvalComponent("network") && hw.Network != null &&
             (!hw.Network.HasActiveAdapter ||
              (hw.Network.PacketLossPercent ?? 0) >= 5 ||
              (hw.Network.PingLatencyMs ?? 0) >= 150 ||
              (hw.Network.IsWifi && hw.Network.WifiSignalStrength is > 0 and <= 45)))
         {
-            var primary = $"Network connectivity degradation detected (Ping: {hw.Network.PingLatencyMs?.ToString() ?? "N/A"} ms, Packet Loss: {hw.Network.PacketLossPercent ?? 0:0.#}%).";
+            var primary = $"Network connectivity issue detected (Ping: {hw.Network.PingLatencyMs?.ToString() ?? "N/A"} ms, Packet Loss: {hw.Network.PacketLossPercent ?? 0:0.#}%).";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
                 PrimaryResult = primary,
-                IncidentalWarning = incidentalWarning,
+                IncidentalWarning = absentComponentNote,
                 DiagnosedCategory = "Network issue",
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = "Medium",
-                Explanation = AppendIncidental(primary, incidentalWarning),
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to inspect network adapters and flush the Windows DNS resolver cache.",
+                Explanation = primary,
+                RecommendedNextStep = "Run the guided inspection below to test network connectivity and flush the Windows DNS resolver cache.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -351,30 +355,23 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 7. Scenario-driven investigation when user explicitly picked a problem scenario
-        if (mode == "scenario" && !string.IsNullOrWhiteSpace(scenarioId))
-        {
-            return BuildScenarioDiagnosis(scenarioId, targetScopeLabels, hw, cpuUsage, ramUsage, maxDiskUsage, proof);
-        }
-
         // 8. Scoped Component-driven healthy verdict when user explicitly selected specific parts
         if (mode == "component" && selectedComponents.Count > 0)
         {
             return BuildComponentHealthyDiagnosis(
                 selectedComponents,
                 targetScopeLabels,
-                incidentalWarning,
+                absentComponentNote,
                 hw,
                 cpuUsage,
                 cpuTemp,
                 ramUsage,
                 maxDiskUsage,
                 smartFailing,
-                hasDeviceErrors,
                 proof);
         }
 
-        var fullPrimary = $"Full system telemetry shows CPU ({cpuUsage:0.#}%), RAM ({ramUsage:0.#}%), and Storage ({maxDiskUsage:0.#}%) operating within normal ranges.";
+        var fullPrimary = $"CPU ({cpuUsage:0.#}%), RAM ({ramUsage:0.#}%), and Storage ({maxDiskUsage:0.#}%) are operating within normal ranges.";
         return new AutomaticDiagnosisResult
         {
             ComponentStatus = ComponentStatus.Present,
@@ -384,8 +381,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             DiagnosedCategory = "No Active Issue Detected",
             ActionCategory = "Monitor",
             ConfidenceLabel = "High",
-            Explanation = $"{fullPrimary} You can still launch the Autonomous ReAct Agent below for a deeper multi-tool inspection or proactive maintenance.",
-            RecommendedNextStep = "Continue normal monitoring, or click 'Run Agent & Review Action' below to run a deep ReAct tool inspection (Event Logs, S.M.A.R.T., Processes, and Cache Dry-Run).",
+            Explanation = fullPrimary,
+            RecommendedNextStep = "No immediate fix is needed. You can run the guided inspection below for a deeper check or routine cleanup.",
             Proof = proof,
             VerificationTarget = new AutomaticVerificationTarget
             {
@@ -399,14 +396,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
     private static AutomaticDiagnosisResult BuildComponentHealthyDiagnosis(
         HashSet<string> selectedComponents,
         IReadOnlyList<string> targetScopeLabels,
-        string? incidentalWarning,
+        string? absentComponentNote,
         HardwareProfileDto hw,
         double cpuUsage,
         double? cpuTemp,
         double ramUsage,
         double maxDiskUsage,
         bool smartFailing,
-        bool hasDeviceErrors,
         List<AutomaticDiagnosisProof> proof)
     {
         var componentSummaries = new List<string>();
@@ -442,7 +438,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (selectedComponents.Contains("drivers"))
         {
             componentSummaries.Add(
-                $"Hardware Drivers are operating normally (0 PnP error codes detected in Device Manager).");
+                "Hardware Drivers are operating normally (0 error codes in Device Manager).");
         }
 
         if (selectedComponents.Contains("network"))
@@ -479,12 +475,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             ComponentStatus = ComponentStatus.Present,
             TargetScope = targetScopeLabels,
             PrimaryResult = primaryResult,
-            IncidentalWarning = incidentalWarning,
+            IncidentalWarning = absentComponentNote,
             DiagnosedCategory = "No Active Issue Detected",
             ActionCategory = "Monitor",
             ConfidenceLabel = "High",
-            Explanation = AppendIncidental(primaryResult, incidentalWarning),
-            RecommendedNextStep = "No immediate fix is required for the selected part(s). You can still run the Scoped ReAct Agent below to inspect live component telemetry.",
+            Explanation = primaryResult,
+            RecommendedNextStep = "No immediate fix is required for the selected part(s). You can run the guided inspection below for a deeper check.",
             Proof = proof,
             VerificationTarget = new AutomaticVerificationTarget
             {
@@ -495,116 +491,16 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         };
     }
 
-    private static string? BuildIncidentalWarning(
-        HardwareProfileDto hw,
-        string mode,
-        HashSet<string> selectedComponents,
+    private static AutomaticDiagnosisResult BuildScenarioDiagnosis(
+        string scenarioId,
         IReadOnlyList<string> targetScopeLabels,
+        HardwareProfileDto hw,
         double cpuUsage,
         double? cpuTemp,
         double ramUsage,
         double maxDiskUsage,
         bool smartFailing,
         bool hasDeviceErrors,
-        string? memLeakWarning,
-        string? absentComponentNote)
-    {
-        if (mode != "component" || selectedComponents.Count == 0)
-        {
-            return null;
-        }
-
-        var scopeText = string.Join(", ", targetScopeLabels);
-        var warnings = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(absentComponentNote))
-        {
-            warnings.Add(absentComponentNote);
-        }
-
-        // Check out-of-scope Storage
-        if (!selectedComponents.Contains("storage"))
-        {
-            var criticalVolume = hw.AllDisks
-                .OrderByDescending(d => d.UsagePercent)
-                .FirstOrDefault(d => d.UsagePercent >= 85 || (d.TotalGb > 0 && (d.TotalGb - d.UsedGb) <= 5.0));
-
-            if (smartFailing)
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed a physical drive S.M.A.R.T. health warning on your storage subsystem.");
-            }
-            else if (criticalVolume != null)
-            {
-                var freeGb = Math.Max(0, criticalVolume.TotalGb - criticalVolume.UsedGb);
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed your {criticalVolume.Drive} Drive is critically low on space ({criticalVolume.UsagePercent:0.#}% used, {freeGb:0.0} GB free).");
-            }
-            else if (maxDiskUsage >= 85)
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed your primary storage volume is running low on space ({maxDiskUsage:0.#}% used).");
-            }
-        }
-
-        // Check out-of-scope Memory
-        if (!selectedComponents.Contains("memory") && !selectedComponents.Contains("os"))
-        {
-            if (ramUsage >= 85 || !string.IsNullOrWhiteSpace(memLeakWarning))
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed physical Memory (RAM) pressure is high ({ramUsage:0.#}% in use, {hw.Ram.UsedGb:0.0}/{hw.Ram.TotalGb:0.0} GB).");
-            }
-        }
-
-        // Check out-of-scope CPU / Thermals
-        if (!selectedComponents.Contains("cpu") && !selectedComponents.Contains("thermal"))
-        {
-            if (hw.Cpu.IsThermallyThrottling || (cpuTemp.HasValue && cpuTemp.Value >= 85))
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed your CPU is experiencing thermal pressure ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermal throttling")}).");
-            }
-            else if (cpuUsage >= 85)
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed your CPU utilization is critically elevated ({cpuUsage:0.#}%).");
-            }
-        }
-
-        // Check out-of-scope Drivers/GPU
-        if (!selectedComponents.Contains("drivers") && !selectedComponents.Contains("gpu") && !selectedComponents.Contains("display"))
-        {
-            if (hasDeviceErrors)
-            {
-                var firstErr = hw.DeviceErrors.First();
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed Windows Device Manager reported error code {firstErr.ErrorCode} on '{firstErr.Name}'.");
-            }
-        }
-
-        // Check out-of-scope Network
-        if (!selectedComponents.Contains("network"))
-        {
-            if (hw.Network != null && !hw.Network.HasActiveAdapter)
-            {
-                warnings.Add($"Note: Although you only scanned {scopeText}, RigMD noticed your network adapter is currently offline.");
-            }
-        }
-
-        return warnings.Count > 0 ? string.Join(" ", warnings) : null;
-    }
-
-    private static string AppendIncidental(string primary, string? incidentalWarning)
-    {
-        if (string.IsNullOrWhiteSpace(incidentalWarning))
-        {
-            return primary;
-        }
-
-        return $"{primary}\n\n{incidentalWarning}";
-    }
-
-    private static AutomaticDiagnosisResult BuildScenarioDiagnosis(
-        string scenarioId,
-        IReadOnlyList<string> targetScopeLabels,
-        HardwareProfileDto hw,
-        double cpuUsage,
-        double ramUsage,
-        double maxDiskUsage,
         List<AutomaticDiagnosisProof> proof)
     {
         return scenarioId switch
@@ -613,12 +509,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Scenario check for '{scenarioId}' captured CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and {hw.ProcessInsights?.BrowserMemoryMb ?? 0:0.#} MB in browser processes.",
+                PrimaryResult = $"System responsiveness check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and Storage at {maxDiskUsage:0.#}%.",
                 DiagnosedCategory = "OS performance degradation",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = ramUsage >= 60 || cpuUsage >= 50 ? "High" : "Medium",
-                Explanation = $"Scenario check for '{scenarioId}' captured CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and {hw.ProcessInsights?.BrowserMemoryMb ?? 0:0.#} MB in browser processes.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to execute [inspect_cpu_and_thermals, inspect_memory_and_processes, inspect_storage_health] and preview safe remediation.",
+                ConfidenceLabel = ramUsage >= 65 || cpuUsage >= 55 ? "High" : "Medium",
+                Explanation = $"System responsiveness check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and {hw.ProcessInsights?.BrowserMemoryMb ?? 0:0.#} MB in browser processes.",
+                RecommendedNextStep = "Run the guided inspection below to check active CPU/memory workloads and preview safe cache cleanup.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -631,12 +527,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Startup performance check captured storage usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM usage at {ramUsage:0.#}%.",
+                PrimaryResult = $"Startup check recorded primary storage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM at {ramUsage:0.#}%.",
                 DiagnosedCategory = "Boot and startup failure",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Startup performance check captured storage usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM usage at {ramUsage:0.#}%.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent to execute [inspect_storage_health, query_startup_apps, query_windows_event_logs (Boot/Event 100)] and clear temporary startup caches.",
+                ConfidenceLabel = maxDiskUsage >= 80 || ramUsage >= 75 ? "High" : "Medium",
+                Explanation = $"Startup performance check recorded storage usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM usage at {ramUsage:0.#}%.",
+                RecommendedNextStep = "Review startup applications in Windows Settings or run the guided inspection below to check startup impact and clear temporary caches.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -645,34 +541,52 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Review applications configured to launch at Windows sign-in."
                 }
             },
-            "blue-screen-crash" or "app-crashes" => new AutomaticDiagnosisResult
+            "app-crashes" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Crash & stability scenario selected. Live telemetry captured RAM at {ramUsage:0.#}% and CPU at {cpuUsage:0.#}%; Event Log BugCheck/Kernel-Power 41 inspection is ready.",
-                DiagnosedCategory = "OS performance degradation",
+                PrimaryResult = $"Application stability check recorded CPU at {cpuUsage:0.#}% and RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB).",
+                DiagnosedCategory = "Application crash history requires review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Crash & stability scenario selected. Live telemetry captured RAM at {ramUsage:0.#}% and CPU at {cpuUsage:0.#}%; deeper Windows Event Log and system file inspection is recommended.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to execute [query_windows_event_logs (BugCheck/Kernel-Power 41), inspect_memory_and_processes, inspect_cpu_and_thermals].",
+                ConfidenceLabel = ramUsage >= 80 || cpuUsage >= 80 ? "High" : "Medium",
+                Explanation = $"Application stability check recorded CPU at {cpuUsage:0.#}% and RAM at {ramUsage:0.#}%. Reviewing recent application fault entries in Windows Reliability Monitor and Event Logs helps pinpoint which program failed.",
+                RecommendedNextStep = "Review recent application crash events in Windows Reliability Monitor or run the guided inspection below to check Windows error logs.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
                     Target = "reliability_monitor",
                     Label = "Windows Reliability Monitor",
-                    Description = "Review recent application crashes and Windows stop error events."
+                    Description = "Review recent application crashes and fault events."
+                }
+            },
+            "blue-screen-crash" => new AutomaticDiagnosisResult
+            {
+                ComponentStatus = ComponentStatus.Present,
+                TargetScope = targetScopeLabels,
+                PrimaryResult = $"System crash check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and {hw.DeviceErrors?.Count ?? 0} active device error(s).",
+                DiagnosedCategory = "System crash or stop error requires review",
+                ActionCategory = "Troubleshoot",
+                ConfidenceLabel = hasDeviceErrors || ramUsage >= 85 ? "High" : "Medium",
+                Explanation = $"System crash check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and {hw.DeviceErrors?.Count ?? 0} Device Manager error(s). Checking Windows stop error logs and driver status is recommended.",
+                RecommendedNextStep = "Check Windows Reliability Monitor for stop errors or run the guided inspection below to check crash logs and system files.",
+                Proof = proof,
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "reliability_monitor",
+                    Label = "Windows Reliability Monitor",
+                    Description = "Review Windows stop error and unexpected restart events."
                 }
             },
             "driver-error" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Driver check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) with {hw.DeviceErrors?.Count ?? 0} PnP error code(s) currently active.",
+                PrimaryResult = $"Driver check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) with {hw.DeviceErrors?.Count ?? 0} active device error(s).",
                 DiagnosedCategory = "Driver conflict",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Driver check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) with {hw.DeviceErrors?.Count ?? 0} PnP error code(s) currently active.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to query Windows Event Logs for driver faults and inspect GPU/device telemetry.",
+                ConfidenceLabel = hasDeviceErrors ? "High" : "Medium",
+                Explanation = $"Driver check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) with {hw.DeviceErrors?.Count ?? 0} PnP error code(s) currently active in Device Manager.",
+                RecommendedNextStep = "Open Windows Device Manager or run the guided inspection below to check for driver warnings and system event errors.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -688,9 +602,9 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 PrimaryResult = $"Display check completed for {hw.Gpu.Name} across {hw.ConnectedDisplays} connected display(s).",
                 DiagnosedCategory = "Display driver behavior",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Display check completed for {hw.Gpu.Name} across {hw.ConnectedDisplays} connected display(s).",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to inspect GPU/display telemetry, check Windows Event Logs, or restart the Windows Explorer shell.",
+                ConfidenceLabel = hasDeviceErrors ? "High" : "Medium",
+                Explanation = $"Display check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) across {hw.ConnectedDisplays} connected display(s).",
+                RecommendedNextStep = "Check display adapter status in Device Manager or run the guided inspection below to check graphics telemetry and refresh the Windows shell.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -703,12 +617,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Thermal scenario check recorded CPU load at {cpuUsage:0.#}% ({(hw.Cpu.TemperatureCelsius.HasValue ? $"{hw.Cpu.TemperatureCelsius.Value:0.#}°C" : "sensor nominal")}) under power plan '{hw.ActivePowerPlan}'.",
+                PrimaryResult = $"Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : hw.Cpu.IsThermallyThrottling ? "throttling active" : "thermals nominal")}) under power plan '{hw.ActivePowerPlan}'.",
                 DiagnosedCategory = "Thermal condition",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Thermal scenario check recorded CPU load at {cpuUsage:0.#}% ({(hw.Cpu.TemperatureCelsius.HasValue ? $"{hw.Cpu.TemperatureCelsius.Value:0.#}°C" : "sensor nominal")}) under power plan '{hw.ActivePowerPlan}'.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to execute [inspect_cpu_and_thermals, inspect_gpu_and_displays, inspect_memory_and_processes] and close heat-generating workloads.",
+                ConfidenceLabel = hw.Cpu.IsThermallyThrottling || (cpuTemp.HasValue && cpuTemp.Value >= 80) || cpuUsage >= 75 ? "High" : "Medium",
+                Explanation = $"Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermals nominal")}) under power plan '{hw.ActivePowerPlan}'.",
+                RecommendedNextStep = "Check fan airflow and vents, or run the guided inspection below to check processor temperatures and close heat-generating tasks.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -721,12 +635,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Network scenario check recorded adapter ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
+                PrimaryResult = $"Network check recorded ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
                 DiagnosedCategory = "Network issue",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Network scenario check recorded adapter ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to execute [inspect_network_connectivity, inspect_dns] and flush the Windows DNS cache.",
+                ConfidenceLabel = hw.Network != null && (!hw.Network.HasActiveAdapter || !hw.Network.DnsResolutionSucceeded || (hw.Network.PingLatencyMs ?? 0) >= 120) ? "High" : "Medium",
+                Explanation = $"Network check recorded adapter ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
+                RecommendedNextStep = "Run the guided inspection below to test network connectivity and flush the Windows DNS resolver cache.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -739,12 +653,14 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Storage scenario check recorded primary volume usage at {maxDiskUsage:0.#}% across {hw.StorageDrives.Count} drive(s).",
-                DiagnosedCategory = "Elevated Storage Utilization",
-                ActionCategory = "Maintain",
-                ConfidenceLabel = "Medium",
-                Explanation = $"Storage scenario check recorded primary volume usage at {maxDiskUsage:0.#}% across {hw.StorageDrives.Count} drive(s).",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below to execute [inspect_storage_health] and preview temporary/cache file cleanup.",
+                PrimaryResult = $"Storage check recorded primary volume usage at {maxDiskUsage:0.#}% ({(smartFailing ? "S.M.A.R.T. warning active" : "S.M.A.R.T. healthy")}) across {hw.StorageDrives.Count} drive(s).",
+                DiagnosedCategory = smartFailing ? "Storage health behavior" : maxDiskUsage >= 90 ? "Low Available Storage Space" : "Elevated Storage Utilization",
+                ActionCategory = smartFailing ? "Escalate" : "Maintain",
+                ConfidenceLabel = smartFailing || maxDiskUsage >= 80 ? "High" : "Medium",
+                Explanation = $"Storage check recorded primary volume usage at {maxDiskUsage:0.#}% across {hw.StorageDrives.Count} drive(s) ({(smartFailing ? "S.M.A.R.T. warning reported" : "S.M.A.R.T. healthy")}).",
+                RecommendedNextStep = smartFailing
+                    ? "Back up important files immediately, then review drive health in Windows Storage Settings."
+                    : "Run the guided inspection below to check drive health and preview temporary file cleanup.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -762,7 +678,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Maintain",
                 ConfidenceLabel = "Medium",
                 Explanation = $"Scenario check completed with CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and Storage at {maxDiskUsage:0.#}%.",
-                RecommendedNextStep = "Run the Autonomous ReAct Agent below for a multi-turn diagnostic tool inspection and safe remediation preview.",
+                RecommendedNextStep = "Run the guided inspection below to review live system telemetry and safe maintenance options.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -777,6 +693,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
     private static List<AutomaticDiagnosisProof> BuildTelemetryProof(
         HardwareProfileDto hw,
         string mode,
+        string scenarioId,
         HashSet<string> selectedComponents,
         double cpuUsage,
         double? cpuTemp,
@@ -787,8 +704,9 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         double browserMemoryMb,
         int browserProcs)
     {
+        var activeScopeKeys = ResolveScopeKeys(mode, scenarioId, selectedComponents);
         bool Include(params string[] keys) =>
-            mode != "component" || selectedComponents.Count == 0 || keys.Any(selectedComponents.Contains);
+            activeScopeKeys == null || keys.Any(activeScopeKeys.Contains);
 
         var proof = new List<AutomaticDiagnosisProof>();
 
@@ -879,5 +797,34 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         }
 
         return proof;
+    }
+
+    private static HashSet<string>? ResolveScopeKeys(
+        string mode,
+        string scenarioId,
+        HashSet<string> selectedComponents)
+    {
+        if (mode == "component" && selectedComponents.Count > 0)
+        {
+            return selectedComponents;
+        }
+
+        if (mode == "scenario" && !string.IsNullOrWhiteSpace(scenarioId))
+        {
+            return scenarioId switch
+            {
+                "overheating-loud-fan" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "thermal", "gpu" },
+                "driver-error" or "no-display" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "gpu", "display", "drivers" },
+                "network-problem" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "network" },
+                "storage-problem" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage" },
+                "slow-boot" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage", "memory", "os" },
+                "app-crashes" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "os" },
+                "blue-screen-crash" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "gpu", "drivers", "os" },
+                "slow-system" or "stuttering-freezing" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "storage" },
+                _ => null
+            };
+        }
+
+        return null;
     }
 }

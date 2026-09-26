@@ -17,6 +17,7 @@ public class ResolutionService
     private const double ElevatedMemoryThreshold = 80;
     private const double BrowserMemoryPressureMb = 3000;
     private const double ElevatedStorageThreshold = 80;
+    private const double ElevatedTempThresholdCelsius = 85;
 
     public ResolutionResultDto CheckResolution(
         string diagnosedCategory,
@@ -30,7 +31,7 @@ public class ResolutionService
             return CheckSevereResourceResolution(hardware);
         }
 
-        if (category.Contains("thermal condition") || category.Contains("thermal load"))
+        if (category.Contains("thermal"))
         {
             return CheckThermalResolution(hardware);
         }
@@ -40,12 +41,22 @@ public class ResolutionService
             return CheckCpuResolution(hardware);
         }
 
-        if (category.Contains("os performance") || category.Contains("boot and startup"))
+        if (category.Contains("application crash") || category.Contains("system crash") || category.Contains("stop error"))
+        {
+            return CheckCrashStabilityResolution(hardware);
+        }
+
+        if (category.Contains("boot and startup") || category.Contains("boot or startup"))
+        {
+            return CheckBootStartupResolution(hardware);
+        }
+
+        if (category.Contains("os performance"))
         {
             return CheckOsPerformanceResolution(hardware);
         }
 
-        if (category.Contains("high memory pressure") || category.Contains("memory resource pressure") || category.Contains("memory pressure / high ram"))
+        if (category.Contains("high memory pressure") || category.Contains("critical memory pressure") || category.Contains("memory resource pressure") || category.Contains("memory pressure / high ram"))
         {
             return CheckMemoryResolution(
                 hardware,
@@ -115,6 +126,87 @@ public class ResolutionService
         return CheckSevereResourceResolution(hardware);
     }
 
+    private static ResolutionResultDto CheckCrashStabilityResolution(
+        HardwareProfileDto hardware)
+    {
+        var cpuUsage = hardware.Cpu.UsagePercent;
+        var ramUsage = hardware.Ram.UsagePercent;
+        var errCount = hardware.DeviceErrors?.Count ?? 0;
+
+        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var ramOk = ramUsage < ElevatedMemoryThreshold;
+        var driversOk = errCount == 0;
+        var resolved = cpuOk && ramOk && driversOk;
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? "Fresh scan shows stable processor, memory, and device driver status. No active issue is detected for this saved check."
+                : "Fresh scan still shows resource pressure or active device error codes that may contribute to instability.",
+            new object[]
+            {
+                Proof(
+                    "Processor activity",
+                    $"{cpuUsage:0.##}%",
+                    cpuOk,
+                    "Processor activity is within normal operating limits.",
+                    "Processor activity is still elevated."),
+                Proof(
+                    "Memory use",
+                    $"{ramUsage:0.##}%",
+                    ramOk,
+                    "Memory use is within normal operating limits.",
+                    "Memory use is still above RigMD's high-use threshold."),
+                Proof(
+                    "Device Manager Errors",
+                    errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
+                    driversOk,
+                    "All hardware drivers report healthy status (ErrorCode = 0).",
+                    "One or more devices still report an active error code.")
+            });
+    }
+
+    private static ResolutionResultDto CheckBootStartupResolution(
+        HardwareProfileDto hardware)
+    {
+        var primaryDisk = GetPrimaryDisk(hardware);
+        var storageUsage = primaryDisk?.UsagePercent ?? 0;
+        var cpuUsage = hardware.Cpu.UsagePercent;
+        var ramUsage = hardware.Ram.UsagePercent;
+
+        var storageOk = primaryDisk == null || storageUsage < ElevatedStorageThreshold;
+        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var ramOk = ramUsage < ElevatedMemoryThreshold;
+        var resolved = storageOk && cpuOk && ramOk;
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? "Fresh scan shows boot storage, processor, and memory operating normally. No active issue is detected for this saved check."
+                : "Fresh scan still shows elevated boot storage or startup resource usage.",
+            new object[]
+            {
+                Proof(
+                    "Main storage use",
+                    primaryDisk == null ? "Not available" : $"{storageUsage:0.##}%",
+                    storageOk,
+                    "Boot drive free space is within a healthy range for Windows startup.",
+                    "Boot drive space is still tight and may slow down startup caching."),
+                Proof(
+                    "Processor activity",
+                    $"{cpuUsage:0.##}%",
+                    cpuOk,
+                    "Processor startup load is within normal limits.",
+                    "Processor load is still elevated."),
+                Proof(
+                    "Memory use",
+                    $"{ramUsage:0.##}%",
+                    ramOk,
+                    "Memory use is within normal limits.",
+                    "Memory use is still above RigMD's high-use range.")
+            });
+    }
+
     private static ResolutionResultDto CheckSevereResourceResolution(
         HardwareProfileDto hardware)
     {
@@ -159,19 +251,32 @@ public class ResolutionService
     private static ResolutionResultDto CheckThermalResolution(
         HardwareProfileDto hardware)
     {
-        var resolved = !hardware.Cpu.IsThermallyThrottling;
+        var tempC = hardware.Cpu.TemperatureCelsius;
+        var tempOk = !tempC.HasValue || tempC.Value < ElevatedTempThresholdCelsius;
+        var throttleOk = !hardware.Cpu.IsThermallyThrottling;
+        var resolved = tempOk && throttleOk;
+
+        var tempDisplay = tempC.HasValue
+            ? $"{tempC.Value:0.#}°C ({hardware.Cpu.UsagePercent:0.#}% load)"
+            : $"Nominal ({hardware.Cpu.UsagePercent:0.#}% load)";
 
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan no longer shows processor throttling behavior. No active issue is detected for this saved check."
-                : "Fresh scan still shows processor behavior that may point to heat or throttling.",
+                ? "Fresh scan shows processor temperature and throttling within normal limits. No active issue is detected for this saved check."
+                : "Fresh scan still shows elevated processor temperature or thermal throttling behavior.",
             new object[]
             {
                 Proof(
+                    "Processor temperature",
+                    tempDisplay,
+                    tempOk,
+                    "Processor temperature is within safe operating limits.",
+                    "Processor temperature is still elevated (>= 85°C)."),
+                Proof(
                     "Processor throttling",
                     hardware.Cpu.IsThermallyThrottling ? "Still observed" : "Not observed",
-                    resolved,
+                    throttleOk,
                     "RigMD no longer sees the processor slowing itself down because of heat.",
                     "RigMD still sees signs that the processor may be slowing itself down because of heat.")
             });

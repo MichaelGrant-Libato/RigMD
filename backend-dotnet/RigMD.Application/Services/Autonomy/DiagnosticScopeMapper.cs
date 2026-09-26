@@ -191,31 +191,53 @@ public static class DiagnosticScopeMapper
                 }
             },
 
-            "blue-screen-crash" or "app-crashes" => new List<ReActToolCallRequest>
+            "app-crashes" => new List<ReActToolCallRequest>
             {
                 new()
                 {
                     ToolName = "query_windows_event_logs",
-                    ArgumentsJson = "{\"logName\":\"System\",\"eventFocus\":\"BugCheck\",\"maxEvents\":15,\"hoursBack\":168}",
-                    Thought = "Scenario 'blue_screen': Querying Windows Event Logs for BugCheck (Event 1001), Kernel-Power (Event 41), and critical stop errors."
-                },
-                new()
-                {
-                    ToolName = "inspect_gpu_and_displays",
-                    ArgumentsJson = "{}",
-                    Thought = "Scenario 'blue_screen': Inspecting GPU driver version, VRAM state, and display adapter status."
+                    ArgumentsJson = "{\"logName\":\"Application\",\"eventFocus\":\"ApplicationCrash\",\"maxEvents\":15,\"hoursBack\":168}",
+                    Thought = "Scenario 'app-crashes': Querying Windows Application Event Log for recent application crash and fault events."
                 },
                 new()
                 {
                     ToolName = "inspect_memory_and_processes",
                     ArgumentsJson = "{\"topN\":10,\"sortBy\":\"memory\"}",
-                    Thought = "Scenario 'blue_screen': Inspecting physical RAM pressure, committed memory, and active workloads."
+                    Thought = "Scenario 'app-crashes': Inspecting physical RAM utilization and active application processes."
                 },
                 new()
                 {
                     ToolName = "inspect_cpu_and_thermals",
                     ArgumentsJson = "{}",
-                    Thought = "Scenario 'blue_screen': Checking CPU load and package temperature for thermal instability."
+                    Thought = "Scenario 'app-crashes': Checking processor load and thermal state."
+                }
+            },
+
+            "blue-screen-crash" => new List<ReActToolCallRequest>
+            {
+                new()
+                {
+                    ToolName = "query_windows_event_logs",
+                    ArgumentsJson = "{\"logName\":\"System\",\"eventFocus\":\"BugCheck\",\"maxEvents\":15,\"hoursBack\":168}",
+                    Thought = "Scenario 'blue-screen-crash': Querying Windows Event Logs for BugCheck (Event 1001), Kernel-Power (Event 41), and critical stop errors."
+                },
+                new()
+                {
+                    ToolName = "inspect_gpu_and_displays",
+                    ArgumentsJson = "{}",
+                    Thought = "Scenario 'blue-screen-crash': Inspecting GPU driver version, VRAM state, and display adapter status."
+                },
+                new()
+                {
+                    ToolName = "inspect_memory_and_processes",
+                    ArgumentsJson = "{\"topN\":10,\"sortBy\":\"memory\"}",
+                    Thought = "Scenario 'blue-screen-crash': Inspecting physical RAM pressure, committed memory, and active workloads."
+                },
+                new()
+                {
+                    ToolName = "inspect_cpu_and_thermals",
+                    ArgumentsJson = "{}",
+                    Thought = "Scenario 'blue-screen-crash': Checking CPU load and package temperature for thermal instability."
                 }
             },
 

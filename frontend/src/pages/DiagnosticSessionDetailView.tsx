@@ -608,13 +608,17 @@ export default function DiagnosticSessionDetailView({
                       }
                     </h2>
 
-                    {session.symptom_type && (
+                    {session.primary_result ? (
+                      <p className="mt-2 text-sm leading-relaxed text-slate-200">
+                        {session.primary_result}
+                      </p>
+                    ) : session.symptom_type ? (
                       <p className="mt-2 text-sm text-slate-400">
                         {
                           session.symptom_type
                         }
                       </p>
-                    )}
+                    ) : null}
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -650,7 +654,7 @@ export default function DiagnosticSessionDetailView({
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Diagnosis Scope
+                        Scope
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
@@ -670,7 +674,7 @@ export default function DiagnosticSessionDetailView({
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Diagnosis Mode
+                        Mode
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
@@ -682,11 +686,11 @@ export default function DiagnosticSessionDetailView({
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Evidence Source
+                        Source
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
-                        Local Windows Telemetry &amp; ReAct Agent
+                        Local Windows Telemetry
                       </p>
                     </div>
                   </div>
@@ -727,111 +731,29 @@ export default function DiagnosticSessionDetailView({
                   </div>
                 )}
 
-                {session.primary_result && (
-                  <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] p-4">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle2
-                        size={18}
-                        className="mt-0.5 shrink-0 text-emerald-300"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
-                            Primary Result (Scoped Verdict)
-                          </h3>
-                          {session.component_status === 'NotPresent' && (
-                            <span className="rounded border border-amber-400/35 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                              Component Not Present
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1.5 text-sm font-medium leading-relaxed text-slate-100">
-                          {session.primary_result}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {session.incidental_warning && (
-                  <div className="mt-4 rounded-xl border border-amber-400/35 bg-amber-400/10 p-4">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle
-                        size={18}
-                        className="mt-0.5 shrink-0 text-amber-300"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-200">
-                          Incidental Warning (Outside Selected Scope)
-                        </h3>
-                        <p className="mt-1.5 text-sm leading-relaxed text-amber-100">
-                          {session.incidental_warning}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <details className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4" open>
-                  <summary className="font-semibold text-slate-200">Why this result was suggested</summary>
-
-                  <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                    {session.ai_explanation ||
-                      'No explanation saved for this session.'}
-                  </p>
-                </details>
-
                 {session.recommended_next_step && (
-                  <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.045] p-4">
+                  <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.045] p-4">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300">
                       What to do next
                     </h3>
 
-                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-200">
                       {
                         session.recommended_next_step
                       }
                     </p>
                   </div>
                 )}
+
+                <details className="mt-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                  <summary className="cursor-pointer font-semibold text-slate-200">Why this result was suggested</summary>
+
+                  <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                    {session.ai_explanation ||
+                      'No explanation saved for this session.'}
+                  </p>
+                </details>
               </motion.section>
-
-              {isNoActiveIssue(
-                session.diagnosed_category,
-              ) && (
-                <motion.section
-                  variants={
-                    cardFadeUp
-                  }
-                  initial="hidden"
-                  animate="visible"
-                  transition={
-                    cardTransition
-                  }
-                  className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.045] p-6"
-                >
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2
-                      size={22}
-                      className="mt-0.5 shrink-0 text-emerald-300"
-                    />
-
-                    <div>
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-200">
-                        Baseline Telemetry Within Normal Thresholds
-                      </h3>
-
-                      <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                        Instantaneous CPU, memory, and disk thresholds did not flag an immediate emergency, or the issue is intermittent.
-                      </p>
-
-                      <p className="mt-3 text-sm leading-relaxed text-slate-400">
-                        You can still launch the Autonomous ReAct Agent below to run a multi-turn deep inspection (Windows Event Logs, S.M.A.R.T. health, processes, network) and preview safe maintenance actions.
-                      </p>
-                    </div>
-                  </div>
-                </motion.section>
-              )}
 
               {!isNoActiveIssue(session.diagnosed_category) && showSafeActions && (
                 <motion.section

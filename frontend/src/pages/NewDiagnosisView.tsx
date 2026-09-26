@@ -2400,7 +2400,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       </div>
 
                       <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                        Possible cause
+                        Result
                       </p>
 
                       <h3 className="mt-1 text-2xl font-bold leading-tight text-white">
@@ -2409,21 +2409,27 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         }
                       </h3>
 
+                      {report.primary_result && (
+                        <p className="mt-2 text-sm leading-relaxed text-slate-200">
+                          {report.primary_result}
+                        </p>
+                      )}
+
                       {report.confidence_label
                         ?.toLowerCase()
                         .includes('low') && (
-                        <p className="mt-2 text-sm text-slate-400">
-                          There is not enough information to confirm the cause. More checks may be needed.
+                        <p className="mt-2 text-xs text-slate-400">
+                          More checks may be needed to confirm the exact cause.
                         </p>
                       )}
                     </div>
 
-                    <div className="grid min-w-[240px] grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                    <div className="grid min-w-[220px] grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1">
                       <div
                         className={`rounded-lg border p-3 ${softTileStyle}`}
                       >
                         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                          Suggested next step
+                          Next step
                         </p>
 
                         <p
@@ -2439,7 +2445,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         className={`rounded-lg border p-3 ${softTileStyle}`}
                       >
                         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                          How certain is this result?
+                          Certainty
                         </p>
 
                         <p className="mt-1 text-sm font-bold text-white">
@@ -2451,57 +2457,15 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   </div>
                 </div>
 
-                {report.primary_result && (
-                  <section className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] p-4">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle2
-                        size={18}
-                        className="mt-0.5 shrink-0 text-emerald-300"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
-                            Primary Result (Scoped Verdict)
-                          </h4>
-                          {report.target_scope && (
-                            <span className="rounded border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-                              {report.target_scope}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1.5 text-sm font-medium leading-relaxed text-slate-100">
-                          {report.primary_result}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-                )}
+                <section className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-200">What to do next</h4>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-200">
+                    {report.recommended_next_step || 'Review the result below before making changes.'}
+                  </p>
+                </section>
 
-                {report.incidental_warning && (
-                  <section className="rounded-xl border border-amber-400/35 bg-amber-400/10 p-4">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle
-                        size={18}
-                        className="mt-0.5 shrink-0 text-amber-300"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-amber-200">
-                          Incidental Warning (Outside Selected Scope)
-                        </h4>
-                        <p className="mt-1.5 text-sm leading-relaxed text-amber-100">
-                          {report.incidental_warning}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-                )}
-
-                  <section className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4">
-                    <h4 className="font-semibold text-cyan-200">What to do next</h4>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-200">{report.recommended_next_step || 'No next step was provided. Review the result before making changes.'}</p>
-                  </section>
                 <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
-                  <summary className="font-semibold text-slate-200">Why this result was suggested</summary>
+                  <summary className="cursor-pointer font-semibold text-slate-200">Why this result was suggested</summary>
                   <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
                     {report.ai_explanation || 'An explanation is not available for this result.'}
                   </p>
@@ -2510,7 +2474,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 {report.proof &&
                   report.proof.length > 0 && (
                     <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
-                      <summary className="mb-3 font-semibold text-slate-200">View scan details</summary>
+                      <summary className="mb-3 cursor-pointer font-semibold text-slate-200">View scan details</summary>
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         {report.proof.map(
@@ -2528,7 +2492,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                               transition={
                                 cardTransition
                               }
-                              className={`rounded-xl border p-4 ${getProofCardStyle(
+                              className={`rounded-xl border p-3.5 ${getProofCardStyle(
                                 report.action_category,
                                 item.status,
                               )}`}
@@ -2545,14 +2509,10 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                 }
                               </p>
 
-                              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                              <p className="mt-1.5 text-xs leading-relaxed text-gray-400">
                                 {
                                   item.meaning
                                 }
-                              </p>
-
-                              <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                                Source: Device scan
                               </p>
                             </motion.div>
                           ),
@@ -2565,25 +2525,17 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   report,
                 ) && (
                   <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.045] p-4">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div className="min-w-0">
-                        <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white">
+                        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
                           <FileText
                             size={14}
                             className="text-cyan-400"
                           />
-                          Check this area
-                        </h4>
-
-                        <p className="mt-3 text-xs font-bold uppercase tracking-wider text-slate-400">
-                          Area to check
+                          Windows Tool: {getVerificationTarget()}
                         </p>
 
-                        <p className="mt-1 text-sm font-bold text-cyan-200">
-                          {getVerificationTarget()}
-                        </p>
-
-                        <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                        <p className="mt-1 text-xs leading-relaxed text-slate-400">
                           {
                             getVerificationDescription()
                           }
@@ -2599,22 +2551,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         whileTap={
                           buttonTap
                         }
-                        className="w-full shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2.5 text-center text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
+                        className="w-full shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-center text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
                       >
                         {inspecting
                           ? 'Opening...'
-                          : 'Open details'}
+                          : 'Open tool'}
                       </motion.button>
                     </div>
-                  </div>
-                )}
-
-
-                {isNoActiveIssue(
-                  report,
-                ) && (
-                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-emerald-300">
-                    The latest check did not find a problem that needs a fix.
                   </div>
                 )}
 

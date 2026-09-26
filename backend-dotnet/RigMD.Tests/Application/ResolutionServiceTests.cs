@@ -87,6 +87,8 @@ public class ResolutionServiceTests
         Assert.Equal("resolved", _service.CheckResolution("Storage Capacity Warning", hardware).resolution_status);
         Assert.Equal("resolved", _service.CheckResolution("Display or Driver Instability", hardware).resolution_status);
         Assert.Equal("resolved", _service.CheckResolution("Boot or Startup Contention", hardware).resolution_status);
+        Assert.Equal("resolved", _service.CheckResolution("Application crash history requires review", hardware).resolution_status);
+        Assert.Equal("resolved", _service.CheckResolution("System crash or stop error requires review", hardware).resolution_status);
     }
 
     [Fact]
@@ -109,13 +111,11 @@ public class ResolutionServiceTests
         });
 
         // Since only storage was selected and storage is healthy at 45%, Primary Verdict is healthy (No Active Issue Detected)
-        // while the 92% unselected RAM spike is surfaced strictly as an IncidentalWarning.
+        // and out-of-scope RAM pressure does NOT hijack or clutter the scoped component scan.
         Assert.Equal("No Active Issue Detected", storageOnlyResult.DiagnosedCategory);
         Assert.Equal(ComponentStatus.Present, storageOnlyResult.ComponentStatus);
         Assert.Contains("Storage / SSD / HDD is operating normally", storageOnlyResult.PrimaryResult);
-        Assert.NotNull(storageOnlyResult.IncidentalWarning);
-        Assert.Contains("Although you only scanned Storage / SSD / HDD", storageOnlyResult.IncidentalWarning);
-        Assert.Contains("Memory (RAM)", storageOnlyResult.IncidentalWarning);
+        Assert.Null(storageOnlyResult.IncidentalWarning);
         Assert.NotEmpty(storageOnlyResult.Proof);
         Assert.Contains(storageOnlyResult.Proof, p => p.Label.Contains("Storage"));
         Assert.DoesNotContain(storageOnlyResult.Proof, p => p.Label.Contains("Memory (RAM)"));
@@ -157,31 +157,46 @@ public class ResolutionServiceTests
     }
 
     [Fact]
-    public void AutomaticDiagnosisService_Diagnose_SeparatesScopedMemoryPrimaryResultFromCriticalStorageIncidentalWarning()
+    public void AutomaticDiagnosisService_Diagnose_StrictlyScopesScenarioScansWithoutMemoryHijacking()
     {
         var autoService = new AutomaticDiagnosisService();
         var hardware = CreateHardware(
-            ramUsage: 42,
-            browserHeavy: false,
-            browserMemoryMb: 500,
-            cpuUsage: 12,
-            storageUsage: 95,
+            ramUsage: 74, // Above 68% RAM threshold
+            browserHeavy: true,
+            browserMemoryMb: 2100, // Above 1500 MB browser threshold
+            cpuUsage: 22,
+            storageUsage: 50,
             dnsResolutionSucceeded: true);
 
-        var result = autoService.Diagnose(new AutomaticDiagnosisInput
+        var overheatingResult = autoService.Diagnose(new AutomaticDiagnosisInput
         {
-            Mode = "component",
-            ComponentIds = ["memory"],
+            Mode = "scenario",
+            ScenarioId = "overheating-loud-fan",
             Hardware = hardware
         });
 
-        Assert.Equal("No Active Issue Detected", result.DiagnosedCategory);
-        Assert.Contains("Memory (RAM)", result.TargetScope);
-        Assert.Contains("Memory (RAM) is operating normally", result.PrimaryResult);
-        Assert.Contains("42% in use, no leaks detected", result.PrimaryResult);
-        Assert.NotNull(result.IncidentalWarning);
-        Assert.Contains("Note: Although you only scanned Memory (RAM)", result.IncidentalWarning);
-        Assert.Contains("critically low on space", result.IncidentalWarning);
+        Assert.Equal("Thermal condition", overheatingResult.DiagnosedCategory);
+        Assert.DoesNotContain("[", overheatingResult.RecommendedNextStep);
+
+        var appCrashResult = autoService.Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = "scenario",
+            ScenarioId = "app-crashes",
+            Hardware = hardware
+        });
+
+        Assert.Equal("Application crash history requires review", appCrashResult.DiagnosedCategory);
+        Assert.DoesNotContain("[", appCrashResult.RecommendedNextStep);
+
+        var bsodResult = autoService.Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = "scenario",
+            ScenarioId = "blue-screen-crash",
+            Hardware = hardware
+        });
+
+        Assert.Equal("System crash or stop error requires review", bsodResult.DiagnosedCategory);
+        Assert.DoesNotContain("[", bsodResult.RecommendedNextStep);
     }
 
     private static HardwareProfileDto CreateHardware(
