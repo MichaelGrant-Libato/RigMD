@@ -15,7 +15,6 @@ import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated mod
 import HelpScopeView from './HelpScopeView';
 import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 import ShareReportView from './ShareReportView';
-import AiAgentDoctorView from './AiAgentDoctorView';
 import SettingsView from './SettingsView';
 
 import {
@@ -666,19 +665,6 @@ export default function HardwareDashboard() {
       case 'home':
         return (
           <HomeDashboardView
-            stats={stats}
-            dashboard={dashboard}
-            setActivePage={setActivePage}
-            onViewSession={(sessionId) => {
-              setSelectedSessionId(sessionId);
-              setActivePage('diagnosticHistory');
-            }}
-          />
-        );
-
-      case 'aiAgent':
-        return (
-          <AiAgentDoctorView
             stats={stats}
             dashboard={dashboard}
             setActivePage={setActivePage}

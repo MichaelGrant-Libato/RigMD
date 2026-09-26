@@ -14,7 +14,7 @@ import {
 import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import { apiFetch } from '../lib/api';
-import type { DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd';
+import type { DashboardSessionSummary, DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd';
 
 interface ShareReportViewProps {
   stats: HardwareStats | null;
@@ -201,15 +201,19 @@ function buildReportText({
   dashboard,
   hardwareUpdatedAt,
   sessions,
+  selectedSession,
   historyUnavailable,
 }: {
   stats: HardwareStats | null;
   dashboard: DashboardSummary;
   hardwareUpdatedAt: Date | null;
   sessions: SessionSummary[];
+  selectedSession?: SessionSummary | DashboardSessionSummary | null;
   historyUnavailable: boolean;
 }) {
-  const latest = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
+  const latest = selectedSession ?? sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
+  const isOlderSelected =
+    Boolean(selectedSession && sessions[0] && selectedSession.session_id !== sessions[0].session_id);
   const recentSessions = sessions.slice(0, 8);
   const drives = resolveAllStorageDrives(stats);
 
@@ -413,7 +417,7 @@ function buildReportText({
     ...driveLines,
     '',
     sectionDivider,
-    'LATEST SYSTEM CHECK',
+    isOlderSelected ? 'SELECTED SYSTEM CHECK' : 'LATEST SYSTEM CHECK',
     sectionDivider,
     ...latestLines,
     '',
@@ -457,6 +461,7 @@ export default function ShareReportView({
   onStartNewDiagnosis,
 }: ShareReportViewProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -474,7 +479,13 @@ export default function ShareReportView({
 
       const data = await response.json();
       const rows = Array.isArray(data) ? data : Array.isArray(data?.sessions) ? data.sessions : [];
-      setSessions(sortSessionsNewestFirst(rows as SessionSummary[]));
+      const sorted = sortSessionsNewestFirst(rows as SessionSummary[]);
+      setSessions(sorted);
+      setSelectedSessionId((prev) =>
+        prev && sorted.some((s) => s.session_id === prev)
+          ? prev
+          : (sorted[0]?.session_id ?? '')
+      );
     } catch {
       setSessions([]);
       setLoadError('Saved checks are not available right now.');
@@ -487,6 +498,20 @@ export default function ShareReportView({
     fetchSessions();
   }, [fetchSessions]);
 
+  const activeSession = useMemo(
+    () =>
+      sessions.find((s) => s.session_id === selectedSessionId) ??
+      sessions[0] ??
+      dashboard.last_saved_session ??
+      dashboard.last_diagnosis,
+    [dashboard.last_diagnosis, dashboard.last_saved_session, selectedSessionId, sessions]
+  );
+
+  const isLatestSelected =
+    !selectedSessionId ||
+    !sessions.length ||
+    selectedSessionId === sessions[0]?.session_id;
+
   const reportText = useMemo(
     () =>
       buildReportText({
@@ -494,12 +519,12 @@ export default function ShareReportView({
         dashboard,
         hardwareUpdatedAt,
         sessions,
+        selectedSession: activeSession,
         historyUnavailable: Boolean(loadError),
       }),
-    [dashboard, hardwareUpdatedAt, sessions, stats, loadError]
+    [activeSession, dashboard, hardwareUpdatedAt, sessions, stats, loadError]
   );
 
-  const latestSession = sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
   const reportFileName = `RigMD-Device-Report-${new Date().toISOString().slice(0, 10)}.txt`;
 
   const handleCopy = async () => {
@@ -531,7 +556,7 @@ export default function ShareReportView({
       {createPortal(<article className="rigmd-print-report" aria-label="Device check report"><h1>RigMD Device Check Report</h1><pre>{reportText.split('\n').slice(1).join('\n')}</pre></article>, document.body)}
       <TopHeader
         title="Share Report"
-        subtitle="Review your results, then print or share them"
+        subtitle="Select a saved check, review your results, then print or share them"
       />
 
       <motion.div
@@ -562,21 +587,57 @@ export default function ShareReportView({
               transition={cardTransition}
               className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6"
             >
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">Report Preview</p>
-              <h3 className="text-2xl font-bold text-white">Your device report</h3>
-              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-                Includes your computer name, device information, and recent checks. Review it before sharing.
-              </p>
+              <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+                <div>
+                  <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">Report Preview</p>
+                  <h3 className="text-2xl font-bold text-white">Your device report</h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+                    Includes your computer name, device information, and the selected diagnostic check. Review it before sharing.
+                  </p>
+                </div>
+
+                {sessions.length > 0 && (
+                  <div className="w-full lg:w-96">
+                    <label
+                      htmlFor="report-session-selector"
+                      className="mb-1.5 block text-xs font-bold uppercase tracking-[0.14em] text-slate-400"
+                    >
+                      Select Saved Check
+                    </label>
+                    <select
+                      id="report-session-selector"
+                      value={selectedSessionId || sessions[0]?.session_id || ''}
+                      onChange={(e) => setSelectedSessionId(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3.5 py-2.5 text-xs font-semibold text-white transition focus:border-cyan-400 focus:outline-none"
+                    >
+                      {sessions.map((s, idx) => {
+                        const codePrefix = s.session_code ? `${s.session_code} • ` : '';
+                        const dateLabel = formatDate(getSessionDate(s));
+                        const findingLabel = friendlyResult(s.diagnosed_category);
+                        const latestTag = idx === 0 ? ' (Latest)' : '';
+                        return (
+                          <option key={s.session_id} value={s.session_id}>
+                            {`${codePrefix}${dateLabel} — ${findingLabel}${latestTag}`}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+              </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-3">
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Latest result</p>
-                  <p className="mt-2 break-words font-bold text-white">{friendlyResult(latestSession?.diagnosed_category)}</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                    {isLatestSelected ? 'Latest result' : 'Selected result'}
+                  </p>
+                  <p className="mt-2 break-words font-bold text-white">{friendlyResult(activeSession?.diagnosed_category)}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">What to do</p>
-                  <p className="mt-2 font-bold text-white">{friendlyAction(latestSession?.action_category)}</p>
+                  <p className="mt-2 font-bold text-white">{friendlyAction(activeSession?.action_category)}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">

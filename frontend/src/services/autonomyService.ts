@@ -270,7 +270,6 @@ export async function closeSelectedApp({
 
 export interface AgentSettingsResponse {
   preferredMode: 'auto' | 'local-only' | string;
-  autoExecuteSafeTier1: boolean;
   hasGeminiApiKey: boolean;
   maskedGeminiApiKey: string;
   activeEngine: string;
@@ -280,20 +279,8 @@ export interface AgentSettingsResponse {
 
 export interface UpdateAgentSettingsPayload {
   preferredMode?: 'auto' | 'local-only';
-  autoExecuteSafeTier1?: boolean;
   geminiApiKey?: string;
   clearGeminiApiKey?: boolean;
-}
-
-export interface AutonomousDoctorResponse {
-  sessionId: string;
-  diagnosedCategory: string;
-  actionCategory: string;
-  confidenceLabel: string;
-  aiExplanation: string;
-  autoExecuted: boolean;
-  activeEngine: string;
-  orchestration: AutonomyResult;
 }
 
 export async function getAgentSettings() {
@@ -308,17 +295,6 @@ export async function updateAgentSettings(
 ) {
   const response = await apiPost<AgentSettingsResponse>(
     '/api/autonomy/settings',
-    payload,
-  );
-  return response.data;
-}
-
-export async function runAutonomousDoctor(payload: {
-  userPrompt?: string;
-  autoExecuteSafeFixes?: boolean;
-}) {
-  const response = await apiPost<AutonomousDoctorResponse>(
-    '/api/autonomy/autonomous-doctor',
     payload,
   );
   return response.data;
