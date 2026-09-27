@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Models;
 using RigMD.Application.Services;
+using RigMD.Application.Services.Autonomy;
 
 namespace RigMD.Infrastructure.Ai;
 
@@ -379,7 +380,9 @@ public class GeminiReActLlmClient : IReActLlmClient
         ReActConversationContext context,
         IReadOnlyList<AgentToolFunctionDeclaration> availableTools)
     {
-        var combinedText = $"{context.DiagnosedCategory} {context.UserSymptom} {context.InitialSummary}".ToLowerInvariant();
+        var normalizedScenario = DiagnosticScopeMapper.NormalizeScenarioId(context.ScenarioId);
+        var scopeText = string.Join(" ", (IEnumerable<string>?)context.TargetScope ?? Array.Empty<string>()).ToLowerInvariant();
+        var combinedText = $"{context.DiagnosedCategory} {context.UserSymptom} {normalizedScenario} {scopeText}".ToLowerInvariant();
         var availableSet = new HashSet<string>(
             availableTools.Select(t => t.Name),
             StringComparer.OrdinalIgnoreCase);
@@ -482,22 +485,52 @@ public class GeminiReActLlmClient : IReActLlmClient
                     Thought = "Checking Windows System Event Log for recent network or DNS client events."
                 });
             }
+            else if (combinedText.Contains("thermal") || combinedText.Contains("overheat") || combinedText.Contains("fan") || combinedText.Contains("processor") || combinedText.Contains("cpu"))
+            {
+                thought =
+                    "Symptom indicates processor load or thermal/cooling concerns. I will invoke 'inspect_cpu_and_thermals' and 'inspect_gpu_and_displays' to measure live CPU/GPU temperatures, clock speeds, and thermal throttling flags.";
+                AppendWholeSystemMemoryTools();
+                toolCalls.Add(new ReActToolCallRequest
+                {
+                    ToolName = "inspect_cpu_and_thermals",
+                    ArgumentsJson = "{}",
+                    Thought = thought
+                });
+                toolCalls.Add(new ReActToolCallRequest
+                {
+                    ToolName = "inspect_gpu_and_displays",
+                    ArgumentsJson = "{}",
+                    Thought = "Checking GPU thermal sensors and graphics load."
+                });
+            }
+            else if (combinedText.Contains("driver") || combinedText.Contains("display") || combinedText.Contains("gpu") || combinedText.Contains("graphics"))
+            {
+                thought =
+                    "Symptom points to graphics, display, or hardware driver behavior. I will invoke 'inspect_gpu_and_displays' and 'query_windows_event_logs' to inspect Device Manager status, driver versions, and system event warnings.";
+                AppendWholeSystemMemoryTools();
+                toolCalls.Add(new ReActToolCallRequest
+                {
+                    ToolName = "inspect_gpu_and_displays",
+                    ArgumentsJson = "{}",
+                    Thought = thought
+                });
+                toolCalls.Add(new ReActToolCallRequest
+                {
+                    ToolName = "query_windows_event_logs",
+                    ArgumentsJson = "{\"logName\":\"System\",\"maxEvents\":10,\"hoursBack\":72}",
+                    Thought = "Checking Windows System Event Log for driver or display errors."
+                });
+            }
             else if (combinedText.Contains("storage") || combinedText.Contains("disk") || combinedText.Contains("space") || combinedText.Contains("cache") || combinedText.Contains("temp") || combinedText.Contains("update"))
             {
                 thought =
-                    "Symptom points to storage capacity, cache bloat, or disk I/O pressure. I will first invoke 'inspect_storage_health' to measure volume free space and exact reclaimable bytes in %TEMP%, Browser Caches, and Windows Update cache, plus 'inspect_memory_and_processes' to check active I/O/memory load.";
+                    "Symptom points to storage capacity, cache bloat, or drive health. I will invoke 'inspect_storage_health' to measure volume free space, S.M.A.R.T. status, and reclaimable temporary caches.";
                 AppendWholeSystemMemoryTools();
                 toolCalls.Add(new ReActToolCallRequest
                 {
                     ToolName = "inspect_storage_health",
                     ArgumentsJson = "{}",
                     Thought = thought
-                });
-                toolCalls.Add(new ReActToolCallRequest
-                {
-                    ToolName = "inspect_memory_and_processes",
-                    ArgumentsJson = "{\"topN\":8,\"sortBy\":\"memory\"}",
-                    Thought = "Checking active processes that may be holding cache locks or consuming memory."
                 });
             }
             else if (combinedText.Contains("memory") || combinedText.Contains("ram") || combinedText.Contains("browser") || combinedText.Contains("leak") || combinedText.Contains("slow") || combinedText.Contains("freeze") || combinedText.Contains("lag"))
@@ -557,15 +590,23 @@ public class GeminiReActLlmClient : IReActLlmClient
             };
         }
 
-        // Turn 1+: Synthesize actual observations returned by Tier 0 tools
+        // Turn 1+: Synthesize actual observations returned by Tier 0 tools strictly within the active diagnostic scope
         var evidence = context.History
             .Select(h => $"{h.ToolName}: {h.ObservationSummary}")
             .ToList();
 
         var storageObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_storage_health", StringComparison.OrdinalIgnoreCase));
         var memObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_memory_and_processes", StringComparison.OrdinalIgnoreCase));
-        var netObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_network_connectivity", StringComparison.OrdinalIgnoreCase));
+        var netObs = context.History.FirstOrDefault(h =>
+            h.ToolName.Equals("inspect_network_connectivity", StringComparison.OrdinalIgnoreCase) ||
+            h.ToolName.Equals("inspect_dns", StringComparison.OrdinalIgnoreCase));
         var cpuObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_cpu_and_thermals", StringComparison.OrdinalIgnoreCase));
+        var gpuObs = context.History.FirstOrDefault(h =>
+            h.ToolName.Equals("inspect_gpu_and_displays", StringComparison.OrdinalIgnoreCase) ||
+            h.ToolName.Equals("inspect_gpu_status", StringComparison.OrdinalIgnoreCase));
+        var eventObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_windows_event_logs", StringComparison.OrdinalIgnoreCase));
+        var startupObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_startup_apps", StringComparison.OrdinalIgnoreCase));
+        var batteryObs = context.History.FirstOrDefault(h => h.ToolName.Equals("inspect_battery_and_power", StringComparison.OrdinalIgnoreCase));
         var historyObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_past_checks_and_remediations", StringComparison.OrdinalIgnoreCase));
         var recurringObs = context.History.FirstOrDefault(h => h.ToolName.Equals("query_recurring_problems_and_warnings", StringComparison.OrdinalIgnoreCase));
 
@@ -578,7 +619,8 @@ public class GeminiReActLlmClient : IReActLlmClient
         double ramUsagePercent = ExtractNestedDouble(memObs?.ObservationJson, "memory", "usagePercent");
         double browserMemMb = ExtractNestedDouble(memObs?.ObservationJson, "browserSummary", "browserMemoryMb");
 
-        if (netObs != null && (combinedText.Contains("network") || combinedText.Contains("dns") || combinedText.Contains("internet") || combinedText.Contains("ping")))
+        // 1. Network scenario or network component scope
+        if (netObs != null && (normalizedScenario == "network-problem" || combinedText.Contains("network") || combinedText.Contains("dns") || combinedText.Contains("internet") || combinedText.Contains("ping")))
         {
             return new ReActModelTurnDecision
             {
@@ -591,6 +633,166 @@ public class GeminiReActLlmClient : IReActLlmClient
                     RecommendedToolName = "flush_dns_cache",
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = "Flushing the Windows DNS Client resolver cache purges stale or cached domain mappings without dropping active connections.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
+        // 2. Thermal / Overheating / CPU scope
+        if (normalizedScenario == "overheating-loud-fan" ||
+            scopeText.Contains("thermal") ||
+            (scopeText.Contains("processor") && !scopeText.Contains("memory")) ||
+            combinedText.Contains("thermal condition") ||
+            combinedText.Contains("overheat"))
+        {
+            var thermalSummary = string.Join(" ", new[] { cpuObs?.ObservationSummary, gpuObs?.ObservationSummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(thermalSummary))
+            {
+                thermalSummary = "Completed live CPU and GPU thermal inspection.";
+            }
+
+            var toolName = availableSet.Contains("terminate_processes") ? "terminate_processes" : "clear_temp_files";
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = $"Synthesized thermal telemetry ({thermalSummary}). Proposing '{toolName}' to reduce sustained background processor heat load.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = thermalSummary,
+                    ConfidenceLevel = "High",
+                    RecommendedToolName = toolName,
+                    RecommendedToolArgumentsJson = "{}",
+                    RemediationRationale = toolName == "terminate_processes"
+                        ? "Closing non-essential background workload processes reduces sustained processor utilization, heat output, and cooling fan speed."
+                        : "Clearing temporary runtime artifacts reduces background disk indexing and processor wake activity.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
+        // 3. Driver / Display / GPU / Peripherals / Audio scope
+        if (normalizedScenario is "driver-error" or "no-display" ||
+            scopeText.Contains("graphics") ||
+            scopeText.Contains("display") ||
+            scopeText.Contains("driver") ||
+            scopeText.Contains("peripheral") ||
+            scopeText.Contains("audio") ||
+            combinedText.Contains("driver conflict") ||
+            combinedText.Contains("display driver"))
+        {
+            var driverSummary = string.Join(" ", new[] { gpuObs?.ObservationSummary, eventObs?.ObservationSummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(driverSummary))
+            {
+                driverSummary = "Completed GPU, display adapter, and Windows Device Manager inspection.";
+            }
+
+            bool isDisplayFocus = normalizedScenario == "no-display" || scopeText.Contains("display") || scopeText.Contains("graphics");
+            var toolName = isDisplayFocus && availableSet.Contains("restart_windows_explorer")
+                ? "restart_windows_explorer"
+                : availableSet.Contains("run_system_file_checker")
+                    ? "run_system_file_checker"
+                    : "restart_windows_explorer";
+
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = $"Synthesized graphics and driver telemetry ({driverSummary}). Proposing '{toolName}'.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = driverSummary,
+                    ConfidenceLevel = "High",
+                    RecommendedToolName = toolName,
+                    RecommendedToolArgumentsJson = "{}",
+                    RemediationRationale = toolName == "restart_windows_explorer"
+                        ? "Restarting the Windows Explorer shell refreshes desktop window composition and taskbar/display hooks without closing user apps."
+                        : "Running Windows System File Checker (sfc /scannow) verifies and repairs protected OS and driver system binaries.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
+        // 4. Application Crashes / Blue Screen Stop Error scope
+        if (normalizedScenario is "app-crashes" or "blue-screen-crash" ||
+            combinedText.Contains("crash") ||
+            combinedText.Contains("stop error"))
+        {
+            var crashSummary = string.Join(" ", new[] { eventObs?.ObservationSummary, gpuObs?.ObservationSummary, cpuObs?.ObservationSummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(crashSummary))
+            {
+                crashSummary = "Completed Windows Event Log and processor/driver stability inspection.";
+            }
+
+            var toolName = normalizedScenario == "blue-screen-crash" && availableSet.Contains("run_system_file_checker")
+                ? "run_system_file_checker"
+                : "clear_temp_files";
+
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = $"Synthesized stability and event log findings ({crashSummary}). Proposing '{toolName}'.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = crashSummary,
+                    ConfidenceLevel = "High",
+                    RecommendedToolName = toolName,
+                    RecommendedToolArgumentsJson = toolName == "clear_temp_files" ? "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}" : "{}",
+                    RemediationRationale = toolName == "run_system_file_checker"
+                        ? "Running Windows System File Checker (sfc /scannow) verifies protected Windows kernel and driver files after stop errors."
+                        : "Clearing corrupted or locked temporary application state files in %TEMP% prevents repeat startup faults in crashing applications.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
+        // 5. Slow Boot / Startup scope
+        if (normalizedScenario == "slow-boot" ||
+            scopeText.Contains("startup") ||
+            combinedText.Contains("boot and startup"))
+        {
+            var bootSummary = string.Join(" ", new[] { startupObs?.ObservationSummary, storageObs?.ObservationSummary, eventObs?.ObservationSummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(bootSummary))
+            {
+                bootSummary = "Completed startup application and boot storage inspection.";
+            }
+
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = $"Synthesized boot and startup telemetry ({bootSummary}). Proposing 'clear_temp_files' to purge accumulated startup temp files.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = bootSummary,
+                    ConfidenceLevel = "High",
+                    RecommendedToolName = "clear_temp_files",
+                    RecommendedToolArgumentsJson = "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}",
+                    RemediationRationale = $"Purging unlocked temporary files in %TEMP% (~{userTempMb:F1} MB measured) reduces boot-time directory scanning overhead.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
+        // 6. Battery & Power scope
+        if (normalizedScenario == "rapid-battery-drain" ||
+            scopeText.Contains("battery") ||
+            combinedText.Contains("battery"))
+        {
+            var batterySummary = string.Join(" ", new[] { batteryObs?.ObservationSummary, cpuObs?.ObservationSummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(batterySummary))
+            {
+                batterySummary = "Completed battery and power plan inspection.";
+            }
+
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = $"Synthesized battery and power telemetry ({batterySummary}). Proposing 'terminate_processes' to reduce background power draw.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = batterySummary,
+                    ConfidenceLevel = "High",
+                    RecommendedToolName = "terminate_processes",
+                    RecommendedToolArgumentsJson = "{}",
+                    RemediationRationale = "Closing heavy background processes lowers CPU wake residency and extends battery runtime.",
                     EvidenceCitations = evidence
                 }
             };
@@ -650,7 +852,7 @@ public class GeminiReActLlmClient : IReActLlmClient
             };
         }
 
-        // Default data-driven remediation selection: if browser cache is significantly larger than user temp and storage/cache is the issue, or clear_temp_files for safe maintenance
+        // Default data-driven remediation selection for Storage / Memory / Full System scans
         var rootCauseParts = new List<string>();
         if (cpuObs != null) rootCauseParts.Add(cpuObs.ObservationSummary);
         if (memObs != null) rootCauseParts.Add(memObs.ObservationSummary);
@@ -662,11 +864,14 @@ public class GeminiReActLlmClient : IReActLlmClient
             ? string.Join(" ", rootCauseParts)
             : "Completed live hardware and OS inspection.";
 
+        var thoughtSummary = memObs != null
+            ? $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Browser caches hold {browserCacheMb:F1} MB, RAM is at {ramUsagePercent:F1}%. Proposing 'clear_temp_files' as a safe, verified Tier 1 remediation."
+            : $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Windows Update cache holds {wuCacheMb:F1} MB. Proposing 'clear_temp_files' as a safe, verified Tier 1 remediation.";
+
         return new ReActModelTurnDecision
         {
             EngineName = "RigMD Local Tool-Calling ReAct Engine",
-            Thought =
-                $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Browser caches hold {browserCacheMb:F1} MB, RAM is at {ramUsagePercent:F1}%. Proposing 'clear_temp_files' as a safe, verified Tier 1 remediation.",
+            Thought = thoughtSummary,
             FinalProposal = new ReActFinalProposal
             {
                 RootCauseAnalysis = rootCause,

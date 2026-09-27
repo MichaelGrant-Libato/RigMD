@@ -197,6 +197,51 @@ public class ResolutionServiceTests
 
         Assert.Equal("System crash or stop error requires review", bsodResult.DiagnosedCategory);
         Assert.DoesNotContain("[", bsodResult.RecommendedNextStep);
+        Assert.DoesNotContain(bsodResult.Proof, p => p.Label.Contains("Memory (RAM)"));
+
+        var fullNormalBrowserResult = autoService.Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = "full",
+            Hardware = hardware
+        });
+
+        Assert.Equal("No Active Issue Detected", fullNormalBrowserResult.DiagnosedCategory);
+    }
+
+    [Fact]
+    public void CheckResolution_PrioritizesScenarioAndComponentScopeOverSavedCategory()
+    {
+        var hardware = CreateHardware(
+            ramUsage: 88,
+            browserHeavy: true,
+            browserMemoryMb: 3800,
+            cpuUsage: 20,
+            storageUsage: 45,
+            dnsResolutionSucceeded: true);
+
+        // Even if an older saved session had 'Elevated Memory Pressure From Active Workloads',
+        // passing scenarioId='overheating-loud-fan' or 'driver-error' checks thermal or driver status instead of RAM/Browser.
+        var thermalCheck = _service.CheckResolution(
+            "Elevated Memory Pressure From Active Workloads",
+            hardware,
+            scenarioId: "overheating-loud-fan");
+        Assert.Equal("resolved", thermalCheck.resolution_status);
+        Assert.Contains("processor temperature", thermalCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
+
+        var driverCheck = _service.CheckResolution(
+            "Elevated Memory Pressure From Active Workloads",
+            hardware,
+            scenarioId: "driver-error");
+        Assert.Equal("resolved", driverCheck.resolution_status);
+        Assert.Contains("device error codes", driverCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
+
+        var networkComponentCheck = _service.CheckResolution(
+            "Elevated Memory Pressure From Active Workloads",
+            hardware,
+            scenarioId: null,
+            componentIds: "[\"network\"]");
+        Assert.Equal("resolved", networkComponentCheck.resolution_status);
+        Assert.Contains("internet name check", networkComponentCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
     }
 
     private static HardwareProfileDto CreateHardware(

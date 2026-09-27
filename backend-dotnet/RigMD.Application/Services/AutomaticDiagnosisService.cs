@@ -170,7 +170,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        if (EvalComponent("drivers", "gpu", "display") && hasDeviceErrors)
+        if (EvalComponent("drivers", "gpu", "display", "peripherals", "audio") && hasDeviceErrors)
         {
             var firstErr = hw.DeviceErrors.First();
             var primary = $"Windows Device Manager reported error code {firstErr.ErrorCode} on '{firstErr.Name}'.";
@@ -270,38 +270,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 5. Memory & Process Workload checks (strictly for Full Scan or explicit Memory/OS Component Scan)
-        if (EvalComponent("memory", "os") && (!string.IsNullOrWhiteSpace(memLeakWarning) || ramUsage >= 80 || (ramUsage >= 68 && browserMemoryMb >= 1500)))
-        {
-            var category = ramUsage >= 80
-                ? "High Memory Pressure"
-                : !string.IsNullOrWhiteSpace(memLeakWarning)
-                    ? "OS performance degradation"
-                    : "Elevated Memory Pressure From Active Workloads";
-
-            var primary = $"Memory (RAM) is at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB) with {browserMemoryMb:0.#} MB across {browserProcs} browser processes.";
-            return new AutomaticDiagnosisResult
-            {
-                ComponentStatus = ComponentStatus.Present,
-                TargetScope = targetScopeLabels,
-                PrimaryResult = primary,
-                IncidentalWarning = absentComponentNote,
-                DiagnosedCategory = category,
-                ActionCategory = ramUsage >= 85 ? "Troubleshoot" : "Maintain",
-                ConfidenceLabel = ramUsage >= 85 ? "High" : "Medium",
-                Explanation = primary,
-                RecommendedNextStep = "Close unused browser tabs or run the guided inspection below to review memory-heavy apps and clear caches.",
-                Proof = proof,
-                VerificationTarget = new AutomaticVerificationTarget
-                {
-                    Target = "task_manager",
-                    Label = "Task Manager - Processes",
-                    Description = "Inspect active memory-consuming applications."
-                }
-            };
-        }
-
-        // 6. Storage utilization check
+        // 5. Storage utilization check (evaluated before moderate RAM/browser workload so storage issues are not masked)
         if (EvalComponent("storage") && maxDiskUsage >= 80)
         {
             var primary = $"Storage volume usage is elevated at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType}.";
@@ -326,7 +295,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        // 7. Network connectivity check
+        // 6. Network connectivity check
         if (EvalComponent("network") && hw.Network != null &&
             (!hw.Network.HasActiveAdapter ||
              (hw.Network.PacketLossPercent ?? 0) >= 5 ||
@@ -351,6 +320,44 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Target = "reliability_monitor",
                     Label = "Windows Network & Reliability",
                     Description = "Inspect network adapter status and DNS resolution."
+                }
+            };
+        }
+
+        // 7. Memory & Process Workload checks (strictly when Memory is in scope and genuinely elevated)
+        bool explicitMemoryScan = mode == "component" && selectedComponents.Contains("memory");
+        bool workloadMemoryPressure = explicitMemoryScan
+            ? (ramUsage >= 75 && browserMemoryMb >= 1800)
+            : (ramUsage >= 82 && browserMemoryMb >= 2600);
+
+        if (EvalComponent("memory") && (!string.IsNullOrWhiteSpace(memLeakWarning) || ramUsage >= 82 || workloadMemoryPressure))
+        {
+            var category = ramUsage >= 82
+                ? "High Memory Pressure"
+                : !string.IsNullOrWhiteSpace(memLeakWarning)
+                    ? "OS performance degradation"
+                    : "Elevated Memory Pressure From Active Workloads";
+
+            var primary = browserMemoryMb >= 2000
+                ? $"Memory (RAM) is at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB) with {browserMemoryMb:0.#} MB across {browserProcs} browser processes."
+                : $"Memory (RAM) is at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB).";
+            return new AutomaticDiagnosisResult
+            {
+                ComponentStatus = ComponentStatus.Present,
+                TargetScope = targetScopeLabels,
+                PrimaryResult = primary,
+                IncidentalWarning = absentComponentNote,
+                DiagnosedCategory = category,
+                ActionCategory = ramUsage >= 85 ? "Troubleshoot" : "Maintain",
+                ConfidenceLabel = ramUsage >= 85 ? "High" : "Medium",
+                Explanation = primary,
+                RecommendedNextStep = "Close unused memory-heavy apps or run the guided inspection below to review active processes and clear caches.",
+                Proof = proof,
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "task_manager",
+                    Label = "Task Manager - Processes",
+                    Description = "Inspect active memory-consuming applications."
                 }
             };
         }
@@ -423,10 +430,24 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 $"Processor (CPU) is operating normally ({cpuUsage:0.#}% load on {hw.Cpu.Name}{tempPart}).");
         }
 
+        if (selectedComponents.Contains("thermal"))
+        {
+            var tempPart = cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C CPU" : "normal thermal state";
+            var gpuTempPart = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C GPU" : string.Empty;
+            componentSummaries.Add(
+                $"Thermal / Cooling is operating normally ({tempPart}{gpuTempPart}, no thermal throttling detected).");
+        }
+
         if (selectedComponents.Contains("storage"))
         {
             componentSummaries.Add(
                 $"Storage / SSD / HDD is operating normally ({maxDiskUsage:0.#}% in use on {hw.PrimaryStorageType}, S.M.A.R.T. {(smartFailing ? "warning" : "healthy")}).");
+        }
+
+        if (selectedComponents.Contains("startup"))
+        {
+            componentSummaries.Add(
+                $"Startup / Boot configuration on {hw.PrimaryStorageType} ({maxDiskUsage:0.#}% used) is operating normally.");
         }
 
         if (selectedComponents.Contains("gpu") || selectedComponents.Contains("display"))
@@ -439,6 +460,18 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         {
             componentSummaries.Add(
                 "Hardware Drivers are operating normally (0 error codes in Device Manager).");
+        }
+
+        if (selectedComponents.Contains("peripherals"))
+        {
+            componentSummaries.Add(
+                "Peripherals / USB controllers are operating normally (0 PnP error codes in Device Manager).");
+        }
+
+        if (selectedComponents.Contains("audio"))
+        {
+            componentSummaries.Add(
+                "Audio / Sound controllers are operating normally (0 PnP error codes in Device Manager).");
         }
 
         if (selectedComponents.Contains("network"))
@@ -466,9 +499,11 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         var target = selectedComponents.Contains("storage")
             ? ("storage_settings", "Windows Storage Settings", "Inspect storage volumes and temporary files.")
-            : selectedComponents.Contains("gpu") || selectedComponents.Contains("drivers") || selectedComponents.Contains("display")
-                ? ("device_manager", "Windows Device Manager", "Inspect display and hardware driver status.")
-                : ("task_manager", "Task Manager", "Inspect live telemetry for the selected components.");
+            : selectedComponents.Contains("startup")
+                ? ("startup_apps", "Windows Startup Apps", "Review applications configured to launch at sign-in.")
+                : selectedComponents.Contains("gpu") || selectedComponents.Contains("drivers") || selectedComponents.Contains("display") || selectedComponents.Contains("peripherals") || selectedComponents.Contains("audio")
+                    ? ("device_manager", "Windows Device Manager", "Inspect display, audio, peripheral, and hardware driver status.")
+                    : ("task_manager", "Task Manager", "Inspect live telemetry for the selected components.");
 
         return new AutomaticDiagnosisResult
         {
@@ -513,25 +548,25 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 DiagnosedCategory = "OS performance degradation",
                 ActionCategory = "Maintain",
                 ConfidenceLabel = ramUsage >= 65 || cpuUsage >= 55 ? "High" : "Medium",
-                Explanation = $"System responsiveness check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and {hw.ProcessInsights?.BrowserMemoryMb ?? 0:0.#} MB in browser processes.",
-                RecommendedNextStep = "Run the guided inspection below to check active CPU/memory workloads and preview safe cache cleanup.",
+                Explanation = $"System responsiveness check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} GB used), and Storage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType}.",
+                RecommendedNextStep = "Run the guided inspection below to check active CPU, memory, and storage workloads and preview safe cache cleanup.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
                     Target = "task_manager",
                     Label = "Task Manager - Processes",
-                    Description = "Inspect active background processes and memory usage."
+                    Description = "Inspect active background processes and system resource usage."
                 }
             },
             "slow-boot" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Startup check recorded primary storage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM at {ramUsage:0.#}%.",
+                PrimaryResult = $"Startup check recorded primary storage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and CPU startup baseline at {cpuUsage:0.#}%.",
                 DiagnosedCategory = "Boot and startup failure",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = maxDiskUsage >= 80 || ramUsage >= 75 ? "High" : "Medium",
-                Explanation = $"Startup performance check recorded storage usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and RAM usage at {ramUsage:0.#}%.",
+                ConfidenceLabel = maxDiskUsage >= 80 || cpuUsage >= 70 ? "High" : "Medium",
+                Explanation = $"Startup performance check recorded boot drive usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} under power plan '{hw.ActivePowerPlan}'.",
                 RecommendedNextStep = "Review startup applications in Windows Settings or run the guided inspection below to check startup impact and clear temporary caches.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
@@ -545,11 +580,11 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Application stability check recorded CPU at {cpuUsage:0.#}% and RAM at {ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB).",
+                PrimaryResult = $"Application stability check recorded CPU at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermals normal")}) and {hw.DeviceErrors?.Count ?? 0} device warning(s).",
                 DiagnosedCategory = "Application crash history requires review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = ramUsage >= 80 || cpuUsage >= 80 ? "High" : "Medium",
-                Explanation = $"Application stability check recorded CPU at {cpuUsage:0.#}% and RAM at {ramUsage:0.#}%. Reviewing recent application fault entries in Windows Reliability Monitor and Event Logs helps pinpoint which program failed.",
+                ConfidenceLabel = hasDeviceErrors || cpuUsage >= 80 ? "High" : "Medium",
+                Explanation = $"Application stability check recorded CPU load at {cpuUsage:0.#}% on {hw.OsVersion}. Reviewing recent application fault entries in Windows Reliability Monitor and Event Logs helps pinpoint which program failed.",
                 RecommendedNextStep = "Review recent application crash events in Windows Reliability Monitor or run the guided inspection below to check Windows error logs.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
@@ -563,11 +598,11 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"System crash check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and {hw.DeviceErrors?.Count ?? 0} active device error(s).",
+                PrimaryResult = $"System crash check recorded CPU at {cpuUsage:0.#}%, GPU ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}), and {hw.DeviceErrors?.Count ?? 0} active device error(s).",
                 DiagnosedCategory = "System crash or stop error requires review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = hasDeviceErrors || ramUsage >= 85 ? "High" : "Medium",
-                Explanation = $"System crash check recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and {hw.DeviceErrors?.Count ?? 0} Device Manager error(s). Checking Windows stop error logs and driver status is recommended.",
+                ConfidenceLabel = hasDeviceErrors || cpuUsage >= 85 ? "High" : "Medium",
+                Explanation = $"System crash check recorded {hw.DeviceErrors?.Count ?? 0} Device Manager error(s) and graphics driver {hw.Gpu.Driver} on {hw.Gpu.Name}. Checking Windows stop error logs and system file integrity is recommended.",
                 RecommendedNextStep = "Check Windows Reliability Monitor for stop errors or run the guided inspection below to check crash logs and system files.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
@@ -631,7 +666,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect processor utilization and thermal load."
                 }
             },
-            "network-problem" => new AutomaticDiagnosisResult
+            "network-problem" or "network-issue" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
@@ -649,7 +684,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect network adapter status and DNS cache."
                 }
             },
-            "storage-problem" => new AutomaticDiagnosisResult
+            "storage-problem" or "disk-full" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
@@ -667,6 +702,28 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Target = "storage_settings",
                     Label = "Windows Storage Settings",
                     Description = "Inspect disk space and temporary files."
+                }
+            },
+            "rapid-battery-drain" => new AutomaticDiagnosisResult
+            {
+                ComponentStatus = hw.Battery?.HasBattery == true ? ComponentStatus.Present : ComponentStatus.NotPresent,
+                TargetScope = targetScopeLabels,
+                PrimaryResult = hw.Battery?.HasBattery == true
+                    ? $"Battery check recorded {hw.Battery.EstimatedChargeRemaining}% charge ({hw.Battery.StatusDescription}) under power plan '{hw.ActivePowerPlan}'."
+                    : "No battery detected on this device",
+                DiagnosedCategory = hw.Battery?.HasBattery == true ? "Battery and power configuration" : "Component Not Present",
+                ActionCategory = hw.Battery?.HasBattery == true ? "Maintain" : "Monitor",
+                ConfidenceLabel = "High",
+                Explanation = hw.Battery?.HasBattery == true
+                    ? $"Battery check recorded {hw.Battery.EstimatedChargeRemaining}% charge ({hw.Battery.StatusDescription}) with CPU load at {cpuUsage:0.#}% under power plan '{hw.ActivePowerPlan}'."
+                    : "No battery detected on this desktop device.",
+                RecommendedNextStep = "Review active power plan settings or run the guided inspection below to check battery drain and background processor activity.",
+                Proof = proof,
+                VerificationTarget = new AutomaticVerificationTarget
+                {
+                    Target = "task_manager",
+                    Label = "Task Manager - Power Usage",
+                    Description = "Inspect applications with high power usage."
                 }
             },
             _ => new AutomaticDiagnosisResult
@@ -722,20 +779,23 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             });
         }
 
-        if (Include("memory", "os"))
+        if (Include("memory"))
         {
+            bool showBrowserDetail = (mode == "component" && selectedComponents.Contains("memory") && browserProcs > 0)
+                || (browserMemoryMb >= 2200 && browserProcs > 0);
+
             proof.Add(new AutomaticDiagnosisProof
             {
                 Label = "Physical Memory (RAM)",
                 Value = $"{ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB)",
-                Status = ramUsage >= 85 ? "high" : ramUsage >= 70 ? "elevated" : "normal",
-                Meaning = browserProcs > 0
+                Status = ramUsage >= 85 ? "high" : ramUsage >= 75 ? "elevated" : "normal",
+                Meaning = showBrowserDetail
                     ? $"Active browser workload: {browserMemoryMb:0.#} MB across {browserProcs} processes."
                     : "Physical RAM utilization across active Windows processes."
             });
         }
 
-        if (Include("storage"))
+        if (Include("storage", "startup"))
         {
             proof.Add(new AutomaticDiagnosisProof
             {
@@ -746,12 +806,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             });
         }
 
-        if (Include("gpu", "display", "drivers"))
+        if (Include("gpu", "display", "drivers", "peripherals", "audio", "thermal"))
         {
+            var gpuTempText = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C" : string.Empty;
             proof.Add(new AutomaticDiagnosisProof
             {
                 Label = "Graphics & Drivers",
-                Value = hasDeviceErrors ? $"{hw.DeviceErrors.Count} PnP Device Error(s)" : $"{hw.Gpu.Name} (OK)",
+                Value = hasDeviceErrors ? $"{hw.DeviceErrors.Count} PnP Device Error(s)" : $"{hw.Gpu.Name}{gpuTempText} (OK)",
                 Status = hasDeviceErrors ? "high" : "normal",
                 Meaning = $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
             });
@@ -783,7 +844,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 Meaning = $"Active Power Plan: {hw.ActivePowerPlan}, Health: {hw.Battery.HealthStatus}."
             });
         }
-        else if (Include("os"))
+        else if (Include("os", "startup"))
         {
             proof.Add(new AutomaticDiagnosisProof
             {
@@ -815,11 +876,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 "overheating-loud-fan" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "thermal", "gpu" },
                 "driver-error" or "no-display" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "gpu", "display", "drivers" },
-                "network-problem" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "network" },
-                "storage-problem" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage" },
-                "slow-boot" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage", "memory", "os" },
-                "app-crashes" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "os" },
-                "blue-screen-crash" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "gpu", "drivers", "os" },
+                "network-problem" or "network-issue" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "network" },
+                "storage-problem" or "disk-full" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage" },
+                "rapid-battery-drain" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "battery", "cpu", "os" },
+                "slow-boot" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage", "startup", "os" },
+                "app-crashes" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "os" },
+                "blue-screen-crash" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "gpu", "drivers", "os" },
                 "slow-system" or "stuttering-freezing" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "storage" },
                 _ => null
             };

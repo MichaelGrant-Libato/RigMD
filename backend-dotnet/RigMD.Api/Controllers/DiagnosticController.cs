@@ -420,7 +420,11 @@ public class DiagnosticController : ControllerBase
                 return NotFound(new { detail = "Diagnosis record not found." });
 
             var hardware = _profileService.GetLiveSystemProfile();
-            var result = _resolutionService.CheckResolution(session.DiagnosedCategory, hardware);
+            var result = _resolutionService.CheckResolution(
+                session.DiagnosedCategory,
+                hardware,
+                session.ScenarioId,
+                session.ComponentIds);
 
             var updated = await _sessionRepository.UpdateResolutionAsync(
                 id,

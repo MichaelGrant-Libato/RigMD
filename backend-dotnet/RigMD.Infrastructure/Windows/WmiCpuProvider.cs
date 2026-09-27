@@ -151,7 +151,9 @@ public class WmiCpuProvider : ICpuProvider
             break;
         }
 
-        dto.TemperatureCelsius ??= HardwareMonitorService.ReadThermalZoneTemperatureCelsius();
+        dto.TemperatureCelsius ??= HardwareMonitorService.ReadThermalZoneTemperatureCelsius(
+            dto.UsagePercent,
+            dto.IsThermallyThrottling);
     }
 
     private static double TryConvertToDouble(

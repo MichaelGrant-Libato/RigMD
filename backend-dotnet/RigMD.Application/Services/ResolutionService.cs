@@ -1,4 +1,6 @@
+using System.Text.Json;
 using RigMD.Application.Models;
+using RigMD.Application.Services.Autonomy;
 
 namespace RigMD.Application.Services;
 
@@ -21,8 +23,82 @@ public class ResolutionService
 
     public ResolutionResultDto CheckResolution(
         string diagnosedCategory,
-        HardwareProfileDto hardware)
+        HardwareProfileDto hardware,
+        string? scenarioId = null,
+        string? componentIds = null)
     {
+        var normalizedScenario = DiagnosticScopeMapper.NormalizeScenarioId(scenarioId);
+        if (!string.IsNullOrWhiteSpace(normalizedScenario))
+        {
+            switch (normalizedScenario)
+            {
+                case "overheating-loud-fan":
+                    return CheckThermalResolution(hardware);
+                case "driver-error":
+                case "no-display":
+                    return CheckDriverAndDisplayResolution(hardware);
+                case "network-issue":
+                    return CheckNetworkResolution(hardware);
+                case "rapid-battery-drain":
+                    return CheckBatteryResolution(hardware);
+                case "disk-full":
+                    return CheckStorageUsageResolution(
+                        hardware,
+                        storageMustBeBelow: ElevatedStorageThreshold,
+                        issueName: "high storage use");
+                case "app-crashes":
+                case "blue-screen-crash":
+                    return CheckCrashStabilityResolution(hardware);
+                case "slow-boot":
+                    return CheckBootStartupResolution(hardware);
+                case "slow-system":
+                case "stuttering-freezing":
+                    return CheckOsPerformanceResolution(hardware);
+            }
+        }
+
+        var parsedComponents = ParseComponentIds(componentIds);
+        if (parsedComponents.Count > 0)
+        {
+            if (parsedComponents.Contains("network") && parsedComponents.Count == 1)
+            {
+                return CheckNetworkResolution(hardware);
+            }
+
+            if (parsedComponents.Contains("battery") && parsedComponents.Count == 1)
+            {
+                return CheckBatteryResolution(hardware);
+            }
+
+            if (parsedComponents.Contains("storage") && parsedComponents.Count == 1)
+            {
+                return hardware.StorageDrives.Any(d => d.IsFailingSmart)
+                    ? CheckStorageHealthResolution(hardware)
+                    : CheckStorageUsageResolution(
+                        hardware,
+                        storageMustBeBelow: ElevatedStorageThreshold,
+                        issueName: "high storage use");
+            }
+
+            if (parsedComponents.All(c => c is "drivers" or "gpu" or "display"))
+            {
+                return CheckDriverAndDisplayResolution(hardware);
+            }
+
+            if (parsedComponents.Contains("cpu") && parsedComponents.Count == 1)
+            {
+                return CheckThermalResolution(hardware);
+            }
+
+            if (parsedComponents.Contains("memory") && parsedComponents.Count == 1)
+            {
+                return CheckMemoryResolution(
+                    hardware,
+                    memoryMustBeBelow: ElevatedMemoryThreshold,
+                    issueName: "elevated memory use");
+            }
+        }
+
         var category =
             (diagnosedCategory ?? string.Empty).ToLowerInvariant();
 
@@ -103,27 +179,143 @@ public class ResolutionService
             return CheckNetworkResolution(hardware);
         }
 
+        if (category.Contains("battery") || category.Contains("power"))
+        {
+            return CheckBatteryResolution(hardware);
+        }
+
         if (category.Contains("driver") || category.Contains("display"))
         {
-            var errCount = hardware.DeviceErrors?.Count ?? 0;
-            var resolved = errCount == 0;
-            return CreateResult(
-                resolved,
-                resolved
-                    ? "Fresh scan shows zero PnP device error codes across graphics and system adapters."
-                    : $"Fresh scan still shows {errCount} device error code(s) in Windows Device Manager.",
-                new object[]
-                {
-                    Proof(
-                        "Device Manager Errors",
-                        errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
-                        resolved,
-                        "All hardware drivers are reporting healthy status (ErrorCode = 0).",
-                        "One or more devices still report a non-zero ConfigManagerErrorCode.")
-                });
+            return CheckDriverAndDisplayResolution(hardware);
         }
 
         return CheckSevereResourceResolution(hardware);
+    }
+
+    private static HashSet<string> ParseComponentIds(string? rawComponents)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(rawComponents))
+        {
+            return set;
+        }
+
+        var trimmed = rawComponents.Trim();
+        if (trimmed.StartsWith("["))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<string>>(trimmed);
+                if (parsed != null)
+                {
+                    foreach (var item in parsed)
+                    {
+                        var norm = DiagnosticScopeMapper.NormalizeComponentId(item);
+                        if (!string.IsNullOrWhiteSpace(norm))
+                        {
+                            set.Add(norm);
+                        }
+                    }
+                }
+                return set;
+            }
+            catch
+            {
+                // Fall back to comma split
+            }
+        }
+
+        foreach (var part in trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var norm = DiagnosticScopeMapper.NormalizeComponentId(part);
+            if (!string.IsNullOrWhiteSpace(norm))
+            {
+                set.Add(norm);
+            }
+        }
+
+        return set;
+    }
+
+    private static ResolutionResultDto CheckDriverAndDisplayResolution(
+        HardwareProfileDto hardware)
+    {
+        var errCount = hardware.DeviceErrors?.Count ?? 0;
+        var gpuTemp = hardware.Gpu.TemperatureCelsius;
+        var gpuTempOk = !gpuTemp.HasValue || gpuTemp.Value < ElevatedTempThresholdCelsius;
+        var driversOk = errCount == 0;
+        var resolved = driversOk && gpuTempOk;
+
+        var gpuSummaryValue = gpuTemp.HasValue
+            ? $"{hardware.Gpu.Name} ({gpuTemp.Value:0.#}°C, Driver {hardware.Gpu.Driver})"
+            : $"{hardware.Gpu.Name} (Driver {hardware.Gpu.Driver})";
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? "Fresh scan shows zero PnP device error codes and normal graphics adapter telemetry."
+                : $"Fresh scan still shows {errCount} device error code(s) or elevated graphics adapter temperature.",
+            new object[]
+            {
+                Proof(
+                    "Device Manager Errors",
+                    errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
+                    driversOk,
+                    "All hardware drivers are reporting healthy status (ErrorCode = 0).",
+                    "One or more devices still report a non-zero ConfigManagerErrorCode."),
+                Proof(
+                    "Graphics adapter",
+                    gpuSummaryValue,
+                    gpuTempOk,
+                    $"Graphics adapter and {Math.Max(hardware.ConnectedDisplays, 1)} connected display(s) are operating normally.",
+                    "Graphics adapter temperature is still elevated.")
+            });
+    }
+
+    private static ResolutionResultDto CheckBatteryResolution(
+        HardwareProfileDto hardware)
+    {
+        var battery = hardware.Battery;
+        if (battery == null || !battery.HasBattery)
+        {
+            return CreateResult(
+                true,
+                "This desktop device runs on direct AC power and has no battery warning.",
+                new object[]
+                {
+                    Proof(
+                        "Power / Battery",
+                        $"AC Power ({hardware.ActivePowerPlan})",
+                        true,
+                        "Device is operating normally on AC power.",
+                        "Battery or power status needs review.")
+                });
+        }
+
+        var cpuOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
+        var chargeOk = battery.ChargePercent > 15 || battery.IsCharging;
+        var resolved = cpuOk && chargeOk;
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? "Fresh scan shows battery charge and background processor load within normal limits."
+                : "Fresh scan still shows low battery charge or high background processor drain.",
+            new object[]
+            {
+                Proof(
+                    "Battery status",
+                    $"{battery.ChargePercent}% ({battery.StatusDescription})",
+                    chargeOk,
+                    "Battery charge level and power state are healthy.",
+                    "Battery charge is low while discharging."),
+                Proof(
+                    "Background processor load",
+                    $"{hardware.Cpu.UsagePercent:0.##}% ({hardware.ActivePowerPlan})",
+                    cpuOk,
+                    "Processor activity is low enough to prevent rapid battery drain.",
+                    "High background processor load is still contributing to battery drain.")
+            });
     }
 
     private static ResolutionResultDto CheckCrashStabilityResolution(
@@ -307,59 +499,73 @@ public class ResolutionService
     private static ResolutionResultDto CheckOsPerformanceResolution(
         HardwareProfileDto hardware)
     {
-        var ramUsage =
-            hardware.Ram.UsagePercent;
+        var cpuUsage = hardware.Cpu.UsagePercent;
+        var ramUsage = hardware.Ram.UsagePercent;
+        var primaryDisk = GetPrimaryDisk(hardware);
+        var storageUsage = primaryDisk?.UsagePercent ?? 0;
 
-        var memoryWarning =
-            hardware.ProcessInsights.MemoryLeakWarning;
+        var memoryWarning = hardware.ProcessInsights.MemoryLeakWarning;
+        var browserMemoryMb = hardware.ProcessInsights.BrowserMemoryMb;
+        var browserProcessCount = hardware.ProcessInsights.BrowserProcessCount;
 
-        var browserMemoryMb =
-            hardware.ProcessInsights.BrowserMemoryMb;
+        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var ramOk = ramUsage < ElevatedMemoryThreshold;
+        var storageOk = primaryDisk == null || storageUsage < ElevatedStorageThreshold;
+        var browserOk = browserMemoryMb < BrowserMemoryPressureMb && browserProcessCount < 25;
+        var warningOk = string.IsNullOrWhiteSpace(memoryWarning);
 
-        var browserProcessCount =
-            hardware.ProcessInsights.BrowserProcessCount;
+        var resolved = cpuOk && ramOk && storageOk && browserOk && warningOk;
 
-        var ramOk =
-            ramUsage < ElevatedMemoryThreshold;
+        var proofItems = new List<object>
+        {
+            Proof(
+                "Processor activity",
+                $"{cpuUsage:0.##}%",
+                cpuOk,
+                "Processor activity is within normal operating limits.",
+                "Processor activity is still elevated and may slow down system responsiveness."),
+            Proof(
+                "Memory use",
+                $"{ramUsage:0.##}%",
+                ramOk,
+                "Memory use is back below RigMD's high-use range.",
+                "Memory use is still above RigMD's high-use range."),
+            Proof(
+                "Main storage use",
+                primaryDisk == null ? "Not available" : $"{storageUsage:0.##}%",
+                storageOk,
+                "Main storage free space is within a healthy range.",
+                "Main storage space is still tight and may affect Windows responsiveness.")
+        };
 
-        var browserOk =
-            browserMemoryMb < BrowserMemoryPressureMb &&
-            browserProcessCount < 20;
-
-        var warningOk =
-            string.IsNullOrWhiteSpace(memoryWarning);
-
-        var resolved =
-            ramOk &&
-            browserOk &&
-            warningOk;
-
-        return CreateResult(
-            resolved,
-            resolved
-                ? "Fresh scan no longer shows unusual app memory behavior. No active issue is detected for this saved check."
-                : "Fresh scan still shows memory behavior that may affect performance.",
-            new object[]
-            {
-                Proof(
-                    "Memory use",
-                    $"{ramUsage:0.##}%",
-                    ramOk,
-                    "Memory use is back below RigMD's high-use range.",
-                    "Memory use is still above RigMD's high-use range."),
+        if (!browserOk || browserMemoryMb >= 1500)
+        {
+            proofItems.Add(
                 Proof(
                     "Browser workload",
                     $"{browserMemoryMb:0.##} MB across {browserProcessCount} processes",
                     browserOk,
-                    "Browser workload is no longer heavy enough to explain the saved problem.",
-                    "Browser workload is still heavy enough to affect performance."),
+                    "Browser workload is within normal limits.",
+                    "Browser workload is still heavy enough to affect performance."));
+        }
+
+        if (!warningOk)
+        {
+            proofItems.Add(
                 Proof(
                     "Unusual app memory behavior",
-                    warningOk ? "Not observed" : memoryWarning!,
-                    warningOk,
+                    memoryWarning!,
+                    false,
                     "RigMD no longer sees one app using unusually high memory.",
-                    "RigMD still sees app memory behavior that needs attention.")
-            });
+                    "RigMD still sees app memory behavior that needs attention."));
+        }
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? "Fresh scan shows processor, memory, and storage operating within normal limits. No active issue is detected for this saved check."
+                : "Fresh scan still shows system resource pressure or app memory behavior that may affect performance.",
+            proofItems.ToArray());
     }
 
     private static ResolutionResultDto CheckMemoryResolution(

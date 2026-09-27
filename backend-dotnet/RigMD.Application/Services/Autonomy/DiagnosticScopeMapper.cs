@@ -18,13 +18,17 @@ public static class DiagnosticScopeMapper
         {
             "ram" or "memory (ram)" or "memory" => "memory",
             "processor" or "processor (cpu)" or "cpu" => "cpu",
+            "cooling" or "fan" or "thermal / cooling" or "thermal" => "thermal",
             "graphics" or "gpu / graphics" or "video" or "gpu" => "gpu",
             "disk" or "ssd" or "hdd" or "storage / ssd / hdd" or "storage" => "storage",
             "operating system" or "windows" or "os" => "os",
+            "boot" or "startup / boot" or "startup" => "startup",
             "driver" or "device manager" or "drivers" => "drivers",
             "power" or "battery / power" or "battery" => "battery",
             "internet" or "wifi" or "network / internet" or "dns" or "network" => "network",
             "monitor" or "screen" or "display" => "display",
+            "usb" or "peripherals / usb" or "peripherals" => "peripherals",
+            "sound" or "audio / sound" or "audio" => "audio",
             _ => key
         };
     }
@@ -34,14 +38,18 @@ public static class DiagnosticScopeMapper
         return NormalizeComponentId(componentId) switch
         {
             "cpu" => "Processor (CPU)",
+            "thermal" => "Thermal / Cooling",
             "memory" => "Memory (RAM)",
             "gpu" => "GPU / Graphics",
             "storage" => "Storage / SSD / HDD",
             "os" => "Operating System",
+            "startup" => "Startup / Boot",
             "drivers" => "Drivers",
             "battery" => "Battery / Power",
             "network" => "Network / Internet",
             "display" => "Display",
+            "peripherals" => "Peripherals / USB",
+            "audio" => "Audio / Sound",
             _ => componentId
         };
     }
@@ -55,8 +63,9 @@ public static class DiagnosticScopeMapper
             "slow-boot" => "slow-boot",
             "blue-screen" or "blue-screen-crash" or "bsod" => "blue-screen-crash",
             "overheating-fan" or "overheating-loud-fan" or "overheating" => "overheating-loud-fan",
-            "network-problem" => "network-problem",
-            "storage-problem" => "storage-problem",
+            "network-problem" or "network-issue" => "network-problem",
+            "storage-problem" or "disk-full" => "storage-problem",
+            "rapid-battery-drain" or "battery-drain" => "rapid-battery-drain",
             "driver-error" or "driver-problem" => "driver-error",
             "no-display" or "display-problem" => "no-display",
             "app-crashes" or "application-crashes" => "app-crashes",
@@ -80,7 +89,9 @@ public static class DiagnosticScopeMapper
             switch (NormalizeComponentId(raw))
             {
                 case "cpu":
+                case "thermal":
                     tier0.Add("inspect_cpu_and_thermals");
+                    tier0.Add("inspect_gpu_and_displays");
                     remediation.Add("terminate_processes");
                     break;
 
@@ -98,6 +109,13 @@ public static class DiagnosticScopeMapper
                     remediation.Add("clear_windows_update_cache");
                     break;
 
+                case "startup":
+                    tier0.Add("query_startup_apps");
+                    tier0.Add("inspect_storage_health");
+                    tier0.Add("query_windows_event_logs");
+                    remediation.Add("clear_temp_files");
+                    break;
+
                 case "gpu":
                 case "display":
                     tier0.Add("inspect_gpu_and_displays");
@@ -106,9 +124,12 @@ public static class DiagnosticScopeMapper
                     break;
 
                 case "drivers":
+                case "peripherals":
+                case "audio":
                     tier0.Add("inspect_gpu_and_displays");
                     tier0.Add("query_windows_event_logs");
                     remediation.Add("run_system_file_checker");
+                    remediation.Add("restart_windows_explorer");
                     break;
 
                 case "network":
@@ -125,7 +146,7 @@ public static class DiagnosticScopeMapper
                 case "os":
                     tier0.Add("query_windows_event_logs");
                     tier0.Add("query_startup_apps");
-                    tier0.Add("inspect_memory_and_processes");
+                    tier0.Add("inspect_cpu_and_thermals");
                     remediation.Add("run_system_file_checker");
                     remediation.Add("clear_temp_files");
                     remediation.Add("clear_windows_update_cache");
@@ -173,15 +194,15 @@ public static class DiagnosticScopeMapper
             {
                 new()
                 {
-                    ToolName = "inspect_storage_health",
-                    ArgumentsJson = "{}",
-                    Thought = "Scenario 'slow_boot': Inspecting boot drive S.M.A.R.T. health, free space, and temporary startup caches."
-                },
-                new()
-                {
                     ToolName = "query_startup_apps",
                     ArgumentsJson = "{}",
                     Thought = "Scenario 'slow_boot': Enumerating Windows startup applications and autorun entries via WMI/Registry."
+                },
+                new()
+                {
+                    ToolName = "inspect_storage_health",
+                    ArgumentsJson = "{}",
+                    Thought = "Scenario 'slow_boot': Inspecting boot drive S.M.A.R.T. health, free space, and temporary startup caches."
                 },
                 new()
                 {
@@ -201,15 +222,9 @@ public static class DiagnosticScopeMapper
                 },
                 new()
                 {
-                    ToolName = "inspect_memory_and_processes",
-                    ArgumentsJson = "{\"topN\":10,\"sortBy\":\"memory\"}",
-                    Thought = "Scenario 'app-crashes': Inspecting physical RAM utilization and active application processes."
-                },
-                new()
-                {
                     ToolName = "inspect_cpu_and_thermals",
                     ArgumentsJson = "{}",
-                    Thought = "Scenario 'app-crashes': Checking processor load and thermal state."
+                    Thought = "Scenario 'app-crashes': Checking processor load and thermal stability."
                 }
             },
 
@@ -226,12 +241,6 @@ public static class DiagnosticScopeMapper
                     ToolName = "inspect_gpu_and_displays",
                     ArgumentsJson = "{}",
                     Thought = "Scenario 'blue-screen-crash': Inspecting GPU driver version, VRAM state, and display adapter status."
-                },
-                new()
-                {
-                    ToolName = "inspect_memory_and_processes",
-                    ArgumentsJson = "{\"topN\":10,\"sortBy\":\"memory\"}",
-                    Thought = "Scenario 'blue-screen-crash': Inspecting physical RAM pressure, committed memory, and active workloads."
                 },
                 new()
                 {
@@ -254,12 +263,6 @@ public static class DiagnosticScopeMapper
                     ToolName = "inspect_gpu_and_displays",
                     ArgumentsJson = "{}",
                     Thought = "Scenario 'overheating_fan': Reading GPU core temperature, VRAM usage, and graphics load."
-                },
-                new()
-                {
-                    ToolName = "inspect_memory_and_processes",
-                    ArgumentsJson = "{\"topN\":10,\"sortBy\":\"cpu\"}",
-                    Thought = "Scenario 'overheating_fan': Identifying background processes driving sustained heat and fan activity."
                 }
             },
 
@@ -286,6 +289,22 @@ public static class DiagnosticScopeMapper
                     ToolName = "inspect_storage_health",
                     ArgumentsJson = "{}",
                     Thought = "Scenario 'storage_problem': Inspecting physical drive S.M.A.R.T. health, volume free space, and reclaimable caches."
+                }
+            },
+
+            "rapid-battery-drain" => new List<ReActToolCallRequest>
+            {
+                new()
+                {
+                    ToolName = "inspect_battery_and_power",
+                    ArgumentsJson = "{}",
+                    Thought = "Scenario 'rapid_battery_drain': Inspecting battery charge state, power plan, and discharge status."
+                },
+                new()
+                {
+                    ToolName = "inspect_cpu_and_thermals",
+                    ArgumentsJson = "{}",
+                    Thought = "Scenario 'rapid_battery_drain': Checking processor activity and thermal load contributing to power draw."
                 }
             },
 
