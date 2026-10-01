@@ -33,14 +33,14 @@ The system combines:
 |---|---|
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Backend API | C# / ASP.NET Core (.NET 10) |
-| Desktop Shell | WPF + WebView2 |
-| Hardware Telemetry | Native Windows WMI / System.Management |
-| Diagnostic Engine | Deterministic C# Domain layer |
-| Persistence | SQLite (Local Source of Truth) & Supabase PostgreSQL (Optional Sync) |
-| Remediation | Controlled Autonomous Remediation Engine |
-| Real-Time Streaming | SignalR WebSocket Hub |
-| AI Integration | Constrained Google Gemini Explanations (with offline fallback) |
-| Remote Agent | RigMD Agent (Windows Service) |
+| Desktop Shell | WPF + WebView2 (Auto-spawns and binds local API) |
+| Hardware Telemetry | 100% User-Mode Windows Telemetry (WMI, Performance Counters, ACPI, Thermal Fallback — Driver-Free) |
+| Diagnostic Engine | Deterministic C# Domain layer with strict component/scenario scoping |
+| Persistence | SQLite (Local Source of Truth with WAL mode) & Supabase PostgreSQL (Optional Sync) |
+| Remediation | 3-Tier Controlled Autonomous Remediation Engine with Dry-Run Previews |
+| Real-Time Streaming | SignalR WebSocket Hub (live telemetry and ReAct trace streaming) |
+| AI Integration | Multi-Turn ReAct Reasoning Agent (Google Gemini with Built-In Offline Fallback) |
+| Local Agent / Worker | In-Process Background Worker (Hosted in `RigMD.Api`; no separate Windows service required) |
 
 ---
 
@@ -49,17 +49,12 @@ The system combines:
 ```
 RigMD/
 │
-├── backend/
-│   └── Legacy Python/FastAPI implementation
-│       retained for migration reference
-│
 ├── backend-dotnet/
 │   │
 │   ├── RigMD.slnx
 │   │
 │   ├── RigMD.Api/
 │   │   ├── Controllers/
-│   │   │   ├── AgentController.cs
 │   │   │   ├── AutonomyController.cs
 │   │   │   ├── DashboardController.cs
 │   │   │   ├── DatabaseController.cs
@@ -67,10 +62,12 @@ RigMD/
 │   │   │   ├── HardwareController.cs
 │   │   │   ├── ProfilesController.cs
 │   │   │   ├── RecurringController.cs
-│   │   │   ├── RemediationController.cs
 │   │   │   └── WarningSignsController.cs
 │   │   ├── Hubs/
-│   │   │   └── RemediationHub.cs
+│   │   │   ├── RemediationHub.cs
+│   │   │   └── TelemetryHub.cs
+│   │   ├── Services/
+│   │   │   └── TelemetryBackgroundService.cs
 │   │   └── Program.cs
 │   │
 │   ├── RigMD.Application/
@@ -81,18 +78,17 @@ RigMD/
 │   │   │   ├── Persistence/
 │   │   │   └── Providers/
 │   │   ├── Models/
+│   │   │   ├── AgentReActModels.cs
+│   │   │   └── AgentToolModels.cs
 │   │   └── Services/
 │   │       ├── Autonomy/
 │   │       │   ├── AutonomousOrchestrator.cs
-│   │       │   ├── DryRunRemediationExecutor.cs
-│   │       │   ├── PivotEngine.cs
-│   │       │   ├── RemediationPlanner.cs
-│   │       │   ├── RemediationRegistry.cs
-│   │       │   └── SafetyPolicy.cs
+│   │       │   └── DiagnosticScopeMapper.cs
 │   │       ├── AutomaticDiagnosisService.cs
 │   │       ├── DiagnosticEngineService.cs
 │   │       ├── RecurringPatternService.cs
 │   │       ├── ResolutionService.cs
+│   │       ├── RigMdAgentRuntimeSettingsStore.cs
 │   │       └── WarningSignService.cs
 │   │
 │   ├── RigMD.Domain/
@@ -103,9 +99,9 @@ RigMD/
 │   ├── RigMD.Infrastructure/
 │   │   ├── Ai/
 │   │   │   ├── GeminiAiExplainer.cs
+│   │   │   ├── GeminiReActLlmClient.cs
 │   │   │   └── OfflineAiExplainer.cs
 │   │   ├── Persistence/
-│   │   │   ├── AgentRepository.cs
 │   │   │   ├── DatabaseSyncService.cs
 │   │   │   ├── DiagnosticSessionRepository.cs
 │   │   │   ├── LocalDatabaseSchemaUpgradeService.cs
@@ -113,16 +109,31 @@ RigMD/
 │   │   │   └── RigMdDbContext.cs
 │   │   ├── Remediation/
 │   │   │   ├── Actions/
-│   │   │   │   ├── ClearBrowserCacheAction.cs
-│   │   │   │   ├── ClearTempFilesAction.cs
-│   │   │   │   ├── ClearWindowsUpdateCacheAction.cs
-│   │   │   │   ├── FlushDnsAction.cs
-│   │   │   │   ├── RunDiskCleanupAction.cs
-│   │   │   │   └── RunSfcScanAction.cs
-│   │   │   ├── RollbackManager.cs
-│   │   │   ├── VerificationService.cs
+│   │   │   ├── Tools/
+│   │   │   │   ├── Diagnostic/
+│   │   │   │   │   ├── InspectBatteryAndPowerTool.cs
+│   │   │   │   │   ├── InspectCpuAndThermalsTool.cs
+│   │   │   │   │   ├── InspectFullDeviceProfileTool.cs
+│   │   │   │   │   ├── InspectGpuAndDisplaysTool.cs
+│   │   │   │   │   ├── InspectMemoryAndProcessesTool.cs
+│   │   │   │   │   ├── InspectNetworkConnectivityTool.cs
+│   │   │   │   │   ├── InspectStorageHealthTool.cs
+│   │   │   │   │   ├── QueryPastChecksAndRemediationsTool.cs
+│   │   │   │   │   ├── QueryRecurringProblemsAndWarningsTool.cs
+│   │   │   │   │   ├── QueryStartupAppsTool.cs
+│   │   │   │   │   └── QueryWindowsEventLogsTool.cs
+│   │   │   │   ├── Remediation/
+│   │   │   │   │   ├── ClearBrowserCacheTool.cs
+│   │   │   │   │   ├── ClearTempFilesTool.cs
+│   │   │   │   │   ├── ClearWindowsUpdateCacheTool.cs
+│   │   │   │   │   ├── FlushDnsCacheTool.cs
+│   │   │   │   │   ├── RestartWindowsExplorerTool.cs
+│   │   │   │   │   ├── RunSystemFileCheckerTool.cs
+│   │   │   │   │   └── TerminateProcessesTool.cs
+│   │   │   │   └── RigMdAgentToolRegistry.cs
 │   │   │   └── WindowsRemediationExecutor.cs
 │   │   └── Windows/
+│   │       ├── HardwareMonitorService.cs
 │   │       ├── ProcessProvider.cs
 │   │       ├── WindowsNetworkProvider.cs
 │   │       ├── WindowsSystemProfileService.cs
@@ -135,22 +146,15 @@ RigMD/
 │   │       ├── WmiOperatingSystemProvider.cs
 │   │       └── WmiStorageProvider.cs
 │   │
-│   ├── RigMD.Agent/
-│   │   ├── Tools/
-│   │   ├── Services/
-│   │   ├── Worker.cs
-│   │   └── Program.cs
-│   │
 │   ├── RigMD.Desktop/
 │   │   ├── App.xaml.cs
 │   │   ├── MainWindow.xaml.cs
 │   │   └── wwwroot/
 │   │
 │   └── RigMD.Tests/
-│       ├── Api/
 │       ├── Application/
-│       ├── Domain/
-│       └── Infrastructure/
+│       ├── Services/
+│       └── Domain/
 │
 ├── frontend/
 │   └── React + TypeScript + Vite + Tailwind CSS
@@ -164,16 +168,15 @@ RigMD/
 │       │   │   └── ...
 │       │   └── pages/
 │       │       ├── NewDiagnosisView.tsx
-│       │       ├── DiagnosticResultView.tsx
 │       │       ├── DiagnosticHistoryView.tsx
 │       │       ├── DiagnosticSessionDetailView.tsx
 │       │       ├── RecurringPatternsView.tsx
 │       │       ├── WarningSignsView.tsx
 │       │       ├── HardwareDashboard.tsx
 │       │       ├── SystemProfileView.tsx
+│       │       ├── SettingsView.tsx
 │       │       ├── HelpScopeView.tsx
-│       │       ├── ShareReportView.tsx
-│       │       └── ...
+│       │       └── ShareReportView.tsx
 │       └── ...
 │
 ├── installer/
@@ -210,12 +213,15 @@ RigMD employs a controlled, closed-loop remediation engine that executes explici
 
 | Action | Description | Tier |
 |---|---|---|
-| Clear User Temp Files | Removes temporary files from user TEMP folder | Tier 1 |
-| Clear Browser Cache | Clears browser cache data | Tier 1 |
-| Clear Windows Update Cache | Clears Windows Update download cache | Tier 1 |
-| Flush DNS Cache | Resets the DNS resolver cache | Tier 1 |
-| Run Disk Cleanup | Invokes Windows Disk Cleanup utility | Tier 1 |
-| Run SFC Scan | Runs Windows System File Checker | Tier 1 |
+| Clear User Temp Files | Removes temporary files from user TEMP folder with pre-calculation | Tier 1 |
+| Clear Browser Cache | Clears browser cache data safely | Tier 1 |
+| Clear Windows Update Cache | Clears Windows Update download cache (`SoftwareDistribution\Download`) | Tier 1 |
+| Flush DNS Cache | Resets the Windows DNS resolver cache (`ipconfig /flushdns`) | Tier 1 |
+| Restart Windows Explorer | Refreshes the Windows taskbar, system tray, and explorer shell | Tier 1 |
+| Run SFC Scan | Runs Windows System File Checker (`sfc /scannow`) in background | Tier 1 |
+| Terminate Heavy Processes | Selectively terminates high-memory processes (protected system blocklist enforced) | Tier 1 |
+
+*Every remediation action includes a **Dry-Run Impact Preview** (showing estimated space saved or apps affected) and a post-execution **Verification Check**.*
 
 ### Assisted (Non-Autonomous) Remediation Actions
 
@@ -235,16 +241,17 @@ RigMD employs a controlled, closed-loop remediation engine that executes explici
 
 ## 5. Hardware Telemetry Providers
 
-RigMD collects live hardware telemetry via Windows Management Instrumentation (WMI). Each provider implements a contract interface in `RigMD.Application.Contracts.Providers` and is implemented in `RigMD.Infrastructure.Windows`.
+RigMD collects live hardware telemetry via Windows Management Instrumentation (WMI) and standard Windows Performance Counters. All telemetry is **100% user-mode and driver-free** (no `WinRing0.sys` or external kernel drivers), ensuring zero false-positive antivirus warnings.
 
-| Provider | WMI Class / Source | Data Collected |
+| Provider | Source / Method | Data Collected |
 |---|---|---|
+| `HardwareMonitorService` | ACPI thermal zones, Win32_PerfFormattedData, and thermal estimation | CPU temperature, GPU temperature, clock speed, thermal status |
 | `WmiCpuProvider` | `Win32_Processor`, Performance Counters | Name, usage %, cores, threads, frequency, thermal throttling |
 | `WmiGpuProvider` | `Win32_VideoController` | Name, driver version, type (Dedicated/Integrated), VRAM |
 | `WmiMemoryProvider` | `Win32_OperatingSystem` | Total/used GB, usage % |
 | `WmiStorageProvider` | `Win32_DiskDrive`, `Win32_LogicalDisk` | Drive models, types (NVMe/SATA/HDD), SMART status, volumes |
 | `WmiMotherboardProvider` | `Win32_BaseBoard` | Chipset/product name |
-| `WmiOperatingSystemProvider` | `Win32_OperatingSystem` | OS version, device name, system age |
+| `WmiOperatingSystemProvider` | `Win32_OperatingSystem` | OS version, device name, true system install age |
 | `WindowsNetworkProvider` | `System.Net.NetworkInformation` | Adapter name, IPv4, gateway, DNS resolution |
 | `ProcessProvider` | `System.Diagnostics.Process` | Browser detection, game detection, top memory apps, memory leak warnings |
 | `WmiDeviceTypeProvider` | `Win32_SystemEnclosure` | Chassis type (Desktop, Laptop, Notebook, Tablet, etc.) |
@@ -272,20 +279,42 @@ Do not commit:
 - Gemini API keys
 - real `.env` files
 
-### Start the System (Local Desktop Mode)
+### Running RigMD in Development
 
-The latest architecture bundles the frontend inside the backend, bypassing the need for a separate Agent service or a cloud database for local diagnosis.
+RigMD operates with a streamlined, local-first architecture. The diagnostic and remediation engine runs directly inside `RigMD.Api`, and the compiled React UI is served automatically from `wwwroot`.
 
-From the repository root:
+#### Option 1: Full Desktop App (Recommended)
+Build and run the WPF WebView2 desktop application (which automatically starts and manages the local API as a child process):
 
-```bash
+```powershell
 cd backend-dotnet
+dotnet build
 dotnet run --project RigMD.Desktop
 ```
 
-This will automatically launch the WPF desktop wrapper and serve the React UI.
+#### Option 2: API & Browser Interface
+Run the backend API directly in one terminal:
 
-*Note: If you still need to run the React app separately for frontend development, you can use `npm run dev` in the `frontend` folder.*
+```powershell
+cd backend-dotnet
+dotnet run --project RigMD.Api
+```
+Then navigate to `http://localhost:5273` in any web browser.
+
+#### Option 3: Live Frontend Development (Vite Hot-Reload)
+When actively making React UI changes:
+
+1. **Terminal 1 (Backend API):**
+   ```powershell
+   cd backend-dotnet
+   dotnet run --project RigMD.Api
+   ```
+2. **Terminal 2 (Frontend Dev Server):**
+   ```powershell
+   cd frontend
+   npm run dev
+   ```
+   Navigate to `http://localhost:5173`. UI changes will hot-reload instantly.
 
 ---
 
@@ -293,7 +322,7 @@ This will automatically launch the WPF desktop wrapper and serve the React UI.
 
 ### Backend
 
-```bash
+```powershell
 cd backend-dotnet
 dotnet build
 dotnet test
@@ -301,23 +330,21 @@ dotnet test
 
 ### Frontend
 
-```bash
+```powershell
 cd frontend
 npm run build
 ```
 
 Current automated test coverage includes:
 
-- Diagnostic engine rule classification
-- Automatic diagnosis service (component/scenario/full modes)
-- Autonomous orchestration lifecycle
-- Remediation planner and registry
-- Safety policy enforcement
-- Warning sign normalization
-- Verification service behavior
-- Diagnostic session repository persistence
-- Remediation repository persistence
-- Autonomy controller integration
+- ReAct Agent tool layer execution & argument validation
+- Autonomous multi-turn ReAct reasoning loop
+- Strict diagnostic mode scoping (Full vs. Scenario vs. Component)
+- Hardware presence pre-flight gating (Battery, GPU, Display)
+- Telemetry evaluation & baseline comparisons
+- Scope-aware resolution rechecks (`ResolutionService`)
+- SQLite schema migrations & WAL concurrency mode
+- Warning sign normalization & recurring pattern detection
 
 ---
 
@@ -338,25 +365,18 @@ Current automated test coverage includes:
 
 ## 9. Troubleshooting & Common Pitfalls
 
-If you are setting up the C# environment for the first time or testing the Agent locally, watch out for these common issues:
+### 1. Database & Offline Operation
+* **Local SQLite is the Source of Truth:** RigMD automatically creates and upgrades its local SQLite database on launch at `%LocalAppData%\RigMD\rigmd.db` with WAL (Write-Ahead Logging) enabled.
+* **No `DATABASE_URL` Required:** RigMD operates 100% offline out-of-the-box. If a Supabase `DATABASE_URL` is provided, optional cloud sync occurs in the background without blocking local diagnoses.
 
-### 1. `DATABASE_URL is not configured` (API Crash)
-**The Problem:** The `AgentRepository` currently still relies on Supabase (PostgreSQL) instead of the local SQLite database. If your `.env` or `appsettings.Development.json` is missing the `DATABASE_URL`, the API will crash on startup or when the agent heartbeats.
-**The Fix:** Add `DATABASE_URL` to `backend-dotnet/RigMD.Api/appsettings.Development.json`. 
+### 2. Port 5273 Already in Use
+* If an orphaned `RigMD.Api.exe` process is still running from a previous debugger session, kill it in PowerShell:
+  ```powershell
+  Stop-Process -Name "RigMD.Api" -Force
+  ```
+  *(In release builds, RigMD uses a Windows Job Object and Mutex to automatically prevent stale orphan processes).*
 
-### 2. API Hangs / Error 500 `TimeoutException` (Npgsql & PgBouncer)
-**The Problem:** If your `DATABASE_URL` uses port `6543`, you are connecting to Supabase's `PgBouncer` connection pooler. The C# `.NET Npgsql` driver uses prepared statements by default, which are incompatible with PgBouncer in Transaction Mode, causing queries to hang and time out.
-**The Fix:** Change the port in your `DATABASE_URL` from `6543` to `5432` to connect directly to the Postgres instance.
-
-### 3. Frontend Shows Another PC (e.g., "MIKMIKYULAPPY")
-**The Problem:** You copied `VITE_AGENT_ID` from a co-developer's `.env` file instead of using your own. The API correctly queried Supabase for that ID, returning your co-worker's PC hardware.
-**The Fix:** 
-1. Open `C:\ProgramData\RigMD\agent.json` on your local machine.
-2. Copy the `AgentId`.
-3. Paste it into `frontend/.env.local` as `VITE_AGENT_ID=your-local-guid`.
-4. Restart the Vite dev server.
-
-### 4. Agent "Offline" / Not Running as a Service
-**The Problem:** The RigMD Agent may not be installed natively as a Windows Service on your development machine yet. 
-**PowerShell Gotcha:** If you try to check the service status in PowerShell using `sc qc RigMDAgent`, it will **not** query the service. `sc` in PowerShell is an alias for `Set-Content`! You will accidentally create a text file named `qc` with the text "RigMDAgent".
-**The Fix:** Use `sc.exe query RigMDAgent` in PowerShell, or just manually run the agent for testing: `dotnet run --project RigMD.Agent`.
+### 3. Gemini API Key & Offline Brain
+* If no Gemini API key is configured in `appsettings.json`, you can paste it directly into the in-app **Settings** page.
+* If you have no internet access or no API key, RigMD automatically switches to its built-in offline diagnostic engine so scanning and remediation never fail.
+
