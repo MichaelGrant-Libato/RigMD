@@ -20,6 +20,15 @@ namespace RigMD.Application.Services.Autonomy;
 /// </summary>
 public class AutonomousOrchestrator : IAutonomousOrchestrator
 {
+    private const double ElevatedCpuThreshold = 90;
+    private const double ElevatedMemoryThreshold = 80;
+    private const double BrowserMemoryPressureMb = 3000;
+    private const int BrowserProcessPressureCount = 25;
+    private const double ElevatedStorageThreshold = 80;
+    private const double ElevatedTempThresholdCelsius = 85;
+    private const double NetworkPacketLossThreshold = 5;
+    private const double NetworkLatencyThresholdMs = 250;
+
     private readonly IRemediationExecutor _realExecutor;
     private readonly IRigMdAgentToolRegistry? _toolRegistry;
     private readonly IReActLlmClient? _llmClient;
@@ -64,6 +73,14 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         var (allowedTier0Tools, allowedRemediationTools) = diagnosisMode == "component" && componentIds.Count > 0
             ? DiagnosticScopeMapper.GetAllowedToolsForComponents(componentIds)
             : (new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var scopedRemediationTools =
+            DiagnosticScopeMapper.GetAllowedRemediationTools(
+                diagnosisMode,
+                componentIds,
+                scenarioId,
+                diagnostic.DiagnosedCategory);
+        var scopedRemediationSet =
+            new HashSet<string>(scopedRemediationTools, StringComparer.OrdinalIgnoreCase);
 
         var requiredScenarioCalls = diagnosisMode == "scenario" && !string.IsNullOrWhiteSpace(scenarioId)
             ? DiagnosticScopeMapper.GetRequiredToolsForScenario(scenarioId).ToList()
@@ -92,11 +109,37 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         };
 
         var allDeclarations = _toolRegistry.GetFunctionDeclarations(includeWriteTools: true);
-        var declarations = diagnosisMode == "component" && allowedTier0Tools.Count > 0
-            ? allDeclarations
-                .Where(d => allowedTier0Tools.Contains(d.Name) || allowedRemediationTools.Contains(d.Name))
-                .ToList()
-            : allDeclarations;
+        var requiredScenarioToolNames = requiredScenarioCalls
+            .Select(c => c.ToolName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var declarations = allDeclarations
+            .Where(d =>
+            {
+                var tool = _toolRegistry.GetTool(d.Name);
+                if (tool == null)
+                {
+                    return false;
+                }
+
+                if (diagnosisMode == "component" && allowedTier0Tools.Count > 0)
+                {
+                    return tool.SafetyTier == ToolSafetyTier.Tier0_ReadOnly
+                        ? allowedTier0Tools.Contains(d.Name)
+                        : allowedRemediationTools.Contains(d.Name);
+                }
+
+                if (diagnosisMode == "scenario" && requiredScenarioToolNames.Count > 0)
+                {
+                    return tool.SafetyTier == ToolSafetyTier.Tier0_ReadOnly
+                        ? requiredScenarioToolNames.Contains(d.Name)
+                        : scopedRemediationSet.Count == 0 || scopedRemediationSet.Contains(d.Name);
+                }
+
+                return tool.SafetyTier == ToolSafetyTier.Tier0_ReadOnly ||
+                       scopedRemediationSet.Count == 0 ||
+                       scopedRemediationSet.Contains(d.Name);
+            })
+            .ToList();
 
         ReActFinalProposal? finalProposal = null;
         string engineMode = "ReAct-Agent";
@@ -233,6 +276,21 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             EvidenceCitations = context.History.Select(h => $"{h.ToolName}: {h.ObservationSummary}").ToList()
         };
 
+        if (scopedRemediationSet.Count > 0 &&
+            !string.IsNullOrWhiteSpace(finalProposal.RecommendedToolName) &&
+            !scopedRemediationSet.Contains(finalProposal.RecommendedToolName))
+        {
+            var scopedToolName = scopedRemediationTools.FirstOrDefault(name => _toolRegistry.GetTool(name) != null);
+            if (!string.IsNullOrWhiteSpace(scopedToolName))
+            {
+                var previousToolName = finalProposal.RecommendedToolName;
+                finalProposal.RecommendedToolName = scopedToolName;
+                finalProposal.RecommendedToolArgumentsJson = "{}";
+                finalProposal.RemediationRationale =
+                    $"RigMD changed the proposed action from '{previousToolName}' to '{scopedToolName}' because it better matches this diagnosis scope.";
+            }
+        }
+
         var recommendedTool = _toolRegistry.GetTool(finalProposal.RecommendedToolName ?? "clear_temp_files")
             ?? _toolRegistry.GetTool("clear_temp_files");
 
@@ -358,6 +416,56 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             ? requestedArgumentsJson!
             : "{}";
 
+        var (diagnosisMode, componentIds, scenarioId) = ExtractSessionScope(diagnostic);
+        var scopedRemediationTools =
+            DiagnosticScopeMapper.GetAllowedRemediationTools(
+                diagnosisMode,
+                componentIds,
+                scenarioId,
+                diagnostic.DiagnosedCategory);
+        if (scopedRemediationTools.Count > 0 &&
+            !scopedRemediationTools.Contains(toolName, StringComparer.OrdinalIgnoreCase))
+        {
+            var blockedActionDef = new RemediationActionDef
+            {
+                Id = toolName,
+                Name = toolName,
+                Description = $"'{toolName}' does not match this diagnosis scope.",
+                RiskLevel = "Blocked",
+                SafetyTier = nameof(ToolSafetyTier.Tier2_DestructiveOrAdmin),
+                ToolArgumentsJson = argsJson,
+                IsReversible = false,
+                RequiresUserConfirmation = true
+            };
+
+            return new OrchestrationResult
+            {
+                EngineMode = "ReAct-Scope-Safety-Gate",
+                Plan = new RemediationPlan
+                {
+                    SessionId = diagnostic.DiagnosticSessionId.ToString(),
+                    PlannedActions = new List<RemediationActionDef> { blockedActionDef },
+                    StrategyReasoning = "The requested remediation was blocked because it does not match this diagnosis."
+                },
+                Safety = new SafetyEvaluation
+                {
+                    IsApproved = false,
+                    RequiresUserConfirmation = true,
+                    RejectionReason = $"'{toolName}' is not a recommended action for '{diagnostic.DiagnosedCategory}'. Recommended action(s): {string.Join(", ", scopedRemediationTools)}."
+                },
+                Attempts = new List<RemediationAttempt>
+                {
+                    new()
+                    {
+                        Action = blockedActionDef,
+                        State = RemediationAttemptState.SafetyRejected,
+                        Notes = "RigMD blocked this action because it did not match the selected scenario or component."
+                    }
+                },
+                Trace = $"[SAFETY] Blocked out-of-scope remediation tool '{toolName}'."
+            };
+        }
+
         var tool = _toolRegistry?.GetTool(toolName);
         var actionDef = new RemediationActionDef
         {
@@ -417,7 +525,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         }
 
         // 1. Pre-execution verification snapshot via paired Tier 0 diagnostic tool
-        var verificationToolName = GetPairedVerificationToolName(actionDef.Id);
+        var verificationToolName = GetPairedVerificationToolName(actionDef.Id, diagnostic);
         var verificationTool = _toolRegistry?.GetTool(verificationToolName);
         AgentToolExecutionResult? beforeSnapshot = null;
 
@@ -489,9 +597,11 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             });
         }
 
-        var verificationStatus = execution.Success
-            ? VerificationStatus.Resolved
-            : VerificationStatus.Unresolved;
+        var verificationStatus = DetermineVerificationStatus(
+            diagnostic,
+            execution,
+            afterSnapshot,
+            verificationTool?.Name);
 
         var verificationReport = new PostExecutionVerificationReport
         {
@@ -591,16 +701,433 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         return (mode, componentIds, scenarioId);
     }
 
-    private static string GetPairedVerificationToolName(string remediationToolName)
+    private static string GetPairedVerificationToolName(string remediationToolName, DiagnosticOutput diagnostic)
     {
+        var diagnosisVerificationTool = GetDiagnosisVerificationToolName(diagnostic);
+        if (!string.IsNullOrWhiteSpace(diagnosisVerificationTool))
+        {
+            return diagnosisVerificationTool;
+        }
+
         return remediationToolName.ToLowerInvariant() switch
         {
+            "rescan_plug_and_play_devices" => "inspect_full_device_profile",
             "terminate_processes" or "restart_windows_explorer" => "inspect_memory_and_processes",
             "flush_dns" or "flush_dns_cache" => "inspect_network_connectivity",
             "clear_temp_files" or "clear_user_temp_files" or "clear_browser_cache" or "clear_windows_update_cache" or "run_disk_cleanup" => "inspect_storage_health",
             _ => "inspect_cpu_and_thermals"
         };
     }
+
+    private static string? GetDiagnosisVerificationToolName(DiagnosticOutput diagnostic)
+    {
+        var (diagnosisMode, componentIds, scenarioId) = ExtractSessionScope(diagnostic);
+        var category = (diagnostic.DiagnosedCategory ?? string.Empty).ToLowerInvariant();
+        var scenario = DiagnosticScopeMapper.NormalizeScenarioId(scenarioId);
+        var components = componentIds
+            .Select(DiagnosticScopeMapper.NormalizeComponentId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (category.Contains("driver") ||
+            category.Contains("pnp") ||
+            category.Contains("usb") ||
+            category.Contains("device manager") ||
+            scenario is "driver-error" or "no-display" ||
+            components.Overlaps(new[] { "drivers", "peripherals", "audio", "display", "gpu" }))
+        {
+            return "inspect_full_device_profile";
+        }
+
+        if (category.Contains("network") || category.Contains("dns") || category.Contains("internet") || scenario == "network-problem" || components.Contains("network"))
+        {
+            return "inspect_network_connectivity";
+        }
+
+        if (category.Contains("storage") || category.Contains("disk") || category.Contains("cache") || scenario == "storage-problem" || components.Contains("storage"))
+        {
+            return "inspect_storage_health";
+        }
+
+        if (category.Contains("memory") || category.Contains("ram") || category.Contains("performance") || category.Contains("slow") || category.Contains("stuttering") || category.Contains("freezing") || scenario is "slow-system" or "stuttering-freezing" || components.Contains("memory"))
+        {
+            return "inspect_memory_and_processes";
+        }
+
+        if (category.Contains("thermal") || category.Contains("overheat") || category.Contains("fan") || category.Contains("cpu") || scenario == "overheating-loud-fan" || components.Contains("cpu") || components.Contains("thermal"))
+        {
+            return "inspect_cpu_and_thermals";
+        }
+
+        if (category.Contains("battery") || category.Contains("power") || scenario == "rapid-battery-drain" || components.Contains("battery"))
+        {
+            return "inspect_battery_and_power";
+        }
+
+        if (category.Contains("application crash") || category.Contains("app crash") || category.Contains("blue screen") || category.Contains("stop error") || scenario is "app-crashes" or "blue-screen-crash")
+        {
+            return "query_windows_event_logs";
+        }
+
+        return diagnosisMode == "full" ? null : "inspect_full_device_profile";
+    }
+
+    private static VerificationStatus DetermineVerificationStatus(
+        DiagnosticOutput diagnostic,
+        ExecutionResult execution,
+        AgentToolExecutionResult? afterSnapshot,
+        string? verificationToolName)
+    {
+        if (!execution.Success)
+        {
+            return VerificationStatus.Unresolved;
+        }
+
+        var category = (diagnostic.DiagnosedCategory ?? string.Empty).ToLowerInvariant();
+        var toolName = verificationToolName ?? string.Empty;
+
+        if (IsDriverIssue(category) && ToolIs(toolName, "inspect_full_device_profile"))
+        {
+            var errorCount = TryReadInt(afterSnapshot?.DataJson, "deviceErrorsCount");
+            return errorCount.HasValue && errorCount.Value == 0
+                ? VerificationStatus.Resolved
+                : VerificationStatus.Unresolved;
+        }
+
+        if (IsMemoryIssue(category) && ToolIs(toolName, "inspect_memory_and_processes"))
+        {
+            return EvaluateMemoryEvidence(afterSnapshot?.DataJson);
+        }
+
+        if (IsStorageIssue(category) && ToolIs(toolName, "inspect_storage_health"))
+        {
+            return EvaluateStorageEvidence(afterSnapshot?.DataJson);
+        }
+
+        if (IsNetworkIssue(category) && ToolIs(toolName, "inspect_network_connectivity"))
+        {
+            return EvaluateNetworkEvidence(afterSnapshot?.DataJson);
+        }
+
+        if (IsThermalIssue(category) && ToolIs(toolName, "inspect_cpu_and_thermals"))
+        {
+            return EvaluateThermalEvidence(afterSnapshot?.DataJson);
+        }
+
+        if (IsBatteryIssue(category) && ToolIs(toolName, "inspect_battery_and_power"))
+        {
+            return EvaluateBatteryEvidence(afterSnapshot?.DataJson);
+        }
+
+        if (IsCrashIssue(category) && ToolIs(toolName, "query_windows_event_logs"))
+        {
+            return EvaluateEventLogEvidence(afterSnapshot?.DataJson);
+        }
+
+        return afterSnapshot?.Success == true ? VerificationStatus.Unknown : VerificationStatus.Unresolved;
+    }
+
+    private static bool ToolIs(string actual, string expected) =>
+        string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDriverIssue(string category) =>
+        category.Contains("driver") ||
+        category.Contains("pnp") ||
+        category.Contains("usb") ||
+        category.Contains("device manager") ||
+        category.Contains("display");
+
+    private static bool IsMemoryIssue(string category) =>
+        category.Contains("memory") ||
+        category.Contains("ram") ||
+        category.Contains("performance") ||
+        category.Contains("slow") ||
+        category.Contains("stuttering") ||
+        category.Contains("freezing");
+
+    private static bool IsStorageIssue(string category) =>
+        category.Contains("storage") ||
+        category.Contains("disk") ||
+        category.Contains("cache") ||
+        category.Contains("temporary");
+
+    private static bool IsNetworkIssue(string category) =>
+        category.Contains("network") ||
+        category.Contains("dns") ||
+        category.Contains("internet") ||
+        category.Contains("connection");
+
+    private static bool IsThermalIssue(string category) =>
+        category.Contains("thermal") ||
+        category.Contains("overheat") ||
+        category.Contains("fan") ||
+        category.Contains("cpu");
+
+    private static bool IsBatteryIssue(string category) =>
+        category.Contains("battery") ||
+        category.Contains("power") ||
+        category.Contains("charging");
+
+    private static bool IsCrashIssue(string category) =>
+        category.Contains("application crash") ||
+        category.Contains("app crash") ||
+        category.Contains("crash") ||
+        category.Contains("blue screen") ||
+        category.Contains("stop error");
+
+    private static VerificationStatus EvaluateMemoryEvidence(string? json)
+    {
+        var ramUsage = TryReadDouble(json, "memory", "usagePercent");
+        var browserMemoryMb = TryReadDouble(json, "browserSummary", "browserMemoryMb");
+        var browserProcessCount = TryReadInt(json, "browserSummary", "browserProcessCount");
+        var memoryLeakWarning = TryReadBool(json, "memoryLeakWarning") ?? false;
+
+        if (!ramUsage.HasValue && !browserMemoryMb.HasValue && !browserProcessCount.HasValue)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        var ramOk = !ramUsage.HasValue || ramUsage.Value < ElevatedMemoryThreshold;
+        var browserMemoryOk = !browserMemoryMb.HasValue || browserMemoryMb.Value < BrowserMemoryPressureMb;
+        var browserCountOk = !browserProcessCount.HasValue || browserProcessCount.Value < BrowserProcessPressureCount;
+
+        return ramOk && browserMemoryOk && browserCountOk && !memoryLeakWarning
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    private static VerificationStatus EvaluateStorageEvidence(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var hasEvidence = false;
+            var storageHealthy = true;
+
+            if (doc.RootElement.TryGetProperty("drives", out var drives) && drives.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var drive in drives.EnumerateArray())
+                {
+                    if (TryReadBool(drive, "isFailingSmart") == true)
+                    {
+                        storageHealthy = false;
+                    }
+
+                    hasEvidence = true;
+                }
+            }
+
+            if (doc.RootElement.TryGetProperty("volumes", out var volumes) && volumes.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var volume in volumes.EnumerateArray())
+                {
+                    var usagePercent = TryReadDouble(volume, "usagePercent");
+                    if (usagePercent.HasValue)
+                    {
+                        storageHealthy = storageHealthy && usagePercent.Value < ElevatedStorageThreshold;
+                        hasEvidence = true;
+                    }
+                }
+            }
+
+            return !hasEvidence
+                ? VerificationStatus.Unknown
+                : storageHealthy
+                    ? VerificationStatus.Resolved
+                    : VerificationStatus.Unresolved;
+        }
+        catch
+        {
+            return VerificationStatus.Unknown;
+        }
+    }
+
+    private static VerificationStatus EvaluateNetworkEvidence(string? json)
+    {
+        var hasAdapter = TryReadBool(json, "hasActiveAdapter");
+        var hasIpv4 = TryReadBool(json, "hasIpv4Address");
+        var hasGateway = TryReadBool(json, "hasDefaultGateway");
+        var hasDns = TryReadBool(json, "hasDnsServers");
+        var dnsSucceeded = TryReadBool(json, "liveProbe", "dnsResolutionSucceeded");
+        var packetLoss = TryReadDouble(json, "packetLossPercent");
+        var pingLatency = TryReadDouble(json, "liveProbe", "pingLatencyMs");
+        var pingStatus = TryReadString(json, "liveProbe", "pingStatus");
+
+        if (!hasAdapter.HasValue && !hasIpv4.HasValue && !hasGateway.HasValue && !hasDns.HasValue)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        var pingOk = string.IsNullOrWhiteSpace(pingStatus) ||
+            pingStatus.Equals("Success", StringComparison.OrdinalIgnoreCase);
+        var latencyOk = !pingLatency.HasValue || pingLatency.Value <= NetworkLatencyThresholdMs;
+        var lossOk = !packetLoss.HasValue || packetLoss.Value <= NetworkPacketLossThreshold;
+
+        return hasAdapter == true &&
+            hasIpv4 == true &&
+            hasGateway == true &&
+            hasDns == true &&
+            dnsSucceeded != false &&
+            pingOk &&
+            latencyOk &&
+            lossOk
+                ? VerificationStatus.Resolved
+                : VerificationStatus.Unresolved;
+    }
+
+    private static VerificationStatus EvaluateThermalEvidence(string? json)
+    {
+        var cpuUsage = TryReadDouble(json, "usagePercent");
+        var tempCelsius = TryReadDouble(json, "temperatureCelsius");
+        var throttling = TryReadBool(json, "isThermallyThrottling");
+
+        if (!cpuUsage.HasValue && !tempCelsius.HasValue && !throttling.HasValue)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        var cpuOk = !cpuUsage.HasValue || cpuUsage.Value < ElevatedCpuThreshold;
+        var tempOk = !tempCelsius.HasValue || tempCelsius.Value < ElevatedTempThresholdCelsius;
+
+        return cpuOk && tempOk && throttling != true
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    private static VerificationStatus EvaluateBatteryEvidence(string? json)
+    {
+        var hasBattery = TryReadBool(json, "hasBattery");
+        if (hasBattery == false)
+        {
+            return VerificationStatus.Resolved;
+        }
+
+        var chargePercent = TryReadDouble(json, "battery", "chargePercent");
+        var healthStatus = TryReadString(json, "battery", "healthStatus") ?? string.Empty;
+        var activePowerPlan = TryReadString(json, "activePowerPlan") ?? string.Empty;
+
+        if (!hasBattery.HasValue && !chargePercent.HasValue && string.IsNullOrWhiteSpace(healthStatus) && string.IsNullOrWhiteSpace(activePowerPlan))
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        var healthOk = !healthStatus.Contains("poor", StringComparison.OrdinalIgnoreCase) &&
+            !healthStatus.Contains("bad", StringComparison.OrdinalIgnoreCase) &&
+            !healthStatus.Contains("critical", StringComparison.OrdinalIgnoreCase) &&
+            !healthStatus.Contains("replace", StringComparison.OrdinalIgnoreCase);
+        var chargeOk = !chargePercent.HasValue || chargePercent.Value >= 20;
+
+        return healthOk && chargeOk
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    private static VerificationStatus EvaluateEventLogEvidence(string? json)
+    {
+        var eventCount = TryReadInt(json, "eventCount");
+        if (!eventCount.HasValue)
+        {
+            return VerificationStatus.Unknown;
+        }
+
+        return eventCount.Value == 0
+            ? VerificationStatus.Resolved
+            : VerificationStatus.Unresolved;
+    }
+
+    private static int? TryReadInt(string? json, params string[] path)
+    {
+        var prop = TryReadElement(json, path);
+        return prop.HasValue ? TryReadInt(prop.Value) : null;
+    }
+
+    private static double? TryReadDouble(string? json, params string[] path)
+    {
+        var prop = TryReadElement(json, path);
+        return prop.HasValue ? TryReadDouble(prop.Value) : null;
+    }
+
+    private static bool? TryReadBool(string? json, params string[] path)
+    {
+        var prop = TryReadElement(json, path);
+        return prop.HasValue ? TryReadBool(prop.Value) : null;
+    }
+
+    private static string? TryReadString(string? json, params string[] path)
+    {
+        var prop = TryReadElement(json, path);
+        return prop.HasValue ? TryReadString(prop.Value) : null;
+    }
+
+    private static JsonElement? TryReadElement(string? json, params string[] path)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var current = doc.RootElement;
+            foreach (var segment in path)
+            {
+                if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+                {
+                    return null;
+                }
+            }
+
+            return current.Clone();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryReadInt(JsonElement prop) =>
+        prop.ValueKind switch
+        {
+            JsonValueKind.Number when prop.TryGetInt32(out var value) => value,
+            JsonValueKind.Number when prop.TryGetDouble(out var value) => (int)Math.Round(value),
+            JsonValueKind.String when int.TryParse(prop.GetString(), out var value) => value,
+            _ => null
+        };
+
+    private static double? TryReadDouble(JsonElement prop) =>
+        prop.ValueKind switch
+        {
+            JsonValueKind.Number when prop.TryGetDouble(out var value) => value,
+            JsonValueKind.String when double.TryParse(prop.GetString(), out var value) => value,
+            _ => null
+        };
+
+    private static bool? TryReadBool(JsonElement prop) =>
+        prop.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(prop.GetString(), out var value) => value,
+            _ => null
+        };
+
+    private static string? TryReadString(JsonElement prop) =>
+        prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.ToString();
+
+    private static double? TryReadDouble(JsonElement parent, string propertyName) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(propertyName, out var prop)
+            ? TryReadDouble(prop)
+            : null;
+
+    private static bool? TryReadBool(JsonElement parent, string propertyName) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(propertyName, out var prop)
+            ? TryReadBool(prop)
+            : null;
 
     private static string ResolveDefaultToolName(string? category)
     {
@@ -613,6 +1140,11 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         if (normalized.Contains("browser"))
         {
             return "clear_browser_cache";
+        }
+
+        if (normalized.Contains("application crash") || normalized.Contains("app crash") || normalized.Contains("crash"))
+        {
+            return "run_system_file_checker";
         }
 
         return "clear_temp_files";

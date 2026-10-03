@@ -170,10 +170,116 @@ function formatSessionTime(createdAt?: string | null) {
   });
 }
 
-function getSessionSymptom(session: SessionSummary) {
+const SCENARIO_LABELS: Record<string, string> = {
+  'slow-system': 'Slow system check',
+  'slow-boot': 'Slow boot check',
+  'blue-screen-crash': 'Blue screen / crash check',
+  'driver-error': 'Driver problem check',
+  'no-display': 'Display problem check',
+  'overheating-loud-fan': 'Overheating / fan check',
+  'network-problem': 'Network problem check',
+  'network-issue': 'Network problem check',
+  'app-crashes': 'Application crashes check',
+  'stuttering-freezing': 'Stuttering / freezing check',
+  'storage-problem': 'Storage problem check',
+  'disk-full': 'Storage space check',
+  'rapid-battery-drain': 'Battery drain check',
+};
+
+const COMPONENT_LABELS: Record<string, string> = {
+  cpu: 'Processor',
+  memory: 'Memory',
+  gpu: 'GPU / Graphics',
+  storage: 'Storage',
+  os: 'Operating System',
+  drivers: 'Drivers',
+  battery: 'Battery / Power',
+  network: 'Network / Internet',
+  display: 'Display',
+};
+
+function titleFromId(value: string) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(
+      (part) =>
+        part.charAt(0).toUpperCase() +
+        part.slice(1)
+    )
+    .join(' ');
+}
+
+function parseComponentIds(raw?: string | null) {
+  const value = raw?.trim();
+
+  if (!value) {
+    return [];
+  }
+
+  if (value.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((id) => String(id).trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fall back to the legacy comma parser below.
+    }
+  }
+
+  return value
+    .split(',')
+    .map((id) =>
+      id
+        .trim()
+        .replace(/^[\["']+|[\]"']+$/g, ''),
+    )
+    .filter(Boolean);
+}
+
+function getSessionCheckLabel(session: SessionSummary) {
   const alternateSymptom = (session as SessionSummary & { symptom?: string | null }).symptom;
   const symptom = session.symptom_type?.trim() || alternateSymptom?.trim();
-  return symptom || 'Symptom not recorded';
+
+  if (symptom) {
+    return symptom;
+  }
+
+  const mode = session.diagnosis_mode?.trim().toLowerCase();
+  const scenarioId = session.scenario_id?.trim();
+  const componentIds = parseComponentIds(
+    session.component_ids,
+  );
+
+  if (mode === 'scenario' && scenarioId) {
+    return SCENARIO_LABELS[scenarioId] ?? `${titleFromId(scenarioId)} check`;
+  }
+
+  if (mode === 'component' && componentIds?.length) {
+    const labels = componentIds.map(
+      (id) => COMPONENT_LABELS[id] ?? titleFromId(id),
+    );
+
+    return `${labels.join(', ')} check`;
+  }
+
+  if (mode === 'full') {
+    return 'Full device check';
+  }
+
+  if (session.diagnosed_category) {
+    return `${session.diagnosed_category} check`;
+  }
+
+  return 'Device check';
+}
+
+function getSessionSymptom(session: SessionSummary) {
+  return getSessionCheckLabel(session);
 }
 
 function getSessionScope(session: SessionSummary) {
@@ -749,7 +855,7 @@ export default function DiagnosticHistoryView({
                   </div>
 
                   <div>
-                    Symptom
+                    Check
                   </div>
 
                   <div className="text-center">

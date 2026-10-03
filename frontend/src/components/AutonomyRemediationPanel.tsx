@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
@@ -73,15 +73,73 @@ const VERIFICATION_STATUS_LABELS: Record<number, string> = {
   3: 'Could not confirm',
 };
 
-const REMEDIATION_TOOL_OPTIONS = [
-  { id: 'clear_temp_files', label: 'Clear Temporary Files (Tier 1)' },
-  { id: 'flush_dns_cache', label: 'Flush Windows DNS Resolver Cache (Tier 1)' },
-  { id: 'restart_windows_explorer', label: 'Restart Windows Explorer Shell (Tier 1)' },
-  { id: 'clear_browser_cache', label: 'Clear Web Browser Disk Caches (Tier 2)' },
-  { id: 'clear_windows_update_cache', label: 'Clear Windows Update Download Cache (Tier 2)' },
-  { id: 'run_system_file_checker', label: 'Run Windows System File Checker / SFC (Tier 2)' },
-  { id: 'close_selected_app', label: 'Terminate Selected High-Memory Apps (Tier 2)' },
+interface RemediationToolOption {
+  id: string;
+  label: string;
+  userLabel: string;
+  reason: string;
+}
+
+const REMEDIATION_TOOL_OPTIONS: RemediationToolOption[] = [
+  {
+    id: 'clear_temp_files',
+    label: 'Clear Temporary Files (Tier 1)',
+    userLabel: 'Clear temporary files',
+    reason: 'Best for storage pressure, temp-cache buildup, and slow startup cleanup.',
+  },
+  {
+    id: 'flush_dns_cache',
+    label: 'Flush DNS Cache (Tier 1)',
+    userLabel: 'Refresh DNS/network name cache',
+    reason: 'Best for websites failing to load, DNS failures, or connection name-resolution issues.',
+  },
+  {
+    id: 'restart_windows_explorer',
+    label: 'Restart Windows Explorer (Tier 1)',
+    userLabel: 'Restart Windows Explorer',
+    reason: 'Best for taskbar, desktop, display shell, or Explorer-related UI problems.',
+  },
+  {
+    id: 'rescan_plug_and_play_devices',
+    label: 'Rescan Connected Devices (Tier 2)',
+    userLabel: 'Rescan connected devices',
+    reason: 'Best for USB, peripheral, or Device Manager errors where Windows needs to detect the device again.',
+  },
+  {
+    id: 'clear_browser_cache',
+    label: 'Clear Browser Caches (Tier 2)',
+    userLabel: 'Clear browser caches',
+    reason: 'Best when browser storage or browser workload is part of the problem.',
+  },
+  {
+    id: 'clear_windows_update_cache',
+    label: 'Clear Windows Update Cache (Tier 2)',
+    userLabel: 'Clear Windows Update download cache',
+    reason: 'Best for storage use or Windows Update download/cache problems.',
+  },
+  {
+    id: 'run_system_file_checker',
+    label: 'Run System File Checker / SFC (Tier 2)',
+    userLabel: 'Repair protected Windows system files',
+    reason: 'Best for driver, display, blue-screen, or Windows integrity problems.',
+  },
+  {
+    id: 'terminate_processes',
+    label: 'Close agent-selected high-use apps (Tier 2)',
+    userLabel: 'Close high-use apps selected by RigMD',
+    reason: 'Best when the agent identified specific running apps that are using too much memory or CPU.',
+  },
+  {
+    id: 'close_selected_app',
+    label: 'Choose memory-heavy apps to close (User selected)',
+    userLabel: 'Choose memory-heavy apps to close',
+    reason: 'Best when you want to choose exactly which user apps RigMD may close.',
+  },
 ];
+
+const REMEDIATION_TOOL_LOOKUP = new Map(
+  REMEDIATION_TOOL_OPTIONS.map((tool) => [tool.id, tool]),
+);
 
 function getLatestAttempt(result?: AutonomyResult | null) {
   return result?.attempts?.[result.attempts.length - 1] ?? null;
@@ -111,8 +169,25 @@ function getState(result?: AutonomyResult | null) {
   const attempt = getLatestAttempt(result);
   const attemptState = getAttemptStateLabel(attempt?.state);
   const verificationState = getVerificationLabel(result.verification);
+  const verification = verificationState.toLowerCase();
   const state = (attemptState || verificationState).toLowerCase();
   const safety = result.safety;
+
+  if (verification.includes('not fixed') || verification.includes('unresolved')) {
+    return 'unresolved';
+  }
+
+  if (verification.includes('needs help') || verification.includes('worse')) {
+    return 'failed';
+  }
+
+  if (verification.includes('could not confirm') || verification.includes('unknown')) {
+    return 'info';
+  }
+
+  if (verification.includes('fixed') || verification.includes('resolved')) {
+    return 'success';
+  }
 
   if (
     state.includes('approval') ||
@@ -169,7 +244,7 @@ function getStatusStyle(state: string) {
   if (state === 'consent' || state === 'unresolved') {
     return {
       icon: AlertTriangle,
-      title: 'Needs your attention',
+      title: state === 'unresolved' ? 'Action completed, issue still active' : 'Needs your attention',
       className: 'border-amber-400/30 bg-amber-400/10 text-amber-200',
     };
   }
@@ -183,6 +258,461 @@ function getStatusStyle(state: string) {
 
 function getPrimaryAction(result?: AutonomyResult | null) {
   return result?.plan?.plannedActions?.[0] ?? null;
+}
+
+function getToolOption(toolId?: string, displayName?: string): RemediationToolOption | null {
+  if (!toolId) {
+    return null;
+  }
+
+  return REMEDIATION_TOOL_LOOKUP.get(toolId) ?? {
+    id: toolId,
+    label: displayName || toolId,
+    userLabel: displayName || toolId.replace(/_/g, ' '),
+    reason: 'Recommended by the agent from the live readings for this diagnosis.',
+  };
+}
+
+function getToolDisplayName(toolId?: string, displayName?: string) {
+  if (toolId === 'inspect_full_device_profile') {
+    return 'Device Manager and hardware check';
+  }
+  if (toolId === 'inspect_gpu_and_displays') {
+    return 'graphics and display check';
+  }
+  if (toolId === 'inspect_memory_and_processes') {
+    return 'memory and running apps check';
+  }
+  if (toolId === 'inspect_cpu_and_thermals') {
+    return 'processor and temperature check';
+  }
+  if (toolId === 'inspect_storage_health') {
+    return 'storage health check';
+  }
+  if (toolId === 'inspect_network_connectivity') {
+    return 'network connection check';
+  }
+  if (toolId === 'inspect_battery_and_power') {
+    return 'battery and power check';
+  }
+  if (toolId === 'query_windows_event_logs') {
+    return 'Windows error history check';
+  }
+
+  return getToolOption(toolId, displayName)?.userLabel || 'this tool';
+}
+
+function getDiagnosisMatchedToolIds(diagnosedCategory: string) {
+  const category = diagnosedCategory.toLowerCase();
+
+  if (
+    category.includes('network') ||
+    category.includes('dns') ||
+    category.includes('internet')
+  ) {
+    return ['flush_dns_cache'];
+  }
+
+  if (
+    category.includes('driver') ||
+    category.includes('pnp') ||
+    category.includes('usb') ||
+    category.includes('device manager')
+  ) {
+    return ['rescan_plug_and_play_devices', 'run_system_file_checker'];
+  }
+
+  if (category.includes('display')) {
+    return ['restart_windows_explorer', 'rescan_plug_and_play_devices', 'run_system_file_checker'];
+  }
+
+  if (
+    category.includes('blue screen') ||
+    category.includes('stop error') ||
+    category.includes('system crash')
+  ) {
+    return ['run_system_file_checker'];
+  }
+
+  if (
+    category.includes('application crash') ||
+    category.includes('app crash')
+  ) {
+    return ['run_system_file_checker', 'restart_windows_explorer'];
+  }
+
+  if (
+    category.includes('memory') ||
+    category.includes('ram') ||
+    category.includes('performance') ||
+    category.includes('stuttering') ||
+    category.includes('freezing') ||
+    category.includes('slow')
+  ) {
+    return ['close_selected_app', 'clear_browser_cache', 'clear_temp_files', 'restart_windows_explorer'];
+  }
+
+  if (
+    category.includes('thermal') ||
+    category.includes('overheat') ||
+    category.includes('fan') ||
+    category.includes('cpu load')
+  ) {
+    return ['close_selected_app'];
+  }
+
+  if (
+    category.includes('storage') ||
+    category.includes('disk') ||
+    category.includes('temp') ||
+    category.includes('cache')
+  ) {
+    return ['clear_temp_files', 'clear_browser_cache', 'clear_windows_update_cache'];
+  }
+
+  if (category.includes('battery') || category.includes('power')) {
+    return ['close_selected_app'];
+  }
+
+  return [];
+}
+
+function getContextualToolOptions(
+  diagnosedCategory: string,
+  previewResult?: AutonomyResult | null,
+) {
+  const ids = new Set<string>();
+  const proposedTool = previewResult?.proposedTool;
+
+  if (proposedTool?.toolName) {
+    ids.add(proposedTool.toolName);
+  }
+
+  for (const id of getDiagnosisMatchedToolIds(diagnosedCategory)) {
+    ids.add(id);
+  }
+
+  if (ids.size === 0) {
+    ids.add('clear_temp_files');
+  }
+
+  return [...ids]
+    .map((id) => getToolOption(id, proposedTool?.toolName === id ? proposedTool.displayName : undefined))
+    .filter((tool): tool is RemediationToolOption => Boolean(tool));
+}
+
+function formatStepType(stepType: string) {
+  const normalized = stepType.toLowerCase();
+  if (normalized.includes('thought')) {
+    return 'Reasoning';
+  }
+  if (normalized.includes('toolcall')) {
+    return 'Check';
+  }
+  if (normalized.includes('observation')) {
+    return 'Result';
+  }
+  if (normalized.includes('dryrun')) {
+    return 'Safety preview';
+  }
+  if (normalized.includes('approval')) {
+    return 'Needs approval';
+  }
+  if (normalized.includes('execution')) {
+    return 'Action';
+  }
+  if (normalized.includes('verification')) {
+    return 'Verification';
+  }
+  return stepType;
+}
+
+function formatStepTitle(step: ReActTraceStep) {
+  const normalized = step.stepType.toLowerCase();
+  if (normalized.includes('toolcall')) {
+    return `Checking ${getToolDisplayName(step.toolName)}`;
+  }
+  if (normalized.includes('observation')) {
+    return `Result from ${getToolDisplayName(step.toolName)}`;
+  }
+  if (normalized.includes('dryrun')) {
+    return `Safety preview for ${getToolDisplayName(step.toolName)}`;
+  }
+  if (normalized.includes('approval')) {
+    return 'Waiting for your approval';
+  }
+  if (normalized.includes('thought')) {
+    return 'Agent reasoning';
+  }
+  return step.title;
+}
+
+function formatStepContent(step: ReActTraceStep) {
+  const normalized = step.stepType.toLowerCase();
+  if (normalized.includes('toolcall')) {
+    return `RigMD is reading ${getToolDisplayName(step.toolName)} evidence. This check does not change Windows.`;
+  }
+  if (normalized.includes('approval')) {
+    return `${getToolDisplayName(step.toolName)} is ready to run after you review the safety preview and approve it.`;
+  }
+  if (normalized.includes('thought')) {
+    return step.content
+      .replace(/I will invoke/gi, 'RigMD will check')
+      .replace(/telemetry/gi, 'device readings');
+  }
+  return step.content
+    .replace(/telemetry/gi, 'device readings')
+    .replace(/Tier 0/gi, 'read-only')
+    .replace(/Tier 1/gi, 'low-risk')
+    .replace(/Tier 2/gi, 'approval-required');
+}
+
+function formatCitation(citation: string) {
+  const [toolName, ...rest] = citation.split(':');
+  const summary = rest.join(':').trim();
+  if (!summary) {
+    return citation.replace(/telemetry/gi, 'device readings');
+  }
+
+  return `${getToolDisplayName(toolName.trim())}: ${summary.replace(/telemetry/gi, 'device readings')}`;
+}
+
+type SnapshotRecord = Record<string, unknown>;
+
+function parseSnapshot(json?: string): SnapshotRecord | null {
+  if (!json || json === '{}' || json === 'null') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as SnapshotRecord
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readRecord(source: SnapshotRecord | null, key: string): SnapshotRecord | null {
+  const value = source?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as SnapshotRecord
+    : null;
+}
+
+function readNumber(source: SnapshotRecord | null, key: string): number | null {
+  const value = source?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readString(source: SnapshotRecord | null, key: string): string | null {
+  const value = source?.[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function formatMetric(value: number | null, suffix = '') {
+  return value === null ? 'Not available' : `${value.toFixed(value % 1 === 0 ? 0 : 1)}${suffix}`;
+}
+
+function getSnapshotFacts(toolName: string, snapshot: SnapshotRecord | null) {
+  if (!snapshot) {
+    return [] as string[];
+  }
+
+  const normalized = toolName.toLowerCase();
+
+  if (normalized === 'inspect_full_device_profile') {
+    const gpu = readRecord(snapshot, 'gpu');
+    return [
+      `Device Manager errors: ${readNumber(snapshot, 'deviceErrorsCount') ?? 0}`,
+      `Graphics: ${readString(gpu, 'name') ?? 'Detected'}${readString(gpu, 'driver') ? `, driver ${readString(gpu, 'driver')}` : ''}`,
+      `Connected displays: ${readNumber(snapshot, 'connectedDisplays') ?? 0}`,
+    ];
+  }
+
+  if (normalized === 'inspect_memory_and_processes') {
+    const memory = readRecord(snapshot, 'memory');
+    const browser = readRecord(snapshot, 'browserSummary');
+    return [
+      `Memory use: ${formatMetric(readNumber(memory, 'usagePercent'), '%')}`,
+      `Browser workload: ${formatMetric(readNumber(browser, 'browserMemoryMb'), ' MB')}`,
+    ];
+  }
+
+  if (normalized === 'inspect_cpu_and_thermals') {
+    const cpu = readRecord(snapshot, 'cpu');
+    return [
+      `Processor load: ${formatMetric(readNumber(cpu, 'usagePercent'), '%')}`,
+      `Temperature: ${formatMetric(readNumber(cpu, 'temperatureCelsius'), '°C')}`,
+    ];
+  }
+
+  if (normalized === 'inspect_storage_health') {
+    const primary = readRecord(snapshot, 'primaryVolume') || readRecord(snapshot, 'volume');
+    const smart = readString(snapshot, 'smartStatus') || readString(primary, 'smartStatus') || 'Reported by Windows';
+    return [
+      `Drive use: ${formatMetric(readNumber(primary, 'usagePercent'), '%')}`,
+      `Drive health: ${smart}`,
+    ];
+  }
+
+  if (normalized === 'inspect_network_connectivity') {
+    const connectivity = readRecord(snapshot, 'connectivity') || snapshot;
+    return [
+      `Ping: ${formatMetric(readNumber(connectivity, 'latencyMs'), ' ms')}`,
+      `Packet loss: ${formatMetric(readNumber(connectivity, 'packetLossPercent'), '%')}`,
+    ];
+  }
+
+  if (normalized === 'inspect_battery_and_power') {
+    const battery = readRecord(snapshot, 'battery') || snapshot;
+    return [
+      `Battery: ${formatMetric(readNumber(battery, 'chargePercent'), '%')}`,
+      `Power state: ${readString(battery, 'powerLineStatus') || readString(snapshot, 'activePowerPlan') || 'Detected'}`,
+    ];
+  }
+
+  if (normalized === 'query_windows_event_logs') {
+    const focus = readString(snapshot, 'eventFocus')?.toLowerCase() || '';
+    const eventLabel = focus.includes('applicationcrash')
+      ? 'Application crash/fault events'
+      : focus.includes('bugcheck')
+        ? 'System crash/stop-error events'
+        : focus.includes('boot')
+          ? 'Boot/startup events'
+          : 'Recent Windows events';
+
+    return [
+      `${eventLabel}: ${readNumber(snapshot, 'eventCount') ?? readNumber(snapshot, 'count') ?? 'Detected'}`,
+    ];
+  }
+
+  return [];
+}
+
+function getUnresolvedReason(diagnosedCategory: string, result: AutonomyResult) {
+  const toolName = result.verificationReport?.verificationToolName || '';
+  const after = parseSnapshot(result.verificationReport?.afterSnapshotJson);
+  const category = diagnosedCategory.toLowerCase();
+
+  if (
+    toolName === 'inspect_full_device_profile' ||
+    category.includes('driver') ||
+    category.includes('pnp') ||
+    category.includes('usb') ||
+    category.includes('device manager')
+  ) {
+    const errors = readNumber(after, 'deviceErrorsCount');
+    if (errors && errors > 0) {
+      return `${errors} Device Manager error${errors === 1 ? '' : 's'} still reported after the action.`;
+    }
+  }
+
+  if (category.includes('memory') || category.includes('ram') || category.includes('slow') || category.includes('performance')) {
+    const memory = readRecord(after, 'memory');
+    const usage = readNumber(memory, 'usagePercent');
+    return usage !== null
+      ? `Memory is still high at ${usage.toFixed(1)}%.`
+      : 'The follow-up check still sees performance pressure.';
+  }
+
+  if (category.includes('storage') || category.includes('disk')) {
+    return 'Storage readings still need attention after the action.';
+  }
+
+  if (category.includes('network') || category.includes('dns') || category.includes('internet')) {
+    return 'Network readings still show a connection or name-resolution problem.';
+  }
+
+  if (category.includes('thermal') || category.includes('overheat') || category.includes('fan')) {
+    return 'Temperature or processor-load readings still need attention.';
+  }
+
+  if (category.includes('application crash') || category.includes('app crash') || category.includes('blue screen')) {
+    return 'Windows still has stability evidence that needs review.';
+  }
+
+  return 'The follow-up Windows check still sees the original issue.';
+}
+
+function getNextSteps(diagnosedCategory: string, result: AutonomyResult) {
+  const state = getState(result);
+  if (state !== 'unresolved') {
+    return [] as string[];
+  }
+
+  const category = diagnosedCategory.toLowerCase();
+
+  if (category.includes('driver') || category.includes('pnp') || category.includes('usb') || category.includes('device manager')) {
+    return [
+      'Open Device Manager and expand the device category with the warning icon.',
+      'Unplug and reconnect the affected USB or peripheral device, then recheck the current status.',
+      'If the same Code 43 error remains, try another USB port or update/remove only that specific device entry in Device Manager.',
+    ];
+  }
+
+  if (category.includes('network') || category.includes('dns') || category.includes('internet')) {
+    return [
+      'Disconnect and reconnect Wi-Fi or Ethernet, then recheck the current status.',
+      'Restart the router if other devices also have connection issues.',
+      'If DNS still fails, try another DNS provider or review adapter settings.',
+    ];
+  }
+
+  if (category.includes('storage') || category.includes('disk') || category.includes('cache')) {
+    return [
+      'Review the storage details and confirm which drive is still under pressure.',
+      'Move or delete large user files only after checking them yourself.',
+      'If drive health is not healthy, back up important files before doing more cleanup.',
+    ];
+  }
+
+  if (category.includes('memory') || category.includes('ram') || category.includes('slow') || category.includes('performance') || category.includes('stuttering') || category.includes('freezing')) {
+    return [
+      'Close or save work in high-memory apps, then recheck the current status.',
+      'Check Task Manager for apps that returned after the action.',
+      'If memory stays high after closing apps, restart Windows and retest under normal use.',
+    ];
+  }
+
+  if (category.includes('thermal') || category.includes('overheat') || category.includes('fan') || category.includes('cpu load')) {
+    return [
+      'Let the device cool for a few minutes, then recheck the current status.',
+      'Check airflow, vents, and surface placement while the device is under load.',
+      'If temperature rises quickly with low workload, inspect cooling or fan behavior.',
+    ];
+  }
+
+  if (category.includes('battery') || category.includes('power')) {
+    return [
+      'Check whether the issue happens on battery, charger, or both.',
+      'Close high-use apps and recheck the current status.',
+      'If battery health is poor or drain remains high, compare with Windows battery settings.',
+    ];
+  }
+
+  if (category.includes('application crash') || category.includes('app crash')) {
+    return [
+      'Open Windows Reliability Monitor and check the latest failing app name.',
+      'Update or repair the affected app, then recheck the current status.',
+      'If only one app keeps crashing, focus on that app instead of changing system-wide settings.',
+    ];
+  }
+
+  if (category.includes('blue screen') || category.includes('stop error') || category.includes('system crash')) {
+    return [
+      'Review recent Windows critical events before running another repair.',
+      'Disconnect recently added hardware if the crash started after adding it.',
+      'If crashes continue, collect the stop code or dump details for deeper review.',
+    ];
+  }
+
+  return [
+    'Review the still-failing evidence below.',
+    'Recheck the current status after changing only one thing.',
+    'If the same evidence remains, use the related Windows tool shown in the diagnosis.',
+  ];
 }
 
 function formatMemory(memoryMb: number) {
@@ -264,6 +794,8 @@ function ReActTimeline({ steps }: { steps: ReActTraceStep[] }) {
             Boolean(step.observationJson) &&
             step.observationJson !== '{}' &&
             step.observationJson !== 'null';
+          const displayTitle = formatStepTitle(step);
+          const displayContent = formatStepContent(step);
 
           return (
             <div
@@ -277,11 +809,11 @@ function ReActTimeline({ steps }: { steps: ReActTraceStep[] }) {
                       step.stepType,
                     )}`}
                   >
-                    {step.stepType}
+                    {formatStepType(step.stepType)}
                   </span>
 
                   <span className="font-semibold text-white">
-                    {step.title}
+                    {displayTitle}
                   </span>
 
                   {step.toolName && (
@@ -299,7 +831,7 @@ function ReActTimeline({ steps }: { steps: ReActTraceStep[] }) {
               </div>
 
               <p className="mt-1.5 leading-relaxed text-slate-300">
-                {step.content}
+                {displayContent}
               </p>
 
               {hasRawJson && (
@@ -382,16 +914,120 @@ function ProofList({ execution }: { execution?: AutonomyExecution }) {
   );
 }
 
-function ResultCard({ result }: { result: AutonomyResult }) {
+function FollowUpEvidence({
+  result,
+}: {
+  result: AutonomyResult;
+}) {
+  const report = result.verificationReport;
+  if (!report) {
+    return null;
+  }
+
+  const before = parseSnapshot(report.beforeSnapshotJson);
+  const after = parseSnapshot(report.afterSnapshotJson);
+  const beforeFacts = getSnapshotFacts(report.verificationToolName, before);
+  const afterFacts = getSnapshotFacts(report.verificationToolName, after);
+
+  if (beforeFacts.length === 0 && afterFacts.length === 0) {
+    return (
+      <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3 text-xs">
+        <p className="font-bold uppercase tracking-wider opacity-80">
+          Follow-up check ({getToolDisplayName(report.verificationToolName)})
+        </p>
+        <p className="mt-1 leading-relaxed opacity-90">
+          {report.summary.replace(/Before:/g, 'Before check:').replace(/After:/g, 'After check:')}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3">
+      <p className="text-xs font-bold uppercase tracking-wider opacity-80">
+        Follow-up check ({getToolDisplayName(report.verificationToolName)})
+      </p>
+
+      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="rounded-md border border-current/15 bg-black/20 p-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">
+            Before action
+          </p>
+          <ul className="mt-1 space-y-1 text-xs leading-relaxed opacity-90">
+            {(beforeFacts.length ? beforeFacts : ['No baseline reading available']).map((fact) => (
+              <li key={fact}>{fact}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="rounded-md border border-current/15 bg-black/20 p-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">
+            After action
+          </p>
+          <ul className="mt-1 space-y-1 text-xs leading-relaxed opacity-90">
+            {(afterFacts.length ? afterFacts : ['No follow-up reading available']).map((fact) => (
+              <li key={fact}>{fact}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NextStepsPanel({
+  diagnosedCategory,
+  result,
+}: {
+  diagnosedCategory: string;
+  result: AutonomyResult;
+}) {
+  const steps = getNextSteps(diagnosedCategory, result);
+  if (steps.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3">
+      <p className="text-xs font-bold uppercase tracking-wider opacity-80">
+        What to try next
+      </p>
+      <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-xs leading-relaxed opacity-90">
+        {steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ResultCard({
+  result,
+  diagnosedCategory,
+}: {
+  result: AutonomyResult;
+  diagnosedCategory: string;
+}) {
   const state = getState(result);
   const style = getStatusStyle(state);
   const Icon = style.icon;
   const attempt = getLatestAttempt(result);
+  const verificationLabel = getVerificationLabel(result.verification);
   const summary =
+    state === 'unresolved'
+      ? 'The action ran, but the follow-up Windows check still sees the issue.'
+      : state === 'success'
+        ? result.execution?.summary || attempt?.notes || 'The action completed and the follow-up check passed.'
+        : null;
+  const displaySummary =
+    summary ||
     attempt?.notes ||
     result.execution?.summary ||
     result.safety?.rejectionReason ||
     'RigMD finished checking this action.';
+  const unresolvedReason = state === 'unresolved'
+    ? getUnresolvedReason(diagnosedCategory, result)
+    : '';
 
   return (
     <div className="space-y-3">
@@ -413,23 +1049,26 @@ function ResultCard({ result }: { result: AutonomyResult }) {
             </div>
 
             <p className="mt-2 leading-relaxed">
-              {summary}
+              {displaySummary}
             </p>
 
-            {result.verificationReport?.summary && (
-              <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-2.5 text-xs">
+            {unresolvedReason && (
+              <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3 text-xs leading-relaxed">
                 <p className="font-bold uppercase tracking-wider opacity-80">
-                  Post-Action Telemetry Verification ({result.verificationReport.verificationToolName})
+                  Why it is still active
                 </p>
                 <p className="mt-1 opacity-90">
-                  {result.verificationReport.summary}
+                  {unresolvedReason}
                 </p>
               </div>
             )}
 
+            <FollowUpEvidence result={result} />
+            <NextStepsPanel diagnosedCategory={diagnosedCategory} result={result} />
+
             <span className="mt-3 inline-flex rounded-full border border-current/30 px-2.5 py-1 text-[10px] font-bold uppercase">
-              {getAttemptStateLabel(attempt?.state) ||
-                getVerificationLabel(result.verification) ||
+              {verificationLabel ||
+                getAttemptStateLabel(attempt?.state) ||
                 'Completed'}
             </span>
           </div>
@@ -505,17 +1144,23 @@ export default function AutonomyRemediationPanel({
 
   const dynamicTitle = isCloseSelectedAppMode
     ? 'Close selected memory-heavy apps'
-    : effectiveDryRun?.displayName ||
+    : getToolDisplayName(
+      activeToolId,
+      effectiveDryRun?.displayName ||
       previewResult?.proposedTool?.displayName ||
-      primaryAction?.name ||
-      'Review proposed remediation';
+      primaryAction?.name,
+    ) ||
+      'Review proposed action';
 
   const dynamicDescription = isCloseSelectedAppMode
     ? 'Select which running applications RigMD should close to reduce live memory pressure.'
-    : effectiveDryRun?.whatWillHappen ||
+    : (effectiveDryRun?.whatWillHappen ||
       primaryAction?.description ||
       previewResult?.plan?.strategyReasoning ||
-      'Review the proposed remediation parameters before execution.';
+      'Review the proposed action before execution.')
+      .replace(/telemetry/gi, 'device readings')
+      .replace(/Tier 1/gi, 'low-risk')
+      .replace(/Tier 2/gi, 'approval-required');
 
   const dynamicWarnings =
     effectiveDryRun?.warnings && effectiveDryRun.warnings.length > 0
@@ -537,9 +1182,26 @@ export default function AutonomyRemediationPanel({
   const selectedAppNames =
     selectedMemoryApps.map((app) => app.displayName || app.name);
 
+  const contextualToolOptions = useMemo(
+    () => getContextualToolOptions(diagnosedCategory, previewResult),
+    [diagnosedCategory, previewResult],
+  );
+
+  const activeToolOption = getToolOption(
+    activeToolId,
+    previewResult?.proposedTool?.toolName === activeToolId
+      ? previewResult.proposedTool.displayName
+      : undefined,
+  );
+
   const handleToolSelectionChange = async (nextToolId: string) => {
     setActiveToolId(nextToolId);
     setUserConsentProvided(false);
+
+    if (nextToolId === previewResult?.proposedTool?.toolName) {
+      setCustomDryRun(null);
+      return;
+    }
 
     if (nextToolId === 'close_selected_app') {
       setCustomDryRun(null);
@@ -697,7 +1359,7 @@ export default function AutonomyRemediationPanel({
               </div>
 
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
-                Runs live read-only WMI &amp; OS inspection tools (Thought &rarr; Tool Call &rarr; Observation), computes a real dry-run impact preview, and verifies telemetry deltas after user-approved execution.
+                Checks the related Windows readings first, previews the safest matching action, and waits for your approval before changing anything.
               </p>
             </div>
           </div>
@@ -715,7 +1377,7 @@ export default function AutonomyRemediationPanel({
               <SlidersHorizontal size={14} />
             )}
 
-            {isPreviewLoading ? 'Running ReAct Tools...' : 'Run Agent & Review Action'}
+            {isPreviewLoading ? 'Checking device readings...' : 'Run Agent & Review Action'}
           </motion.button>
         </div>
 
@@ -745,7 +1407,7 @@ export default function AutonomyRemediationPanel({
 
         {executionResult && (
           <div className="mt-4">
-            <ResultCard result={executionResult} />
+            <ResultCard result={executionResult} diagnosedCategory={diagnosedCategory} />
           </div>
         )}
       </motion.section>
@@ -762,7 +1424,7 @@ export default function AutonomyRemediationPanel({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                    ReAct Agent Investigation &amp; Dry-Run Preview
+                    Investigation &amp; Safe Action Preview
                   </p>
                   {previewResult?.engineMode && (
                     <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] text-cyan-200">
@@ -802,7 +1464,7 @@ export default function AutonomyRemediationPanel({
                   <div className="flex items-center gap-2">
                     <Cpu size={15} className="text-cyan-300" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-200">
-                      Synthesized Root Cause &amp; Live Telemetry Citations
+                      Why RigMD picked this action
                     </h4>
                   </div>
 
@@ -817,7 +1479,7 @@ export default function AutonomyRemediationPanel({
                       <ul className="mt-3 space-y-1.5 border-t border-cyan-400/15 pt-2.5 font-mono text-xs text-cyan-100/90">
                         {previewResult.proposedTool.evidenceCitations.map(
                           (citation, i) => (
-                            <li key={i}>&bull; {citation}</li>
+                            <li key={i}>&bull; {formatCitation(citation)}</li>
                           ),
                         )}
                       </ul>
@@ -831,7 +1493,7 @@ export default function AutonomyRemediationPanel({
                   <div className="flex items-center gap-2">
                     <Wrench size={15} className="text-emerald-300" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
-                      Selected OS Remediation Tool &amp; Pre-Flight Dry Run
+                      Recommended action and safety preview
                     </h4>
                   </div>
 
@@ -841,7 +1503,7 @@ export default function AutonomyRemediationPanel({
                     disabled={requestActive}
                     className="rounded-lg border border-white/15 bg-[#101821] px-3 py-1.5 text-xs font-semibold text-white focus:border-cyan-400 focus:outline-none"
                   >
-                    {REMEDIATION_TOOL_OPTIONS.map((opt) => (
+                    {contextualToolOptions.map((opt) => (
                       <option key={opt.id} value={opt.id}>
                         {opt.label}
                       </option>
@@ -862,7 +1524,7 @@ export default function AutonomyRemediationPanel({
 
                     <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Estimated Space / RAM Impact
+                        Estimated space or memory impact
                       </p>
                       <p className="mt-1 text-base font-bold text-cyan-300">
                         {formatBytes(effectiveDryRun.estimatedBytesAffected)}
@@ -871,7 +1533,7 @@ export default function AutonomyRemediationPanel({
 
                     <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Privilege Check
+                        Permission needed
                       </p>
                       <p className="mt-1 text-xs font-bold text-white">
                         {effectiveDryRun.requiresAdmin
@@ -889,7 +1551,7 @@ export default function AutonomyRemediationPanel({
                   !isCloseSelectedAppMode && (
                     <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Measured Target Paths / Services
+                        What this action may touch
                       </p>
                       <ul className="mt-1.5 space-y-1 font-mono text-xs text-slate-300">
                         {effectiveDryRun.affectedTargets.map((t, idx) => (
@@ -908,7 +1570,12 @@ export default function AutonomyRemediationPanel({
 
                 <ul className="mt-2.5 space-y-1.5 text-sm text-slate-300">
                   {dynamicWarnings.map((item) => (
-                    <li key={item}>- {item}</li>
+                    <li key={item}>
+                      - {item
+                        .replace(/telemetry/gi, 'device readings')
+                        .replace(/Tier 1/gi, 'low-risk')
+                        .replace(/Tier 2/gi, 'approval-required')}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -1005,6 +1672,12 @@ export default function AutonomyRemediationPanel({
                     pressure improved.
                   </div>
                 )}
+
+                {activeToolOption?.reason && (
+                  <p className="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] p-3 text-xs leading-relaxed text-emerald-100/90">
+                    {activeToolOption.reason}
+                  </p>
+                )}
               </div>
             )}
 
@@ -1019,9 +1692,9 @@ export default function AutonomyRemediationPanel({
               />
 
               <span>
-                I have reviewed the live ReAct observations and dry-run impact preview and authorize RigMD to execute this tool.
+                I reviewed the readings and safety preview. I approve RigMD to run this action.
                 <span className="mt-1 block text-xs text-amber-100/70">
-                  Explicit user approval is required before any Tier 1 or Tier 2 OS tool is executed.
+                  RigMD will not change Windows until this box is checked.
                 </span>
               </span>
             </label>

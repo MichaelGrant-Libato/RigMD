@@ -312,8 +312,10 @@ export interface HardwareStats {
 
 export interface DashboardSessionSummary {
   session_id: string;
+  session_code?: string;
   symptom_type: string;
   diagnosed_category: string;
+  probable_cause?: string;
   action_category: string;
   confidence_label: string;
   created_at: string | null;
@@ -323,6 +325,9 @@ export interface DashboardSessionSummary {
   resolution_status?: string;
   resolution_checked_at?: string | null;
   resolution_summary?: string;
+  diagnosis_mode?: string;
+  component_ids?: string;
+  scenario_id?: string;
 }
 
 // Map SessionSummary to your DashboardSessionSummary structure so DiagnosticHistoryView is satisfied

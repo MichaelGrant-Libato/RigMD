@@ -1056,8 +1056,6 @@ public class AutonomyController : ControllerBase
     {
         public string? PreferredMode { get; set; }
         public bool? AutoExecuteSafeTier1 { get; set; }
-        public string? GeminiApiKey { get; set; }
-        public bool ClearGeminiApiKey { get; set; }
     }
 
     [HttpGet("settings")]
@@ -1066,21 +1064,16 @@ public class AutonomyController : ControllerBase
         var settings = RigMdAgentRuntimeSettingsStore.Load();
         var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
         var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
-        var rawKey = !string.IsNullOrWhiteSpace(settings.GeminiApiKey)
-            ? settings.GeminiApiKey
-            : _configuration?["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
 
         return Ok(new
         {
             preferredMode = settings.PreferredMode,
             autoExecuteSafeTier1 = settings.AutoExecuteSafeTier1,
-            hasGeminiApiKey = !string.IsNullOrWhiteSpace(rawKey),
-            maskedGeminiApiKey = RigMdAgentRuntimeSettingsStore.MaskApiKey(rawKey),
+            hasGeminiApiKey = hasKey,
             activeEngine = hasKey
-                ? "Gemini 3.5 Flash Cascade + Local ReAct Fallback"
+                ? "Gemini Server Key + Local ReAct Fallback"
                 : "Local Deterministic ReAct Engine (100% Offline)",
-            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0,
-            settingsFilePath = RigMdAgentRuntimeSettingsStore.GetSettingsFilePath()
+            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0
         });
     }
 
@@ -1089,27 +1082,20 @@ public class AutonomyController : ControllerBase
     {
         var saved = RigMdAgentRuntimeSettingsStore.Save(
             request.PreferredMode,
-            request.AutoExecuteSafeTier1,
-            request.GeminiApiKey,
-            request.ClearGeminiApiKey);
+            request.AutoExecuteSafeTier1);
 
         var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
         var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
-        var rawKey = !string.IsNullOrWhiteSpace(saved.GeminiApiKey)
-            ? saved.GeminiApiKey
-            : _configuration?["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
 
         return Ok(new
         {
             preferredMode = saved.PreferredMode,
             autoExecuteSafeTier1 = saved.AutoExecuteSafeTier1,
-            hasGeminiApiKey = !string.IsNullOrWhiteSpace(rawKey),
-            maskedGeminiApiKey = RigMdAgentRuntimeSettingsStore.MaskApiKey(rawKey),
+            hasGeminiApiKey = hasKey,
             activeEngine = hasKey
-                ? "Gemini 3.5 Flash Cascade + Local ReAct Fallback"
+                ? "Gemini Server Key + Local ReAct Fallback"
                 : "Local Deterministic ReAct Engine (100% Offline)",
-            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0,
-            settingsFilePath = RigMdAgentRuntimeSettingsStore.GetSettingsFilePath()
+            registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0
         });
     }
 

@@ -49,8 +49,8 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                 ["eventFocus"] = new()
                 {
                     Type = "string",
-                    Description = "Optional event filter focus: 'General' (default), 'Boot' (Event 100 / boot performance), or 'BugCheck' (Kernel-Power 41 / BugCheck 1001 / unexpected shutdown 6008).",
-                    EnumValues = new List<string> { "General", "Boot", "BugCheck" }
+                    Description = "Optional event filter focus: 'General' (default), 'ApplicationCrash' (Application Error / Windows Error Reporting / .NET Runtime faults), 'Boot' (Event 100 / boot performance), or 'BugCheck' (Kernel-Power 41 / BugCheck 1001 / unexpected shutdown 6008).",
+                    EnumValues = new List<string> { "General", "ApplicationCrash", "Boot", "BugCheck" }
                 }
             },
             Required = new List<string>()
@@ -81,7 +81,10 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
     {
         var rawLogName = ToolArgumentHelper.GetString(arguments, "logName", "System");
         var eventFocus = ToolArgumentHelper.GetString(arguments, "eventFocus", "General");
-        var logName = string.Equals(rawLogName, "Application", StringComparison.OrdinalIgnoreCase)
+        var normalizedFocus = eventFocus.Trim();
+        var logName = string.Equals(normalizedFocus, "ApplicationCrash", StringComparison.OrdinalIgnoreCase)
+            ? "Application"
+            : string.Equals(rawLogName, "Application", StringComparison.OrdinalIgnoreCase)
             ? "Application"
             : "System";
 
@@ -91,11 +94,13 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
         progressReporter?.Invoke($"Querying Windows '{logName}' Event Log (focus: {eventFocus}, last {hoursBack}h, up to {maxEvents} events)...");
 
         var timeDiffMs = (long)TimeSpan.FromHours(hoursBack).TotalMilliseconds;
-        var xpathQuery = string.Equals(eventFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)
+        var xpathQuery = string.Equals(normalizedFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)
             ? $"*[System[(EventID=41 or EventID=1001 or EventID=6008 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
-            : string.Equals(eventFocus, "Boot", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(normalizedFocus, "Boot", StringComparison.OrdinalIgnoreCase)
                 ? $"*[System[(EventID=100 or EventID=6005 or EventID=6006 or EventID=7000 or EventID=7001 or Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
-                : $"*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+                : string.Equals(normalizedFocus, "ApplicationCrash", StringComparison.OrdinalIgnoreCase)
+                    ? $"*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1026 or EventID=1005 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
+                    : $"*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
 
         var events = new List<object>();
         string? queryWarning = null;
@@ -191,14 +196,23 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
         var payload = new
         {
             logName,
+            eventFocus = normalizedFocus,
             hoursBack,
             eventCount = events.Count,
             warning = queryWarning,
             events
         };
 
+        var focusLabel = string.Equals(normalizedFocus, "ApplicationCrash", StringComparison.OrdinalIgnoreCase)
+            ? "application crash/fault"
+            : string.Equals(normalizedFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)
+                ? "system crash/stop-error"
+                : string.Equals(normalizedFocus, "Boot", StringComparison.OrdinalIgnoreCase)
+                    ? "boot/startup"
+                    : "Critical/Error/Warning";
+
         var summary =
-            $"Retrieved {events.Count} recent Critical/Error/Warning event(s) from the Windows '{logName}' log (last {hoursBack}h).";
+            $"Retrieved {events.Count} recent {focusLabel} event(s) from the Windows '{logName}' log (last {hoursBack}h).";
 
         return new AgentToolExecutionResult
         {

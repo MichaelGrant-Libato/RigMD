@@ -7,7 +7,6 @@ import {
 import { motion } from 'motion/react';
 
 import {
-  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Clock3,
@@ -78,13 +77,6 @@ interface SessionDetail {
   remediation_history?: RemediationRunDetail[];
 }
 
-interface RemediationAction {
-  id: string;
-  label: string;
-  description: string;
-  risk: string;
-}
-
 interface Props {
   sessionId: string;
   onBack: () => void;
@@ -115,14 +107,45 @@ function shouldShowSafeActions(session: SessionDetail) {
 
 function getResolutionLabel(
   status?: string,
+  hasCompletedAction = false,
+  proof?: SessionDetail['resolution_proof'],
+  diagnosedCategory?: string,
 ) {
   if (status === 'resolved') {
-    return 'Resolved';
+    const category =
+      diagnosedCategory?.toLowerCase() ?? '';
+
+    if (
+      !hasCompletedAction &&
+      category.includes('crash') &&
+      proofShowsNoNewCrashes(proof)
+    ) {
+      return 'No New Crashes Observed';
+    }
+
+    return hasCompletedAction
+      ? 'Resolved'
+      : 'No Longer Detected';
   }
 
   if (
     status === 'still_active'
   ) {
+    const category =
+      diagnosedCategory?.toLowerCase() ?? '';
+
+    if (
+      category.includes('crash') &&
+      proofShowsNoNewCrashes(proof) &&
+      proofShowsMemoryRisk(proof)
+    ) {
+      return 'No New Crashes, Risk Still High';
+    }
+
+    if (proofNeedsAttention(proof)) {
+      return 'Risk Still Active';
+    }
+
     return 'Still Active';
   }
 
@@ -133,6 +156,67 @@ function getResolutionLabel(
   }
 
   return 'Open';
+}
+
+function proofNeedsAttention(
+  proof?: SessionDetail['resolution_proof'],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const status =
+        item.status?.toLowerCase() ?? '';
+      return (
+        status.includes('attention') ||
+        status.includes('active') ||
+        status.includes('high') ||
+        status.includes('elevated') ||
+        status.includes('detected')
+      );
+    }),
+  );
+}
+
+function proofShowsNoNewCrashes(
+  proof?: SessionDetail['resolution_proof'],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const label =
+        item.label?.toLowerCase() ?? '';
+      const value =
+        item.value?.toLowerCase() ?? '';
+      const status =
+        item.status?.toLowerCase() ?? '';
+
+      return (
+        label.includes('crash') &&
+        (value.includes('0') ||
+          value.includes('none') ||
+          status.includes('normal'))
+      );
+    }),
+  );
+}
+
+function proofShowsMemoryRisk(
+  proof?: SessionDetail['resolution_proof'],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const label =
+        item.label?.toLowerCase() ?? '';
+      const status =
+        item.status?.toLowerCase() ?? '';
+
+      return (
+        label.includes('memory') &&
+        (status.includes('attention') ||
+          status.includes('active') ||
+          status.includes('high') ||
+          status.includes('elevated'))
+      );
+    }),
+  );
 }
 
 function getResolutionStyle(
@@ -173,6 +257,97 @@ function getResolutionPanelStyle(
   }
 
   return 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]';
+}
+
+function hasCompletedRemediationAction(
+  session: SessionDetail,
+) {
+  return Boolean(
+    session.remediation_history?.some(
+      (run) =>
+        run.attempts.length > 0 ||
+        [
+          'completed',
+          'resolved',
+          'succeeded',
+          'success',
+        ].includes(
+          run.status
+            ?.trim()
+            .toLowerCase(),
+        ),
+    ),
+  );
+}
+
+function getResolutionFallbackText(
+  status?: string,
+  hasCompletedAction = false,
+  proof?: SessionDetail['resolution_proof'],
+  diagnosedCategory?: string,
+) {
+  const normalized =
+    status?.trim().toLowerCase();
+
+  if (normalized === 'resolved') {
+    const category =
+      diagnosedCategory?.toLowerCase() ?? '';
+
+    if (
+      !hasCompletedAction &&
+      category.includes('crash') &&
+      proofShowsNoNewCrashes(proof)
+    ) {
+      return 'Fresh scan found no new crash events after this diagnosis. RigMD did not run a repair action for this result.';
+    }
+
+    return hasCompletedAction
+      ? 'The latest live check no longer detects the issue after a completed action.'
+      : 'The latest live check no longer detects this issue. RigMD did not run a repair action for this result.';
+  }
+
+  if (normalized === 'still_active') {
+    const category =
+      diagnosedCategory?.toLowerCase() ?? '';
+
+    if (
+      category.includes('crash') &&
+      proofShowsNoNewCrashes(proof) &&
+      proofShowsMemoryRisk(proof)
+    ) {
+      return 'No new crash events were found, but memory pressure is still high enough to increase the chance of freezes or crashes.';
+    }
+
+    return 'The latest live check still sees this issue. Review the suggested next steps or run a guided action.';
+  }
+
+  if (normalized === 'needs_recheck') {
+    return 'A safe action was recorded. Recheck the current status to confirm whether the issue improved.';
+  }
+
+  return 'Check the current status to compare this diagnosis with fresh Windows readings.';
+}
+
+function getResolutionButtonText(
+  status?: string,
+  checking = false,
+) {
+  const normalized =
+    status?.trim().toLowerCase();
+  const hasBeenChecked =
+    Boolean(normalized) &&
+    normalized !== 'open' &&
+    normalized !== 'not_checked';
+
+  if (checking) {
+    return hasBeenChecked
+      ? 'Rechecking...'
+      : 'Checking...';
+  }
+
+  return hasBeenChecked
+    ? 'Recheck Current Status'
+    : 'Check Current Status';
 }
 
 function getProofItemView(
@@ -458,7 +633,7 @@ export default function DiagnosticSessionDetailView({
         );
       } catch {
         setError(
-          'RigMD completed the safe action, but could not recheck whether the issue is fixed yet.',
+          'RigMD completed the safe action, but could not recheck the current issue status.',
         );
       }
     };
@@ -508,7 +683,7 @@ export default function DiagnosticSessionDetailView({
         );
       } catch {
         setError(
-          'Could not check whether this issue is fixed yet.',
+          'Could not recheck the current issue status.',
         );
       } finally {
         setChecking(false);
@@ -518,6 +693,12 @@ export default function DiagnosticSessionDetailView({
   const showSafeActions =
     session
       ? shouldShowSafeActions(
+          session,
+        )
+      : false;
+  const completedRemediationAction =
+    session
+      ? hasCompletedRemediationAction(
           session,
         )
       : false;
@@ -642,6 +823,9 @@ export default function DiagnosticSessionDetailView({
                       >
                         {getResolutionLabel(
                           session.resolution_status,
+                          completedRemediationAction,
+                          session.resolution_proof,
+                          session.diagnosed_category,
                         )}
                       </span>
                     )}
@@ -777,7 +961,12 @@ export default function DiagnosticSessionDetailView({
 
                       <p className="mt-2 text-sm leading-relaxed text-slate-400">
                         {session.resolution_summary ||
-                          'Use a safe action if needed, then check whether the live issue is fixed.'}
+                          getResolutionFallbackText(
+                            session.resolution_status,
+                            completedRemediationAction,
+                            session.resolution_proof,
+                            session.diagnosed_category,
+                          )}
                       </p>
                     </div>
 
@@ -803,9 +992,10 @@ export default function DiagnosticSessionDetailView({
                         }
                       />
 
-                      {checking
-                        ? 'Checking...'
-                        : 'Check if Fixed'}
+                      {getResolutionButtonText(
+                        session.resolution_status,
+                        checking,
+                      )}
                     </motion.button>
                   </div>
 
@@ -994,48 +1184,50 @@ export default function DiagnosticSessionDetailView({
                   </motion.section>
                 )}
 
-              <motion.section
-                variants={
-                  cardFadeUp
-                }
-                initial="hidden"
-                animate="visible"
-                transition={
-                  cardTransition
-                }
-                className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
-              >
-                <div className="flex items-start gap-3">
-                  <ShieldCheck
-                    size={20}
-                    className="mt-0.5 text-cyan-400"
-                  />
+              {!isNoActiveIssue(session.diagnosed_category) && (
+                <motion.section
+                  variants={
+                    cardFadeUp
+                  }
+                  initial="hidden"
+                  animate="visible"
+                  transition={
+                    cardTransition
+                  }
+                  className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck
+                      size={20}
+                      className="mt-0.5 text-cyan-400"
+                    />
 
-                  <div>
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                      Autonomous ReAct Diagnostic &amp; Remediation Agent
-                    </h3>
+                    <div>
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                        Autonomous ReAct Diagnostic &amp; Remediation Agent
+                      </h3>
 
-                    <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                      Run the multi-turn ReAct Agent to inspect live OS telemetry tools, review dry-run impact metrics, and approve safe actions.
-                    </p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                        Run the multi-turn ReAct Agent to inspect live OS telemetry tools, review dry-run impact metrics, and approve safe actions.
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-5 space-y-3">
-                  <AutonomyRemediationPanel
-                    diagnosedCategory={
-                      session.diagnosed_category
-                    }
-                    onExecutionComplete={
-                      handleAutonomyExecutionComplete
-                    }
-                    sessionId={
-                      sessionId
-                    }
-                  />
-                </div>
-              </motion.section>
+                  <div className="mt-5 space-y-3">
+                    <AutonomyRemediationPanel
+                      diagnosedCategory={
+                        session.diagnosed_category
+                      }
+                      onExecutionComplete={
+                        handleAutonomyExecutionComplete
+                      }
+                      sessionId={
+                        sessionId
+                      }
+                    />
+                  </div>
+                </motion.section>
+              )}
             </>
           ) : (
             <div className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-6 py-16 text-center">

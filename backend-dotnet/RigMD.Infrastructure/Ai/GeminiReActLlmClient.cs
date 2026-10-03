@@ -687,11 +687,15 @@ public class GeminiReActLlmClient : IReActLlmClient
             }
 
             bool isDisplayFocus = normalizedScenario == "no-display" || scopeText.Contains("display") || scopeText.Contains("graphics");
-            var toolName = isDisplayFocus && availableSet.Contains("restart_windows_explorer")
-                ? "restart_windows_explorer"
-                : availableSet.Contains("run_system_file_checker")
-                    ? "run_system_file_checker"
-                    : "restart_windows_explorer";
+            var toolName = !isDisplayFocus && availableSet.Contains("rescan_plug_and_play_devices")
+                ? "rescan_plug_and_play_devices"
+                : isDisplayFocus && availableSet.Contains("restart_windows_explorer")
+                    ? "restart_windows_explorer"
+                    : availableSet.Contains("rescan_plug_and_play_devices")
+                        ? "rescan_plug_and_play_devices"
+                        : availableSet.Contains("run_system_file_checker")
+                            ? "run_system_file_checker"
+                            : "restart_windows_explorer";
 
             return new ReActModelTurnDecision
             {
@@ -703,9 +707,11 @@ public class GeminiReActLlmClient : IReActLlmClient
                     ConfidenceLevel = "High",
                     RecommendedToolName = toolName,
                     RecommendedToolArgumentsJson = "{}",
-                    RemediationRationale = toolName == "restart_windows_explorer"
-                        ? "Restarting the Windows Explorer shell refreshes desktop window composition and taskbar/display hooks without closing user apps."
-                        : "Running Windows System File Checker (sfc /scannow) verifies and repairs protected OS and driver system binaries.",
+                    RemediationRationale = toolName == "rescan_plug_and_play_devices"
+                        ? "Rescanning connected devices asks Windows Plug and Play to rediscover USB/peripheral hardware without uninstalling drivers or deleting user files."
+                        : toolName == "restart_windows_explorer"
+                            ? "Restarting the Windows Explorer shell refreshes desktop window composition and taskbar/display hooks without closing user apps."
+                            : "Running Windows System File Checker (sfc /scannow) verifies and repairs protected OS and driver system binaries.",
                     EvidenceCitations = evidence
                 }
             };
@@ -724,7 +730,13 @@ public class GeminiReActLlmClient : IReActLlmClient
 
             var toolName = normalizedScenario == "blue-screen-crash" && availableSet.Contains("run_system_file_checker")
                 ? "run_system_file_checker"
-                : "clear_temp_files";
+                : combinedText.Contains("explorer") && availableSet.Contains("restart_windows_explorer")
+                    ? "restart_windows_explorer"
+                    : availableSet.Contains("run_system_file_checker")
+                        ? "run_system_file_checker"
+                        : availableSet.Contains("restart_windows_explorer")
+                            ? "restart_windows_explorer"
+                            : "clear_temp_files";
 
             return new ReActModelTurnDecision
             {
@@ -737,8 +749,12 @@ public class GeminiReActLlmClient : IReActLlmClient
                     RecommendedToolName = toolName,
                     RecommendedToolArgumentsJson = toolName == "clear_temp_files" ? "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}" : "{}",
                     RemediationRationale = toolName == "run_system_file_checker"
-                        ? "Running Windows System File Checker (sfc /scannow) verifies protected Windows kernel and driver files after stop errors."
-                        : "Clearing corrupted or locked temporary application state files in %TEMP% prevents repeat startup faults in crashing applications.",
+                        ? normalizedScenario == "blue-screen-crash"
+                            ? "Running Windows System File Checker (sfc /scannow) verifies protected Windows kernel and driver files after stop errors."
+                            : "Application crashes are usually app-specific. This Windows-safe action checks protected system files only; if the same app keeps failing, update or repair that app rather than changing unrelated caches."
+                        : toolName == "restart_windows_explorer"
+                            ? "Restarting Windows Explorer is only appropriate when the crash evidence involves Explorer, shell, or desktop UI instability."
+                            : "Clearing temporary files is a fallback maintenance action only when no app-specific Windows repair action is available.",
                     EvidenceCitations = evidence
                 }
             };

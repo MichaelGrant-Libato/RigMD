@@ -173,6 +173,23 @@ public class DeviceErrorDto
     public string Description { get; set; } = string.Empty;
 }
 
+public class WindowsEventSummaryDto
+{
+    public DateTimeOffset? TimeUtc { get; set; }
+    public string Level { get; set; } = string.Empty;
+    public string Provider { get; set; } = string.Empty;
+    public int EventId { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public class StabilityEventSnapshotDto
+{
+    public string WindowDescription { get; set; } = "Last 7 days";
+    public string? QueryWarning { get; set; }
+    public List<WindowsEventSummaryDto> ApplicationCrashEvents { get; set; } = new();
+    public List<WindowsEventSummaryDto> SystemCrashEvents { get; set; } = new();
+}
+
 public class HardwareProfileDto
 {
     public string DeviceName { get; set; } = string.Empty;
@@ -198,6 +215,7 @@ public class HardwareProfileDto
     public List<DiskVolumeDto> AllDisks { get; set; } = new();
     
     public ProcessInsightsDto ProcessInsights { get; set; } = new();
+    public StabilityEventSnapshotDto StabilityEvents { get; set; } = new();
     public HardwarePresenceProbeDto? Presence { get; set; }
 }
 

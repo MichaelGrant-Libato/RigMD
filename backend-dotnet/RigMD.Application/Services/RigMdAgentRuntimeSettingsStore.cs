@@ -17,10 +17,6 @@ public class RigMdAgentRuntimeSettings
     /// </summary>
     public bool AutoExecuteSafeTier1 { get; set; } = false;
 
-    /// <summary>
-    /// Optional user-supplied Gemini API key stored strictly in %LocalAppData%\RigMD\agent-settings.json.
-    /// </summary>
-    public string? GeminiApiKey { get; set; }
 }
 
 public static class RigMdAgentRuntimeSettingsStore
@@ -63,9 +59,7 @@ public static class RigMdAgentRuntimeSettingsStore
 
     public static RigMdAgentRuntimeSettings Save(
         string? preferredMode,
-        bool? autoExecuteSafeTier1,
-        string? geminiApiKey,
-        bool clearApiKey = false)
+        bool? autoExecuteSafeTier1)
     {
         lock (FileLock)
         {
@@ -82,15 +76,6 @@ public static class RigMdAgentRuntimeSettingsStore
             if (autoExecuteSafeTier1.HasValue)
             {
                 current.AutoExecuteSafeTier1 = autoExecuteSafeTier1.Value;
-            }
-
-            if (clearApiKey)
-            {
-                current.GeminiApiKey = null;
-            }
-            else if (!string.IsNullOrWhiteSpace(geminiApiKey))
-            {
-                current.GeminiApiKey = geminiApiKey.Trim();
             }
 
             try
@@ -118,11 +103,6 @@ public static class RigMdAgentRuntimeSettingsStore
             string.Equals(settings.PreferredMode, "local", StringComparison.OrdinalIgnoreCase))
         {
             return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(settings.GeminiApiKey))
-        {
-            return settings.GeminiApiKey.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(configuredApiKey))

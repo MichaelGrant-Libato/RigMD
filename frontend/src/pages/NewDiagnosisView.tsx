@@ -154,6 +154,10 @@ interface DiagnosisScenario {
 const AGENT_ID =
   import.meta.env.VITE_AGENT_ID;
 
+void Fan;
+void Usb;
+void Volume2;
+
 const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
   {
     id: 'full',
@@ -582,17 +586,43 @@ function getProofCardStyle(
 
 function getResolutionView(
   status?: string,
+  hasCompletedAction = false,
+  proof?: DiagnosticProof[],
+  diagnosedCategory?: string,
 ) {
   const value =
     (status ?? '').toLowerCase();
+  const category =
+    diagnosedCategory?.toLowerCase() ?? '';
+  const noNewCrashes =
+    proofShowsNoNewCrashes(proof);
+  const memoryRisk =
+    proofShowsMemoryRisk(proof);
 
   if (value === 'resolved') {
+    if (
+      !hasCompletedAction &&
+      category.includes('crash') &&
+      noNewCrashes
+    ) {
+      return {
+        label: 'No New Crashes Observed',
+        className:
+          'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
+        fallback:
+          'Fresh scan found no new crash events after this diagnosis. RigMD did not run a repair action for this result.',
+      };
+    }
+
     return {
-      label: 'Resolved',
+      label: hasCompletedAction
+        ? 'Resolved'
+        : 'No Longer Detected',
       className:
         'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
-      fallback:
-        'The issue is no longer detected in the latest live scan.',
+      fallback: hasCompletedAction
+        ? 'The issue is no longer detected after the completed action and latest live scan.'
+        : 'Fresh scan no longer detects this issue. RigMD did not run a repair action for this result.',
     };
   }
 
@@ -600,12 +630,23 @@ function getResolutionView(
     value === 'still_active' ||
     value === 'unresolved'
   ) {
+    const label =
+      category.includes('crash') &&
+      noNewCrashes &&
+      memoryRisk
+        ? 'No New Crashes, Risk Still High'
+        : proofNeedsAttention(proof)
+          ? 'Risk Still Active'
+          : 'Still Active';
+
     return {
-      label: 'Still Active',
+      label,
       className:
         'border-red-500/35 bg-red-500/[0.08] text-red-300',
-      fallback:
-        'The issue is still detected after checking the latest live scan.',
+      fallback: label ===
+        'No New Crashes, Risk Still High'
+        ? 'No new crash events were found, but another live risk signal still needs attention.'
+        : 'The issue is still detected after checking the latest live scan.',
     };
   }
 
@@ -615,7 +656,7 @@ function getResolutionView(
       className:
         'border-cyan-500/30 bg-cyan-500/5 text-cyan-300',
       fallback:
-        'A safe action was recorded. Check the latest live scan to confirm whether the issue improved.',
+        'A safe action was recorded. Recheck the current status to confirm whether the issue improved.',
     };
   }
 
@@ -624,8 +665,91 @@ function getResolutionView(
     className:
       'border-slate-500/30 bg-slate-500/5 text-slate-300',
     fallback:
-      'Use Check if Fixed after a safe action or manual inspection.',
+      'Check the current status to compare this diagnosis with fresh Windows readings.',
   };
+}
+
+function proofNeedsAttention(
+  proof?: DiagnosticProof[],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const status =
+        item.status?.toLowerCase() ?? '';
+      return (
+        status.includes('attention') ||
+        status.includes('active') ||
+        status.includes('high') ||
+        status.includes('elevated') ||
+        status.includes('detected')
+      );
+    }),
+  );
+}
+
+function proofShowsNoNewCrashes(
+  proof?: DiagnosticProof[],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const label =
+        item.label?.toLowerCase() ?? '';
+      const value =
+        item.value?.toLowerCase() ?? '';
+      const status =
+        item.status?.toLowerCase() ?? '';
+
+      return (
+        label.includes('crash') &&
+        (value.includes('0') ||
+          value.includes('none') ||
+          status.includes('normal'))
+      );
+    }),
+  );
+}
+
+function proofShowsMemoryRisk(
+  proof?: DiagnosticProof[],
+) {
+  return Boolean(
+    proof?.some((item) => {
+      const label =
+        item.label?.toLowerCase() ?? '';
+      const status =
+        item.status?.toLowerCase() ?? '';
+
+      return (
+        label.includes('memory') &&
+        (status.includes('attention') ||
+          status.includes('active') ||
+          status.includes('high') ||
+          status.includes('elevated'))
+      );
+    }),
+  );
+}
+
+function getResolutionButtonText(
+  status?: string,
+  checking = false,
+) {
+  const normalized =
+    status?.trim().toLowerCase();
+  const hasBeenChecked =
+    Boolean(normalized) &&
+    normalized !== 'open' &&
+    normalized !== 'not_checked';
+
+  if (checking) {
+    return hasBeenChecked
+      ? 'Rechecking...'
+      : 'Checking...';
+  }
+
+  return hasBeenChecked
+    ? 'Recheck Current Status'
+    : 'Check Current Status';
 }
 
 function getApiErrorMessage(
@@ -1388,7 +1512,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
         );
 
         setError(
-          'RigMD could not check whether this issue is fixed yet.',
+          'RigMD could not recheck the current issue status.',
         );
       } finally {
         setCheckingResolution(
@@ -2668,7 +2792,9 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     </div>
                   )}
 
-                {report.session_id && (
+                {!isNoActiveIssue(
+                  report,
+                ) && report.session_id && (
                     <AutonomyRemediationPanel
                       sessionId={
                         report.session_id
@@ -2704,6 +2830,12 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         const resolutionView =
                           getResolutionView(
                             report.resolution_status,
+                            Boolean(
+                              report.last_action_status ||
+                                report.last_action_summary,
+                            ),
+                            report.resolution_proof,
+                            report.diagnosed_category,
                           );
 
                         return (
@@ -2744,9 +2876,10 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                 }
                                 className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-4 py-2 text-xs font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {checkingResolution
-                                  ? 'Checking if fixed...'
-                                  : 'Check if Fixed'}
+                                {getResolutionButtonText(
+                                  report.resolution_status,
+                                  checkingResolution,
+                                )}
                               </motion.button>
                             </div>
 

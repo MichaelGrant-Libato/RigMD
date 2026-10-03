@@ -25,7 +25,8 @@ public class ResolutionService
         string diagnosedCategory,
         HardwareProfileDto hardware,
         string? scenarioId = null,
-        string? componentIds = null)
+        string? componentIds = null,
+        DateTimeOffset? sessionCreatedAt = null)
     {
         var normalizedScenario = DiagnosticScopeMapper.NormalizeScenarioId(scenarioId);
         if (!string.IsNullOrWhiteSpace(normalizedScenario))
@@ -37,18 +38,21 @@ public class ResolutionService
                 case "driver-error":
                 case "no-display":
                     return CheckDriverAndDisplayResolution(hardware);
+                case "network-problem":
                 case "network-issue":
                     return CheckNetworkResolution(hardware);
                 case "rapid-battery-drain":
                     return CheckBatteryResolution(hardware);
+                case "storage-problem":
                 case "disk-full":
                     return CheckStorageUsageResolution(
                         hardware,
                         storageMustBeBelow: ElevatedStorageThreshold,
                         issueName: "high storage use");
                 case "app-crashes":
+                    return CheckCrashStabilityResolution(hardware, sessionCreatedAt, CrashResolutionKind.Application);
                 case "blue-screen-crash":
-                    return CheckCrashStabilityResolution(hardware);
+                    return CheckCrashStabilityResolution(hardware, sessionCreatedAt, CrashResolutionKind.System);
                 case "slow-boot":
                     return CheckBootStartupResolution(hardware);
                 case "slow-system":
@@ -117,9 +121,14 @@ public class ResolutionService
             return CheckCpuResolution(hardware);
         }
 
-        if (category.Contains("application crash") || category.Contains("system crash") || category.Contains("stop error"))
+        if (category.Contains("application crash"))
         {
-            return CheckCrashStabilityResolution(hardware);
+            return CheckCrashStabilityResolution(hardware, sessionCreatedAt, CrashResolutionKind.Application);
+        }
+
+        if (category.Contains("system crash") || category.Contains("stop error"))
+        {
+            return CheckCrashStabilityResolution(hardware, sessionCreatedAt, CrashResolutionKind.System);
         }
 
         if (category.Contains("boot and startup") || category.Contains("boot or startup"))
@@ -250,11 +259,17 @@ public class ResolutionService
             ? $"{hardware.Gpu.Name} ({gpuTemp.Value:0.#}°C, Driver {hardware.Gpu.Driver})"
             : $"{hardware.Gpu.Name} (Driver {hardware.Gpu.Driver})";
 
+        var unresolvedSummary = !driversOk && !gpuTempOk
+            ? $"Fresh scan still shows {errCount} device error code(s) and elevated graphics adapter temperature."
+            : !driversOk
+                ? $"Fresh scan still shows {errCount} active Device Manager error(s). The graphics adapter is operating normally."
+                : "Fresh scan still shows elevated graphics adapter temperature. Device Manager is not reporting active driver errors.";
+
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan shows zero PnP device error codes and normal graphics adapter telemetry."
-                : $"Fresh scan still shows {errCount} device error code(s) or elevated graphics adapter temperature.",
+                ? "Fresh scan shows zero PnP device error codes and normal graphics adapter readings."
+                : unresolvedSummary,
             new object[]
             {
                 Proof(
@@ -292,8 +307,11 @@ public class ResolutionService
                 });
         }
 
+        var chargePercent = battery.ChargePercent > 0
+            ? battery.ChargePercent
+            : battery.EstimatedChargeRemaining;
         var cpuOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
-        var chargeOk = battery.ChargePercent > 15 || battery.IsCharging;
+        var chargeOk = chargePercent > 15 || battery.IsCharging;
         var resolved = cpuOk && chargeOk;
 
         return CreateResult(
@@ -305,7 +323,7 @@ public class ResolutionService
             {
                 Proof(
                     "Battery status",
-                    $"{battery.ChargePercent}% ({battery.StatusDescription})",
+                    $"{chargePercent}% ({battery.StatusDescription})",
                     chargeOk,
                     "Battery charge level and power state are healthy.",
                     "Battery charge is low while discharging."),
@@ -318,44 +336,96 @@ public class ResolutionService
             });
     }
 
+    private enum CrashResolutionKind
+    {
+        Application,
+        System
+    }
+
     private static ResolutionResultDto CheckCrashStabilityResolution(
-        HardwareProfileDto hardware)
+        HardwareProfileDto hardware,
+        DateTimeOffset? sessionCreatedAt,
+        CrashResolutionKind kind)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
         var ramUsage = hardware.Ram.UsagePercent;
         var errCount = hardware.DeviceErrors?.Count ?? 0;
 
+        var sinceUtc = (sessionCreatedAt ?? DateTimeOffset.UtcNow.AddHours(-24)).ToUniversalTime();
+        var stabilityEvents = hardware.StabilityEvents ?? new StabilityEventSnapshotDto();
+        var relevantEvents = kind == CrashResolutionKind.Application
+            ? stabilityEvents.ApplicationCrashEvents
+            : stabilityEvents.SystemCrashEvents;
+        var eventsSinceDiagnosis = relevantEvents
+            .Where(ev => !ev.TimeUtc.HasValue || ev.TimeUtc.Value.ToUniversalTime() >= sinceUtc)
+            .OrderByDescending(ev => ev.TimeUtc ?? DateTimeOffset.MinValue)
+            .ToList();
+
+        var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
+        var eventEvidenceOk = eventLogAvailable && eventsSinceDiagnosis.Count == 0;
         var cpuOk = cpuUsage < ElevatedCpuThreshold;
         var ramOk = ramUsage < ElevatedMemoryThreshold;
         var driversOk = errCount == 0;
-        var resolved = cpuOk && ramOk && driversOk;
+        var supportingSignalsOk = cpuOk && ramOk && driversOk;
+        var resolved = eventEvidenceOk && supportingSignalsOk;
 
-        return CreateResult(
-            resolved,
-            resolved
-                ? "Fresh scan shows stable processor, memory, and device driver status. No active issue is detected for this saved check."
-                : "Fresh scan still shows resource pressure or active device error codes that may contribute to instability.",
-            new object[]
-            {
+        var issueLabel = kind == CrashResolutionKind.Application
+            ? "application crash"
+            : "system crash";
+        var eventProofLabel = kind == CrashResolutionKind.Application
+            ? "Application crash events since diagnosis"
+            : "System crash events since diagnosis";
+
+        var proofItems = new List<object>
+        {
+            Proof(
+                eventProofLabel,
+                BuildEventProofValue(eventsSinceDiagnosis, eventLogAvailable, stabilityEvents.QueryWarning),
+                eventEvidenceOk,
+                $"No new {issueLabel} events were found in Windows Event Logs after this diagnosis.",
+                eventLogAvailable
+                    ? $"Windows Event Logs still show {eventsSinceDiagnosis.Count} {issueLabel} event(s) after this diagnosis."
+                    : "RigMD could not confirm Windows Event Log evidence, so the saved crash check should not be marked fixed yet."),
+            Proof(
+                "Memory pressure",
+                $"{ramUsage:0.##}%",
+                ramOk,
+                "Memory use is below RigMD's high-use range, so RAM pressure is not currently contributing to instability.",
+                "Memory use is still high enough to contribute to app instability or freezes.")
+        };
+
+        if (kind == CrashResolutionKind.System || errCount > 0)
+        {
+            proofItems.Add(
+                Proof(
+                    "Device driver warnings",
+                    errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
+                    driversOk,
+                    "Device Manager is not reporting active driver error codes.",
+                    "One or more devices still report an active driver error code."));
+        }
+
+        if (kind == CrashResolutionKind.System || !cpuOk)
+        {
+            proofItems.Add(
                 Proof(
                     "Processor activity",
                     $"{cpuUsage:0.##}%",
                     cpuOk,
                     "Processor activity is within normal operating limits.",
-                    "Processor activity is still elevated."),
-                Proof(
-                    "Memory use",
-                    $"{ramUsage:0.##}%",
-                    ramOk,
-                    "Memory use is within normal operating limits.",
-                    "Memory use is still above RigMD's high-use threshold."),
-                Proof(
-                    "Device Manager Errors",
-                    errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
-                    driversOk,
-                    "All hardware drivers report healthy status (ErrorCode = 0).",
-                    "One or more devices still report an active error code.")
-            });
+                    "Processor activity is still elevated and may contribute to instability."));
+        }
+
+        return CreateResult(
+            resolved,
+            resolved
+                ? $"Fresh scan found no new {issueLabel} events after this diagnosis, and supporting telemetry is stable."
+                : BuildCrashResolutionSummary(
+                    issueLabel,
+                    eventLogAvailable,
+                    eventsSinceDiagnosis.Count,
+                    supportingSignalsOk),
+            proofItems.ToArray());
     }
 
     private static ResolutionResultDto CheckBootStartupResolution(
@@ -446,7 +516,10 @@ public class ResolutionService
         var tempC = hardware.Cpu.TemperatureCelsius;
         var tempOk = !tempC.HasValue || tempC.Value < ElevatedTempThresholdCelsius;
         var throttleOk = !hardware.Cpu.IsThermallyThrottling;
-        var resolved = tempOk && throttleOk;
+        var cpuLoadOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
+        var gpuTemp = hardware.Gpu.TemperatureCelsius;
+        var gpuTempOk = !gpuTemp.HasValue || gpuTemp.Value < ElevatedTempThresholdCelsius;
+        var resolved = tempOk && throttleOk && cpuLoadOk && gpuTempOk;
 
         var tempDisplay = tempC.HasValue
             ? $"{tempC.Value:0.#}°C ({hardware.Cpu.UsagePercent:0.#}% load)"
@@ -457,7 +530,7 @@ public class ResolutionService
             resolved
                 ? "Fresh scan shows processor temperature and throttling within normal limits. No active issue is detected for this saved check."
                 : "Fresh scan still shows elevated processor temperature or thermal throttling behavior.",
-            new object[]
+            new List<object>
             {
                 Proof(
                     "Processor temperature",
@@ -470,8 +543,26 @@ public class ResolutionService
                     hardware.Cpu.IsThermallyThrottling ? "Still observed" : "Not observed",
                     throttleOk,
                     "RigMD no longer sees the processor slowing itself down because of heat.",
-                    "RigMD still sees signs that the processor may be slowing itself down because of heat.")
-            });
+                    "RigMD still sees signs that the processor may be slowing itself down because of heat."),
+                Proof(
+                    "Processor activity",
+                    $"{hardware.Cpu.UsagePercent:0.##}%",
+                    cpuLoadOk,
+                    "Processor activity is low enough that it is not currently creating thermal pressure.",
+                    "Processor activity is still high enough to keep heat or fan noise active.")
+            }
+            .Concat(gpuTemp.HasValue
+                ? new object[]
+                {
+                    Proof(
+                        "Graphics temperature",
+                        $"{gpuTemp.Value:0.#}°C",
+                        gpuTempOk,
+                        "Graphics temperature is within safe operating limits.",
+                        "Graphics temperature is still elevated and may affect fan noise.")
+                }
+                : Array.Empty<object>())
+            .ToArray());
     }
 
     private static ResolutionResultDto CheckCpuResolution(
@@ -658,6 +749,7 @@ public class ResolutionService
         var primaryDisk = GetPrimaryDisk(hardware);
         var usagePercent = primaryDisk?.UsagePercent ?? 0;
         var resolved = primaryDisk != null && usagePercent < storageMustBeBelow;
+        var smartOk = !hardware.StorageDrives.Any(drive => drive.IsFailingSmart);
 
         return CreateResult(
             resolved,
@@ -675,7 +767,13 @@ public class ResolutionService
                     "Storage use is back below RigMD's high-use range.",
                     primaryDisk == null
                         ? "RigMD could not read the main storage usage yet."
-                        : "Storage use is still above RigMD's high-use range.")
+                        : "Storage use is still above RigMD's high-use range."),
+                Proof(
+                    "Storage health",
+                    smartOk ? "S.M.A.R.T. healthy" : "S.M.A.R.T. warning active",
+                    smartOk,
+                    "Drive health telemetry is not reporting a storage-health warning.",
+                    "Drive health telemetry is still reporting a storage-health warning.")
             });
     }
 
@@ -683,19 +781,25 @@ public class ResolutionService
         HardwareProfileDto hardware)
     {
         var network = hardware.Network;
+        var pingOk = !network.PingLatencyMs.HasValue || network.PingLatencyMs.Value < 120;
+        var lossOk = !network.PacketLossPercent.HasValue || network.PacketLossPercent.Value < 5;
+        var signalOk = !network.IsWifi || network.WifiSignalStrength <= 0 || network.WifiSignalStrength > 45;
         var resolved =
             network.HasActiveAdapter &&
             network.HasIpv4Address &&
             network.HasDefaultGateway &&
             network.HasDnsServers &&
-            network.DnsResolutionSucceeded;
+            network.DnsResolutionSucceeded &&
+            pingOk &&
+            lossOk &&
+            signalOk;
 
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan shows the internet name check is working again. No active issue is detected for this saved check."
-                : "Fresh scan still cannot confirm that the internet name check is working normally.",
-            new object[]
+                ? "Fresh scan shows the internet name check is working again, with network adapter, latency, and packet loss within normal limits. No active issue is detected for this saved check."
+                : "Fresh scan still shows network evidence that may affect connectivity.",
+            new List<object>
             {
                 Proof(
                     "Network adapter",
@@ -708,8 +812,32 @@ public class ResolutionService
                     network.DnsResolutionSucceeded ? "Succeeded" : "Failed",
                     network.DnsResolutionSucceeded,
                     "Website names can be turned into reachable addresses again.",
-                    "Website names still cannot be turned into reachable addresses.")
-            });
+                    "Website names still cannot be turned into reachable addresses."),
+                Proof(
+                    "Latency",
+                    network.PingLatencyMs.HasValue ? $"{network.PingLatencyMs.Value} ms" : "Not available",
+                    pingOk,
+                    "Network latency is within RigMD's normal range.",
+                    "Network latency is still high enough to affect responsiveness."),
+                Proof(
+                    "Packet loss",
+                    network.PacketLossPercent.HasValue ? $"{network.PacketLossPercent.Value:0.##}%" : "Not available",
+                    lossOk,
+                    "Packet loss is within RigMD's normal range.",
+                    "Packet loss is still high enough to cause connection drops.")
+            }
+            .Concat(network.IsWifi
+                ? new object[]
+                {
+                    Proof(
+                        "Wi-Fi signal",
+                        network.WifiSignalStrength > 0 ? $"{network.WifiSignalStrength}%" : "Not available",
+                        signalOk,
+                        "Wi-Fi signal strength is within a usable range.",
+                        "Wi-Fi signal strength is still weak and may cause intermittent issues.")
+                }
+                : Array.Empty<object>())
+            .ToArray());
     }
 
     private static DiskVolumeDto? GetPrimaryDisk(HardwareProfileDto hardware)
@@ -719,6 +847,52 @@ public class ResolutionService
                 disk.Drive.Equals("C:\\", StringComparison.OrdinalIgnoreCase) ||
                 disk.Mountpoint.Equals("C:\\", StringComparison.OrdinalIgnoreCase))
             ?? hardware.AllDisks?.FirstOrDefault();
+    }
+
+    private static string BuildEventProofValue(
+        IReadOnlyList<WindowsEventSummaryDto> eventsSinceDiagnosis,
+        bool eventLogAvailable,
+        string? queryWarning)
+    {
+        if (!eventLogAvailable)
+        {
+            return string.IsNullOrWhiteSpace(queryWarning)
+                ? "Event log unavailable"
+                : $"Event log unavailable: {queryWarning}";
+        }
+
+        if (eventsSinceDiagnosis.Count == 0)
+        {
+            return "0 found";
+        }
+
+        var latest = eventsSinceDiagnosis[0];
+        var when = latest.TimeUtc.HasValue
+            ? latest.TimeUtc.Value.ToLocalTime().ToString("MMM dd, h:mm tt")
+            : "time unknown";
+
+        return $"{eventsSinceDiagnosis.Count} found; latest {latest.Provider} {latest.EventId} at {when}";
+    }
+
+    private static string BuildCrashResolutionSummary(
+        string issueLabel,
+        bool eventLogAvailable,
+        int eventCount,
+        bool supportingSignalsOk)
+    {
+        if (!eventLogAvailable)
+        {
+            return $"Fresh scan could not confirm Windows Event Log evidence for the saved {issueLabel} check.";
+        }
+
+        if (eventCount > 0)
+        {
+            return $"Fresh scan found {eventCount} new {issueLabel} event(s) after this diagnosis.";
+        }
+
+        return supportingSignalsOk
+            ? $"Fresh scan found no new {issueLabel} events after this diagnosis."
+            : $"Fresh scan found no new {issueLabel} events after this diagnosis, but supporting risk signals still need attention.";
     }
 
     private static ResolutionResultDto CreateResult(

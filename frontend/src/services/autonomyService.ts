@@ -271,7 +271,6 @@ export async function closeSelectedApp({
 export interface AgentSettingsResponse {
   preferredMode: 'auto' | 'local-only' | string;
   hasGeminiApiKey: boolean;
-  maskedGeminiApiKey: string;
   activeEngine: string;
   registeredToolCount: number;
   settingsFilePath?: string;
@@ -279,8 +278,6 @@ export interface AgentSettingsResponse {
 
 export interface UpdateAgentSettingsPayload {
   preferredMode?: 'auto' | 'local-only';
-  geminiApiKey?: string;
-  clearGeminiApiKey?: boolean;
 }
 
 export async function getAgentSettings() {

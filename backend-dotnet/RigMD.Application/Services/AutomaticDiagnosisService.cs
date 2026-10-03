@@ -389,7 +389,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             ActionCategory = "Monitor",
             ConfidenceLabel = "High",
             Explanation = fullPrimary,
-            RecommendedNextStep = "No immediate fix is needed. You can run the guided inspection below for a deeper check or routine cleanup.",
+            RecommendedNextStep = "No immediate fix is needed. Continue using the device normally, and run another check if symptoms appear again.",
             Proof = proof,
             VerificationTarget = new AutomaticVerificationTarget
             {
@@ -515,7 +515,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             ActionCategory = "Monitor",
             ConfidenceLabel = "High",
             Explanation = primaryResult,
-            RecommendedNextStep = "No immediate fix is required for the selected part(s). You can run the guided inspection below for a deeper check.",
+            RecommendedNextStep = "No immediate fix is required for the selected part(s). Run another check if symptoms appear again.",
             Proof = proof,
             VerificationTarget = new AutomaticVerificationTarget
             {
@@ -538,8 +538,40 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         bool hasDeviceErrors,
         List<AutomaticDiagnosisProof> proof)
     {
+        var thermalIssue = hw.Cpu.IsThermallyThrottling ||
+            (cpuTemp.HasValue && cpuTemp.Value >= 75) ||
+            cpuUsage >= 75;
+        var networkIssue = hw.Network == null ||
+            !hw.Network.HasActiveAdapter ||
+            !hw.Network.HasIpv4Address ||
+            !hw.Network.HasDefaultGateway ||
+            !hw.Network.HasDnsServers ||
+            !hw.Network.DnsResolutionSucceeded ||
+            (hw.Network.PacketLossPercent ?? 0) >= 5 ||
+            (hw.Network.PingLatencyMs ?? 0) >= 120 ||
+            (hw.Network.IsWifi && hw.Network.WifiSignalStrength is > 0 and <= 45);
+        var storageIssue = smartFailing || maxDiskUsage >= 80;
+        var responsivenessIssue = cpuUsage >= 65 || ramUsage >= 75 || maxDiskUsage >= 80;
+        var startupIssue = maxDiskUsage >= 80 || cpuUsage >= 70;
+        var batteryIssue = hw.Battery?.HasBattery == true &&
+            !hw.Battery.IsCharging &&
+            hw.Battery.EstimatedChargeRemaining <= 20;
+        var stabilityEvents = hw.StabilityEvents ?? new StabilityEventSnapshotDto();
+        var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
+        var appCrashEventCount = stabilityEvents.ApplicationCrashEvents?.Count ?? 0;
+        var systemCrashEventCount = stabilityEvents.SystemCrashEvents?.Count ?? 0;
+        var appCrashSupportingRisk = cpuUsage >= 80 || ramUsage >= 80 || hasDeviceErrors;
+        var systemCrashSupportingRisk = cpuUsage >= 85 || hasDeviceErrors;
+
         return scenarioId switch
         {
+            "slow-system" or "stuttering-freezing" when !responsivenessIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active performance bottleneck detected. Live scan recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and Storage at {maxDiskUsage:0.#}%.",
+                "Task Manager - Processes",
+                "task_manager",
+                "Inspect active CPU, memory, and storage workload if the symptom happens again.",
+                proof),
             "slow-system" or "stuttering-freezing" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -558,6 +590,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect active background processes and system resource usage."
                 }
             },
+            "slow-boot" when !startupIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active boot-resource issue detected. Startup check recorded primary storage at {maxDiskUsage:0.#}% and CPU baseline at {cpuUsage:0.#}%.",
+                "Windows Startup Apps",
+                "startup_apps",
+                "Review applications configured to launch at Windows sign-in if slow boot happens again.",
+                proof),
             "slow-boot" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -576,16 +615,35 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Review applications configured to launch at Windows sign-in."
                 }
             },
+            "app-crashes" when eventLogAvailable && appCrashEventCount == 0 && !appCrashSupportingRisk => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active application crash issue detected. Windows Event Logs show 0 recent application crash event(s), CPU is {cpuUsage:0.#}%, and RAM is {ramUsage:0.#}%.",
+                "Windows Reliability Monitor",
+                "reliability_monitor",
+                "Review Reliability Monitor again if an app closes unexpectedly.",
+                proof),
             "app-crashes" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Application stability check recorded CPU at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermals normal")}) and {hw.DeviceErrors?.Count ?? 0} device warning(s).",
-                DiagnosedCategory = "Application crash history requires review",
+                PrimaryResult = appCrashEventCount > 0
+                    ? $"Windows Event Logs show {appCrashEventCount} recent application crash event(s). CPU is {cpuUsage:0.#}% and RAM is {ramUsage:0.#}%."
+                    : eventLogAvailable
+                        ? $"No recent application crash event is visible, but supporting risk signals are still high: CPU {cpuUsage:0.#}%, RAM {ramUsage:0.#}%, Device Manager warnings {(hw.DeviceErrors?.Count ?? 0)}."
+                        : $"RigMD could not verify recent application crash events from Windows Event Logs. CPU is {cpuUsage:0.#}% and RAM is {ramUsage:0.#}%.",
+                DiagnosedCategory = appCrashEventCount > 0 || !eventLogAvailable
+                    ? "Application crash history requires review"
+                    : "Application stability risk needs review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = hasDeviceErrors || cpuUsage >= 80 ? "High" : "Medium",
-                Explanation = $"Application stability check recorded CPU load at {cpuUsage:0.#}% on {hw.OsVersion}. Reviewing recent application fault entries in Windows Reliability Monitor and Event Logs helps pinpoint which program failed.",
-                RecommendedNextStep = "Review recent application crash events in Windows Reliability Monitor or run the guided inspection below to check Windows error logs.",
+                ConfidenceLabel = appCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= 80 || ramUsage >= 85 ? "High" : "Medium",
+                Explanation = appCrashEventCount > 0
+                    ? $"Windows Event Logs show {appCrashEventCount} recent application crash event(s). Reliability Monitor can show which app failed and when."
+                    : eventLogAvailable
+                        ? $"Windows Event Logs do not show a new application crash right now, but live CPU, memory, or driver signals may still contribute to app freezes or forced closes."
+                        : $"RigMD could not confirm Windows Event Log crash evidence right now, so the application stability check remains in review instead of being marked clear.",
+                RecommendedNextStep = appCrashEventCount > 0
+                    ? "Open Windows Reliability Monitor to identify the failing app, or run the guided inspection below to check Windows error logs."
+                    : "Reduce the highlighted risk signal or run the guided inspection below, then recheck current status.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -594,16 +652,29 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Review recent application crashes and fault events."
                 }
             },
+            "blue-screen-crash" when eventLogAvailable && systemCrashEventCount == 0 && !systemCrashSupportingRisk => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active Windows stop-error issue detected. Windows Event Logs show 0 recent system crash event(s), CPU is {cpuUsage:0.#}%, and Device Manager reports {(hw.DeviceErrors?.Count ?? 0)} active device error(s).",
+                "Windows Reliability Monitor",
+                "reliability_monitor",
+                "Review Reliability Monitor again if the PC restarts unexpectedly or shows a blue screen.",
+                proof),
             "blue-screen-crash" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"System crash check recorded CPU at {cpuUsage:0.#}%, GPU ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}), and {hw.DeviceErrors?.Count ?? 0} active device error(s).",
+                PrimaryResult = systemCrashEventCount > 0
+                    ? $"Windows Event Logs show {systemCrashEventCount} recent system crash or restart event(s). CPU is {cpuUsage:0.#}% and Device Manager reports {(hw.DeviceErrors?.Count ?? 0)} active device error(s)."
+                    : $"System crash check needs review because supporting risk signals remain active: CPU {cpuUsage:0.#}% and Device Manager warnings {(hw.DeviceErrors?.Count ?? 0)}.",
                 DiagnosedCategory = "System crash or stop error requires review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = hasDeviceErrors || cpuUsage >= 85 ? "High" : "Medium",
-                Explanation = $"System crash check recorded {hw.DeviceErrors?.Count ?? 0} Device Manager error(s) and graphics driver {hw.Gpu.Driver} on {hw.Gpu.Name}. Checking Windows stop error logs and system file integrity is recommended.",
-                RecommendedNextStep = "Check Windows Reliability Monitor for stop errors or run the guided inspection below to check crash logs and system files.",
+                ConfidenceLabel = systemCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= 85 ? "High" : "Medium",
+                Explanation = systemCrashEventCount > 0
+                    ? $"Windows Event Logs show {systemCrashEventCount} recent system crash or unexpected restart event(s). Checking stop-error logs and system file integrity is recommended."
+                    : $"No recent stop-error event is visible, but live driver or processor signals still need review before the system crash scenario is considered clear.",
+                RecommendedNextStep = systemCrashEventCount > 0
+                    ? "Check Windows Reliability Monitor for stop errors or run the guided inspection below to check crash logs and system files."
+                    : "Review the highlighted risk signal, then recheck current status.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -612,6 +683,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Review Windows stop error and unexpected restart events."
                 }
             },
+            "driver-error" when !hasDeviceErrors => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active driver conflict detected. Device Manager reports 0 active device error(s) for the current hardware scan, including {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}).",
+                "Windows Device Manager",
+                "device_manager",
+                "Check driver status again if a device disappears, fails, or shows a warning icon.",
+                proof),
             "driver-error" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -630,6 +708,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect hardware drivers and device status."
                 }
             },
+            "no-display" when !hasDeviceErrors && hw.ConnectedDisplays > 0 => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active display-driver issue detected. Display check completed for {hw.Gpu.Name} across {hw.ConnectedDisplays} connected display(s).",
+                "Device Manager - Display Adapters",
+                "device_manager",
+                "Check display adapter status again if flicker, black-screen behavior, or display instability returns.",
+                proof),
             "no-display" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -648,6 +733,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect display adapter driver status."
                 }
             },
+            "overheating-loud-fan" when !thermalIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active overheating detected. Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "no thermal throttling reported")}) under power plan '{hw.ActivePowerPlan}'.",
+                "Task Manager - Performance",
+                "task_manager",
+                "Check fan airflow and vents if heat or fan noise returns, or run another thermal check while the issue is happening.",
+                proof),
             "overheating-loud-fan" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -666,6 +758,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect processor utilization and thermal load."
                 }
             },
+            "network-problem" or "network-issue" when !networkIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active network issue detected. Network check recorded ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
+                "Windows Network Diagnostics",
+                "reliability_monitor",
+                "Run another network check if connection drops, DNS failures, or high latency happen again.",
+                proof),
             "network-problem" or "network-issue" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -684,6 +783,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect network adapter status and DNS cache."
                 }
             },
+            "storage-problem" or "disk-full" when !storageIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active storage issue detected. Storage check recorded primary volume usage at {maxDiskUsage:0.#}% ({(smartFailing ? "S.M.A.R.T. warning active" : "S.M.A.R.T. healthy")}) across {hw.StorageDrives.Count} drive(s).",
+                "Windows Storage Settings",
+                "storage_settings",
+                "Review storage again if save/load behavior slows down or free space drops below the warning threshold.",
+                proof),
             "storage-problem" or "disk-full" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -704,6 +810,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect disk space and temporary files."
                 }
             },
+            "rapid-battery-drain" when hw.Battery?.HasBattery == true && !batteryIssue => BuildScenarioHealthyDiagnosis(
+                targetScopeLabels,
+                $"No active battery or power issue detected. Battery check recorded {hw.Battery.EstimatedChargeRemaining}% charge ({hw.Battery.StatusDescription}) under power plan '{hw.ActivePowerPlan}'.",
+                "Task Manager - Power Usage",
+                "task_manager",
+                "Review battery and power usage again if drain happens while unplugged.",
+                proof),
             "rapid-battery-drain" => new AutomaticDiagnosisResult
             {
                 ComponentStatus = hw.Battery?.HasBattery == true ? ComponentStatus.Present : ComponentStatus.NotPresent,
@@ -743,6 +856,34 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Label = "Task Manager",
                     Description = "Inspect live system resources."
                 }
+            }
+        };
+    }
+
+    private static AutomaticDiagnosisResult BuildScenarioHealthyDiagnosis(
+        IReadOnlyList<string> targetScopeLabels,
+        string primaryResult,
+        string verificationLabel,
+        string verificationTarget,
+        string verificationDescription,
+        List<AutomaticDiagnosisProof> proof)
+    {
+        return new AutomaticDiagnosisResult
+        {
+            ComponentStatus = ComponentStatus.Present,
+            TargetScope = targetScopeLabels,
+            PrimaryResult = primaryResult,
+            DiagnosedCategory = "No Active Issue Detected",
+            ActionCategory = "Monitor",
+            ConfidenceLabel = "High",
+            Explanation = primaryResult,
+            RecommendedNextStep = "No immediate fix is required for the selected area. " + verificationDescription,
+            Proof = proof,
+            VerificationTarget = new AutomaticVerificationTarget
+            {
+                Target = verificationTarget,
+                Label = verificationLabel,
+                Description = verificationDescription
             }
         };
     }
@@ -808,13 +949,23 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (Include("gpu", "display", "drivers", "peripherals", "audio", "thermal"))
         {
+            var driverErrorInScope = activeScopeKeys == null ||
+                activeScopeKeys.Contains("drivers") ||
+                activeScopeKeys.Contains("display") ||
+                activeScopeKeys.Contains("peripherals") ||
+                activeScopeKeys.Contains("audio") ||
+                (mode == "component" && selectedComponents.Contains("gpu"));
             var gpuTempText = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C" : string.Empty;
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = "Graphics & Drivers",
-                Value = hasDeviceErrors ? $"{hw.DeviceErrors.Count} PnP Device Error(s)" : $"{hw.Gpu.Name}{gpuTempText} (OK)",
-                Status = hasDeviceErrors ? "high" : "normal",
-                Meaning = $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
+                Label = driverErrorInScope ? "Graphics & Drivers" : "Graphics Thermal Context",
+                Value = driverErrorInScope && hasDeviceErrors
+                    ? $"{hw.DeviceErrors.Count} PnP Device Error(s)"
+                    : $"{hw.Gpu.Name}{gpuTempText} (OK)",
+                Status = driverErrorInScope && hasDeviceErrors ? "high" : "normal",
+                Meaning = driverErrorInScope
+                    ? $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
+                    : $"GPU context is shown only for thermal correlation; driver warnings are handled under Driver or Display checks."
             });
         }
 
@@ -857,6 +1008,31 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             });
         }
 
+        if (mode == "scenario" && scenarioId is "app-crashes" or "blue-screen-crash")
+        {
+            var stabilityEvents = hw.StabilityEvents ?? new StabilityEventSnapshotDto();
+            var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
+            var relevantEvents = scenarioId == "app-crashes"
+                ? stabilityEvents.ApplicationCrashEvents
+                : stabilityEvents.SystemCrashEvents;
+            var eventCount = relevantEvents?.Count ?? 0;
+            var label = scenarioId == "app-crashes"
+                ? "Application crash events"
+                : "System crash events";
+
+            proof.Add(new AutomaticDiagnosisProof
+            {
+                Label = label,
+                Value = eventLogAvailable
+                    ? $"{eventCount} found"
+                    : "Could not verify",
+                Status = !eventLogAvailable ? "elevated" : eventCount > 0 ? "high" : "normal",
+                Meaning = eventLogAvailable
+                    ? $"Windows Event Logs were checked for recent {label.ToLowerInvariant()}."
+                    : stabilityEvents.QueryWarning ?? "Windows Event Logs could not be checked."
+            });
+        }
+
         return proof;
     }
 
@@ -880,7 +1056,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 "storage-problem" or "disk-full" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage" },
                 "rapid-battery-drain" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "battery", "cpu", "os" },
                 "slow-boot" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "storage", "startup", "os" },
-                "app-crashes" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "os" },
+                "app-crashes" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "os" },
                 "blue-screen-crash" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "gpu", "drivers", "os" },
                 "slow-system" or "stuttering-freezing" => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cpu", "memory", "storage" },
                 _ => null

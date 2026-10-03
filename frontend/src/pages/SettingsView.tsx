@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   Bot,
   CheckCircle2,
-  KeyRound,
   RefreshCw,
   Save,
   ShieldCheck,
-  Trash2,
   Wrench,
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
@@ -23,7 +21,6 @@ export default function SettingsView() {
   const [settings, setSettings] = useState<AgentSettingsResponse | null>(null);
   const [tools, setTools] = useState<RegisteredAgentTool[]>([]);
   const [preferredMode, setPreferredMode] = useState<'auto' | 'local-only'>('auto');
-  const [apiKeyInput, setApiKeyInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -53,7 +50,7 @@ export default function SettingsView() {
     void loadData();
   }, []);
 
-  const handleSaveSettings = async (clearKey = false) => {
+  const handleSaveSettings = async () => {
     setIsSaving(true);
     setStatusMessage(null);
     setErrorMessage(null);
@@ -61,22 +58,13 @@ export default function SettingsView() {
     try {
       const updated = await updateAgentSettings({
         preferredMode,
-        geminiApiKey: clearKey ? undefined : apiKeyInput.trim() || undefined,
-        clearGeminiApiKey: clearKey,
       });
 
       setSettings(updated);
       setPreferredMode(
         updated.preferredMode === 'local-only' ? 'local-only' : 'auto',
       );
-      if (clearKey || apiKeyInput.trim()) {
-        setApiKeyInput('');
-      }
-      setStatusMessage(
-        clearKey
-          ? 'Local Gemini API key cleared. Using offline deterministic diagnostic engine.'
-          : 'Settings saved to %LocalAppData%\\RigMD\\agent-settings.json.',
-      );
+      setStatusMessage('Settings saved on this PC.');
     } catch (err) {
       setErrorMessage(getBackendErrorMessage(err));
     } finally {
@@ -88,7 +76,7 @@ export default function SettingsView() {
     <>
       <TopHeader
         title="Settings"
-        subtitle="Manage local diagnostic engine preferences and optional AI explanation credentials"
+        subtitle="Choose whether RigMD may use Gemini for explanations and guided-action reasoning"
       />
 
       <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
@@ -108,7 +96,7 @@ export default function SettingsView() {
                     </div>
                     <div>
                       <h2 className="text-base font-bold text-white">
-                        Diagnostic Reasoning &amp; Explanation Engine
+                        AI Explanation &amp; Guided Action Mode
                       </h2>
                       <p className="text-xs text-cyan-300">
                         {settings?.activeEngine ||
@@ -121,13 +109,12 @@ export default function SettingsView() {
                     <span className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 font-semibold text-emerald-200">
                       {settings?.registeredToolCount ?? tools.length} Registered Diagnostic &amp; Maintenance Tools
                     </span>
-                    {settings?.settingsFilePath && (
-                      <span className="rounded-lg border border-white/10 bg-black/30 px-2.5 py-1 font-mono text-[11px] text-slate-400">
-                        {settings.settingsFilePath}
-                      </span>
-                    )}
                   </div>
                 </div>
+
+                <p className="mt-4 text-sm leading-relaxed text-slate-300">
+                  RigMD still reads device data from Windows on this PC. This setting only controls whether Gemini may help explain the result and plan a safe guided action when an issue needs review.
+                </p>
 
                 {/* Engine Mode Selection */}
                 <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -142,14 +129,14 @@ export default function SettingsView() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold">
-                        Automatic (Cloud AI + Offline Fallback)
+                        Use Gemini when available
                       </span>
                       {preferredMode === 'auto' && (
                         <CheckCircle2 size={16} className="text-cyan-300" />
                       )}
                     </div>
                     <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                      Uses Google Gemini when a local API key is configured, and automatically falls back to the 100% offline deterministic engine when offline or rate-limited.
+                      Uses RigMD's server-managed Gemini key for clearer explanations and guided-action planning. If Gemini is unavailable, offline, or rate-limited, RigMD falls back to the local engine.
                     </p>
                   </button>
 
@@ -164,69 +151,49 @@ export default function SettingsView() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold">
-                        100% Offline Local Deterministic Mode
+                        Local-only mode
                       </span>
                       {preferredMode === 'local-only' && (
                         <CheckCircle2 size={16} className="text-cyan-300" />
                       )}
                     </div>
                     <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                      Strictly offline execution. Never sends telemetry to any external service; runs all diagnostic, history, and controlled maintenance tools locally on this PC.
+                      Keeps explanations, diagnosis decisions, history checks, and controlled maintenance planning on this PC only.
                     </p>
                   </button>
                 </div>
 
-                {/* Optional Local Gemini API Key */}
                 <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-2">
-                      <KeyRound size={16} className="text-cyan-300" />
+                      <ShieldCheck size={16} className="text-cyan-300" />
                       <span className="text-sm font-bold text-white">
-                        Optional Local Gemini API Key (Stored Only on This PC)
+                        Gemini Access
                       </span>
                     </div>
-                    {settings?.hasGeminiApiKey && (
-                      <span className="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 font-mono text-xs text-emerald-200">
-                        Configured: {settings.maskedGeminiApiKey}
-                      </span>
-                    )}
+
+                    <span
+                      className={`w-fit rounded-md border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${
+                        settings?.hasGeminiApiKey
+                          ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+                          : 'border-slate-500/30 bg-slate-500/10 text-slate-300'
+                      }`}
+                    >
+                      {settings?.hasGeminiApiKey
+                        ? 'Configured by app'
+                        : 'Offline fallback only'}
+                    </span>
                   </div>
 
                   <p className="mt-1 text-xs text-slate-400">
-                    Saved strictly to <code className="text-slate-300">%LocalAppData%\RigMD\agent-settings.json</code>. Never bundled in installers or committed to Git.
+                    Users do not enter API keys here. Gemini credentials are configured by the deployment/server environment, and RigMD automatically falls back to local mode when Gemini is unavailable.
                   </p>
-
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-                    <input
-                      type="password"
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder={
-                        settings?.hasGeminiApiKey
-                          ? 'Enter a new Gemini API key to replace existing key...'
-                          : 'AIzaSy... (Leave blank to use 100% free offline mode)'
-                      }
-                      className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                    />
-
-                    {settings?.hasGeminiApiKey && (
-                      <button
-                        type="button"
-                        onClick={() => handleSaveSettings(true)}
-                        disabled={isSaving}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-400/40 bg-red-950/30 px-3.5 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-950/50 disabled:opacity-50"
-                      >
-                        <Trash2 size={14} />
-                        Clear Key
-                      </button>
-                    )}
-                  </div>
                 </div>
 
                 <div className="mt-5 flex items-center justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => handleSaveSettings(false)}
+                    onClick={() => handleSaveSettings()}
                     disabled={isSaving}
                     className="inline-flex items-center gap-2 rounded-lg bg-cyan-400 px-5 py-2.5 text-xs font-bold text-[#041014] transition hover:bg-cyan-300 disabled:opacity-50"
                   >

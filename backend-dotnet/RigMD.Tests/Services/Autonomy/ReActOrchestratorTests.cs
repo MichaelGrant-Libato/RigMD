@@ -168,6 +168,47 @@ public class ReActOrchestratorTests
         }
     }
 
+    private sealed class FakeHighMemoryInspectionTool : IRigMdAgentTool
+    {
+        public string Name => "inspect_memory_and_processes";
+        public string DisplayName => "Inspect RAM and Active Processes";
+        public string Description => "Returns a high live-memory snapshot.";
+        public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
+
+        public AgentToolFunctionDeclaration GetFunctionDeclaration() => new()
+        {
+            Name = Name,
+            Description = Description
+        };
+
+        public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ToolDryRunPreview
+            {
+                ToolName = Name,
+                DisplayName = DisplayName,
+                SafetyTier = SafetyTier,
+                CanExecute = true,
+                WhatWillHappen = "Will inspect current RAM use and browser workload."
+            });
+        }
+
+        public Task<AgentToolExecutionResult> ExecuteAsync(
+            JsonElement arguments,
+            Action<string>? progressReporter = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new AgentToolExecutionResult
+            {
+                ToolName = Name,
+                Success = true,
+                Summary = "RAM usage: 13.0/15.7 GB (82.9%). Browser RAM: 3309 MB across 28 processes.",
+                DataJson = "{\"memory\":{\"totalGb\":15.7,\"usedGb\":13.0,\"usagePercent\":82.9},\"browserSummary\":{\"browserDetected\":true,\"browserProcessCount\":28,\"browserMemoryMb\":3309.0,\"browserHeavy\":true},\"memoryLeakWarning\":false}",
+                OutputLog = "High memory snapshot."
+            });
+        }
+    }
+
     private static (AutonomousOrchestrator Orchestrator, FakeSafeRemediationTool FakeTempTool) CreateOrchestratorWithTools(
         IReActLlmClient? customLlmClient = null)
     {
@@ -183,12 +224,16 @@ public class ReActOrchestratorTests
             new InspectGpuAndDisplaysTool(providers, providers),
             new InspectNetworkConnectivityTool(providers),
             new InspectBatteryAndPowerTool(providers, providers, providers),
+            new InspectFullDeviceProfileTool(new StubSystemProfileService()),
             new QueryWindowsEventLogsTool(),
             new QueryStartupAppsTool(),
             fakeTempTool,
             new FlushDnsCacheTool(loggerFactory),
             new ClearBrowserCacheTool(loggerFactory),
-            new TerminateProcessesTool(loggerFactory)
+            new TerminateProcessesTool(loggerFactory),
+            new RestartWindowsExplorerTool(loggerFactory),
+            new RunSystemFileCheckerTool(loggerFactory),
+            new RescanPlugAndPlayDevicesTool()
         };
 
         var registry = new RigMdAgentToolRegistry(tools);
@@ -351,6 +396,46 @@ public class ReActOrchestratorTests
     }
 
     [Fact]
+    public async Task RunExecutionCycleAsync_MemoryPressure_DoesNotMarkResolvedWhenRamStillHigh()
+    {
+        var fakeTempTool = new FakeSafeRemediationTool();
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
+        {
+            new FakeHighMemoryInspectionTool(),
+            fakeTempTool
+        });
+        var loggerFactory = NullLoggerFactory.Instance;
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, loggerFactory),
+            registry,
+            new GeminiReActLlmClient(
+                new HttpClient(),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" }).Build(),
+                NullLogger<GeminiReActLlmClient>.Instance));
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "High Memory Pressure",
+            AiExplanation = "Memory remains above the high-use range."
+        };
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            diagnostic,
+            new HardwareProfileDto(),
+            userConsentProvided: true,
+            requestedToolName: "clear_temp_files",
+            requestedArgumentsJson: "{\"includeWindowsTemp\":false}");
+
+        Assert.Equal(1, fakeTempTool.ExecutionCount);
+        Assert.True(result.Execution!.Success);
+        Assert.Equal("inspect_memory_and_processes", result.VerificationReport!.VerificationToolName);
+        Assert.Equal(VerificationStatus.Unresolved, result.Verification);
+        Assert.Contains("\"usagePercent\":82.9", result.VerificationReport.AfterSnapshotJson);
+    }
+
+    [Fact]
     public async Task RunDryRunCycleAsync_ComponentMode_StrictlyFiltersTier0ToolsToSelectedScope()
     {
         var (orchestrator, _) = CreateOrchestratorWithTools();
@@ -420,6 +505,109 @@ public class ReActOrchestratorTests
         Assert.Contains("query_windows_event_logs", calledTools);
     }
 
+    [Fact]
+    public async Task RunDryRunCycleAsync_AppCrashes_DoesNotProposeBrowserCacheByDefault()
+    {
+        var (orchestrator, _) = CreateOrchestratorWithTools();
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "Application crash history requires review",
+            AiExplanation = "Application crash scenario.",
+            Session = new DiagnosticSession
+            {
+                Id = Guid.NewGuid(),
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = "scenario" },
+                    new() { QuestionKey = "scenario_id", AnswerValue = "app-crashes" }
+                }
+            }
+        };
+
+        var result = await orchestrator.RunDryRunCycleAsync(
+            diagnostic,
+            new HardwareProfileDto());
+
+        Assert.NotNull(result.ProposedTool);
+        Assert.NotEqual("clear_browser_cache", result.ProposedTool!.ToolName);
+        Assert.Contains(
+            result.ProposedTool.ToolName,
+            new[] { "restart_windows_explorer", "run_system_file_checker" });
+    }
+
+    [Fact]
+    public async Task RunDryRunCycleAsync_DriverConflict_PrefersDeviceRescan()
+    {
+        var (orchestrator, _) = CreateOrchestratorWithTools();
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "Driver conflict",
+            AiExplanation = "Windows Device Manager reported a USB device error.",
+            Session = new DiagnosticSession
+            {
+                Id = Guid.NewGuid(),
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = "full" }
+                }
+            }
+        };
+
+        var result = await orchestrator.RunDryRunCycleAsync(
+            diagnostic,
+            new HardwareProfileDto());
+
+        Assert.NotNull(result.ProposedTool);
+        Assert.Equal("rescan_plug_and_play_devices", result.ProposedTool!.ToolName);
+    }
+
+    [Fact]
+    public async Task RunExecutionCycleAsync_DriverConflict_VerifiesDeviceManagerErrors()
+    {
+        var providers = new StubProviders();
+        var loggerFactory = NullLoggerFactory.Instance;
+        var rescanTool = new FakeDriverRescanTool();
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
+        {
+            new InspectFullDeviceProfileTool(new StubSystemProfileService()),
+            rescanTool
+        });
+
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, loggerFactory),
+            registry,
+            new GeminiReActLlmClient(
+                new HttpClient(),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" }).Build(),
+                NullLogger<GeminiReActLlmClient>.Instance));
+
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(),
+            DiagnosticSessionId = Guid.NewGuid(),
+            DiagnosedCategory = "Driver conflict",
+            AiExplanation = "Windows Device Manager reported a USB device error."
+        };
+
+        var result = await orchestrator.RunExecutionCycleAsync(
+            diagnostic,
+            new HardwareProfileDto(),
+            userConsentProvided: true,
+            requestedToolName: "rescan_plug_and_play_devices",
+            requestedArgumentsJson: "{}");
+
+        Assert.Equal(1, rescanTool.ExecutionCount);
+        Assert.Equal("inspect_full_device_profile", result.VerificationReport!.VerificationToolName);
+        Assert.Equal(VerificationStatus.Unresolved, result.Verification);
+        Assert.Contains("deviceErrorsCount", result.VerificationReport.AfterSnapshotJson);
+    }
+
     private sealed class StubSystemProfileService : IWindowsSystemProfileService
     {
         public HardwareProfileDto GetLiveSystemProfile() => new()
@@ -430,8 +618,63 @@ public class ReActOrchestratorTests
             PrimaryStorageType = "NVMe SSD",
             Cpu = new CpuStatsDto { Name = "Intel Core i7-13700K", UsagePercent = 38.0, Cores = 16, Threads = 24 },
             Ram = new MemoryStatsDto { TotalGb = 32, UsedGb = 19.0, UsagePercent = 59.4 },
-            Gpu = new GpuStatsDto { Name = "NVIDIA GeForce RTX 4070 Ti", HasGpu = true, HasDedicatedGpu = true, VramGb = 12 }
+            Gpu = new GpuStatsDto { Name = "NVIDIA GeForce RTX 4070 Ti", HasGpu = true, HasDedicatedGpu = true, VramGb = 12 },
+            DeviceErrors = new List<DeviceErrorDto>
+            {
+                new()
+                {
+                    Name = "Unknown USB Device (Device Descriptor Request Failed)",
+                    ErrorCode = 43,
+                    Description = "Windows stopped this device because it reported problems."
+                }
+            }
         };
+    }
+
+    private sealed class FakeDriverRescanTool : IRigMdAgentTool
+    {
+        public int ExecutionCount { get; private set; }
+
+        public string Name => "rescan_plug_and_play_devices";
+        public string DisplayName => "Rescan connected devices";
+        public string Description => "Test driver rescan tool.";
+        public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier2_DestructiveOrAdmin;
+
+        public AgentToolFunctionDeclaration GetFunctionDeclaration() => new()
+        {
+            Name = Name,
+            Description = Description
+        };
+
+        public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ToolDryRunPreview
+            {
+                ToolName = Name,
+                DisplayName = DisplayName,
+                SafetyTier = SafetyTier,
+                CanExecute = true,
+                RequiresUserConfirmation = true,
+                AffectedItemsCount = 1,
+                WhatWillHappen = "Will ask Windows to rescan connected devices."
+            });
+        }
+
+        public Task<AgentToolExecutionResult> ExecuteAsync(
+            JsonElement arguments,
+            Action<string>? progressReporter = null,
+            CancellationToken cancellationToken = default)
+        {
+            ExecutionCount++;
+            return Task.FromResult(new AgentToolExecutionResult
+            {
+                ToolName = Name,
+                Success = true,
+                Summary = "Windows completed the connected-device rescan.",
+                DataJson = "{\"success\":true}",
+                OutputLog = "Rescan complete."
+            });
+        }
     }
 
     [Fact]
@@ -462,7 +705,8 @@ public class ReActOrchestratorTests
             new InspectBatteryAndPowerTool(providers, providers, providers),
             new QueryWindowsEventLogsTool(),
             new QueryStartupAppsTool(),
-            fakeTempTool
+            fakeTempTool,
+            new RescanPlugAndPlayDevicesTool()
         });
 
         var config = new ConfigurationBuilder()

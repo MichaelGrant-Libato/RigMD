@@ -420,11 +420,16 @@ public class DiagnosticController : ControllerBase
                 return NotFound(new { detail = "Diagnosis record not found." });
 
             var hardware = _profileService.GetLiveSystemProfile();
+            DateTimeOffset? sessionCreatedAt = DateTimeOffset.TryParse(session.CreatedAt, out var parsedCreatedAt)
+                ? parsedCreatedAt
+                : null;
+
             var result = _resolutionService.CheckResolution(
                 session.DiagnosedCategory,
                 hardware,
                 session.ScenarioId,
-                session.ComponentIds);
+                session.ComponentIds,
+                sessionCreatedAt);
 
             var updated = await _sessionRepository.UpdateResolutionAsync(
                 id,

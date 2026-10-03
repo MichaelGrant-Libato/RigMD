@@ -128,8 +128,8 @@ public static class DiagnosticScopeMapper
                 case "audio":
                     tier0.Add("inspect_gpu_and_displays");
                     tier0.Add("query_windows_event_logs");
+                    remediation.Add("rescan_plug_and_play_devices");
                     remediation.Add("run_system_file_checker");
-                    remediation.Add("restart_windows_explorer");
                     break;
 
                 case "network":
@@ -156,6 +156,100 @@ public static class DiagnosticScopeMapper
         }
 
         return (tier0, remediation);
+    }
+
+    public static IReadOnlyList<string> GetAllowedRemediationTools(
+        string diagnosisMode,
+        IEnumerable<string> componentIds,
+        string? scenarioId,
+        string? diagnosedCategory)
+    {
+        if (string.Equals(diagnosisMode, "component", StringComparison.OrdinalIgnoreCase))
+        {
+            var (_, remediation) = GetAllowedToolsForComponents(componentIds);
+            if (remediation.Count > 0)
+            {
+                return remediation.ToList();
+            }
+        }
+
+        if (string.Equals(diagnosisMode, "scenario", StringComparison.OrdinalIgnoreCase))
+        {
+            var scenarioTools = GetAllowedRemediationToolsForScenario(scenarioId);
+            if (scenarioTools.Count > 0)
+            {
+                return scenarioTools;
+            }
+        }
+
+        return GetAllowedRemediationToolsForCategory(diagnosedCategory);
+    }
+
+    public static IReadOnlyList<string> GetAllowedRemediationToolsForScenario(string? scenarioId)
+    {
+        return NormalizeScenarioId(scenarioId) switch
+        {
+            "network-problem" => new[] { "flush_dns_cache" },
+            "storage-problem" => new[] { "clear_temp_files", "clear_browser_cache", "clear_windows_update_cache" },
+            "slow-system" or "stuttering-freezing" => new[] { "terminate_processes", "clear_browser_cache", "clear_temp_files", "restart_windows_explorer" },
+            "slow-boot" => new[] { "clear_temp_files", "restart_windows_explorer" },
+            "overheating-loud-fan" => new[] { "terminate_processes" },
+            "rapid-battery-drain" => new[] { "terminate_processes" },
+            "driver-error" => new[] { "rescan_plug_and_play_devices", "run_system_file_checker" },
+            "no-display" => new[] { "restart_windows_explorer", "rescan_plug_and_play_devices", "run_system_file_checker" },
+            "blue-screen-crash" => new[] { "run_system_file_checker" },
+            "app-crashes" => new[] { "run_system_file_checker", "restart_windows_explorer" },
+            _ => Array.Empty<string>()
+        };
+    }
+
+    public static IReadOnlyList<string> GetAllowedRemediationToolsForCategory(string? diagnosedCategory)
+    {
+        var category = (diagnosedCategory ?? string.Empty).ToLowerInvariant();
+
+        if (category.Contains("network") || category.Contains("dns") || category.Contains("internet"))
+        {
+            return new[] { "flush_dns_cache" };
+        }
+
+        if (category.Contains("driver") || category.Contains("display") || category.Contains("pnp") || category.Contains("usb") || category.Contains("device manager"))
+        {
+            return category.Contains("display")
+                ? new[] { "restart_windows_explorer", "rescan_plug_and_play_devices", "run_system_file_checker" }
+                : new[] { "rescan_plug_and_play_devices", "run_system_file_checker" };
+        }
+
+        if (category.Contains("blue screen") || category.Contains("stop error") || category.Contains("system crash"))
+        {
+            return new[] { "run_system_file_checker" };
+        }
+
+        if (category.Contains("application crash") || category.Contains("app crash"))
+        {
+            return new[] { "run_system_file_checker", "restart_windows_explorer" };
+        }
+
+        if (category.Contains("memory") || category.Contains("ram") || category.Contains("performance") || category.Contains("stuttering") || category.Contains("freezing") || category.Contains("slow"))
+        {
+            return new[] { "terminate_processes", "clear_browser_cache", "clear_temp_files", "restart_windows_explorer" };
+        }
+
+        if (category.Contains("thermal") || category.Contains("overheat") || category.Contains("fan") || category.Contains("cpu load"))
+        {
+            return new[] { "terminate_processes" };
+        }
+
+        if (category.Contains("storage") || category.Contains("disk") || category.Contains("temp") || category.Contains("cache"))
+        {
+            return new[] { "clear_temp_files", "clear_browser_cache", "clear_windows_update_cache" };
+        }
+
+        if (category.Contains("battery") || category.Contains("power"))
+        {
+            return new[] { "terminate_processes" };
+        }
+
+        return Array.Empty<string>();
     }
 
     /// <summary>

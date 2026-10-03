@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Xml.Linq;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 
@@ -128,6 +130,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             AllDisks = allDisks,
             
             ProcessInsights = _processProvider.GetProcessInsights(),
+            StabilityEvents = GetStabilityEvents(),
             Presence = presence
         };
     }
@@ -222,5 +225,196 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             // Ignore
         }
         return errors;
+    }
+
+    private static StabilityEventSnapshotDto GetStabilityEvents()
+    {
+        const int hoursBack = 168;
+        const int maxEvents = 40;
+
+        var snapshot = new StabilityEventSnapshotDto
+        {
+            WindowDescription = "Last 7 days"
+        };
+
+        var timeDiffMs = (long)TimeSpan.FromHours(hoursBack).TotalMilliseconds;
+
+        var applicationQuery =
+            $"*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1026 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+        var systemQuery =
+            $"*[System[(EventID=41 or EventID=1001 or EventID=6008 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+
+        var warnings = new List<string>();
+
+        snapshot.ApplicationCrashEvents = QueryRecentWindowsEvents("Application", applicationQuery, maxEvents, warnings)
+            .Where(IsApplicationCrashEvent)
+            .Take(12)
+            .ToList();
+
+        snapshot.SystemCrashEvents = QueryRecentWindowsEvents("System", systemQuery, maxEvents, warnings)
+            .Where(IsSystemCrashEvent)
+            .Take(12)
+            .ToList();
+
+        if (warnings.Count > 0)
+        {
+            snapshot.QueryWarning = string.Join(" | ", warnings.Distinct());
+        }
+
+        return snapshot;
+    }
+
+    private static List<WindowsEventSummaryDto> QueryRecentWindowsEvents(
+        string logName,
+        string xpathQuery,
+        int maxEvents,
+        List<string> warnings)
+    {
+        var events = new List<WindowsEventSummaryDto>();
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "wevtutil.exe",
+                Arguments = $"qe {logName} /c:{maxEvents} /rd:true /f:RenderedXml /q:\"{xpathQuery}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                warnings.Add($"Could not start Windows Event Log query for {logName}.");
+                return events;
+            }
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(5000))
+            {
+                TryKill(process);
+                process.WaitForExit(1000);
+                warnings.Add($"Windows Event Log query timed out for {logName}.");
+                return events;
+            }
+
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
+
+            if (!string.IsNullOrWhiteSpace(stderr) &&
+                !stderr.Contains("No events were found", StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add($"{logName}: {stderr.Trim()}");
+            }
+
+            if (string.IsNullOrWhiteSpace(stdout))
+            {
+                return events;
+            }
+
+            var wrappedXml = $"<Events>{stdout}</Events>";
+            var doc = XDocument.Parse(wrappedXml);
+            XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
+
+            foreach (var ev in doc.Root?.Elements(ns + "Event") ?? Enumerable.Empty<XElement>())
+            {
+                var sys = ev.Element(ns + "System");
+                var renderingInfo = ev.Element(ns + "RenderingInfo");
+
+                var providerName = sys?.Element(ns + "Provider")?.Attribute("Name")?.Value ?? "Unknown";
+                var eventIdText = sys?.Element(ns + "EventID")?.Value ?? "0";
+                var levelCode = sys?.Element(ns + "Level")?.Value ?? "0";
+                var timeCreatedText = sys?.Element(ns + "TimeCreated")?.Attribute("SystemTime")?.Value ?? string.Empty;
+                var message = renderingInfo?.Element(ns + "Message")?.Value;
+
+                if (string.IsNullOrWhiteSpace(message))
+                {
+                    var dataItems = ev.Element(ns + "EventData")?
+                        .Elements(ns + "Data")
+                        .Select(d => d.Value)
+                        .Where(v => !string.IsNullOrWhiteSpace(v))
+                        .Take(6)
+                        .ToList();
+
+                    if (dataItems != null && dataItems.Count > 0)
+                    {
+                        message = string.Join(" | ", dataItems);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(message) && message.Length > 320)
+                {
+                    message = message[..320] + "...";
+                }
+
+                events.Add(new WindowsEventSummaryDto
+                {
+                    TimeUtc = DateTimeOffset.TryParse(timeCreatedText, out var parsedTime)
+                        ? parsedTime.ToUniversalTime()
+                        : null,
+                    Level = levelCode switch
+                    {
+                        "1" => "Critical",
+                        "2" => "Error",
+                        "3" => "Warning",
+                        _ => $"Level {levelCode}"
+                    },
+                    Provider = providerName,
+                    EventId = int.TryParse(eventIdText, out var parsedEventId) ? parsedEventId : 0,
+                    Message = message ?? "(No rendered message)"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"{logName}: {ex.Message}");
+        }
+
+        return events;
+    }
+
+    private static bool IsApplicationCrashEvent(WindowsEventSummaryDto ev)
+    {
+        var provider = ev.Provider ?? string.Empty;
+        var message = ev.Message ?? string.Empty;
+
+        return ev.EventId is 1000 or 1001 or 1002 or 1026 ||
+               provider.Contains("Application Error", StringComparison.OrdinalIgnoreCase) ||
+               provider.Contains("Windows Error Reporting", StringComparison.OrdinalIgnoreCase) ||
+               provider.Contains(".NET Runtime", StringComparison.OrdinalIgnoreCase) ||
+               provider.Contains("Application Hang", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("stopped working", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("faulting application", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("application hang", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("appcrash", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSystemCrashEvent(WindowsEventSummaryDto ev)
+    {
+        var provider = ev.Provider ?? string.Empty;
+        var message = ev.Message ?? string.Empty;
+
+        return ev.EventId is 41 or 1001 or 6008 ||
+               provider.Contains("Kernel-Power", StringComparison.OrdinalIgnoreCase) ||
+               provider.Contains("BugCheck", StringComparison.OrdinalIgnoreCase) ||
+               provider.Contains("EventLog", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("bugcheck", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("unexpected shutdown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
     }
 }

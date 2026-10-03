@@ -519,6 +519,10 @@ function PlaceholderView({ title, subtitle }: { title: string; subtitle: string 
   );
 }
 
+void AGENT_ID;
+void agentSnapshotToHardwareStats;
+void PlaceholderView;
+
 export default function HardwareDashboard() {
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);

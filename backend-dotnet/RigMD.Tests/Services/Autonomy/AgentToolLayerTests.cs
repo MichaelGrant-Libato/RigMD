@@ -179,6 +179,14 @@ public class AgentToolLayerTests
         var blueScreenTools = DiagnosticScopeMapper.GetRequiredToolsForScenario("blue-screen-crash");
         Assert.Contains(blueScreenTools, t => t.ToolName == "query_windows_event_logs" && t.ArgumentsJson.Contains("BugCheck"));
         Assert.Contains(blueScreenTools, t => t.ToolName == "inspect_gpu_and_displays");
+
+        var appCrashTools = DiagnosticScopeMapper.GetRequiredToolsForScenario("app-crashes");
+        Assert.Contains(appCrashTools, t => t.ToolName == "query_windows_event_logs" && t.ArgumentsJson.Contains("ApplicationCrash"));
+
+        var appCrashRemediations = DiagnosticScopeMapper.GetAllowedRemediationToolsForScenario("app-crashes");
+        Assert.Contains("restart_windows_explorer", appCrashRemediations);
+        Assert.Contains("run_system_file_checker", appCrashRemediations);
+        Assert.DoesNotContain("clear_browser_cache", appCrashRemediations);
     }
 
     [Fact]
@@ -207,6 +215,11 @@ public class AgentToolLayerTests
         var startupResult = await startupTool.ExecuteAsync(emptyArgs.RootElement);
         Assert.True(startupResult.Success);
         Assert.Contains("startupAppCount", startupResult.DataJson);
+
+        var eventLogDeclaration = registry.GetTool("query_windows_event_logs")!.GetFunctionDeclaration();
+        var eventFocusValues = eventLogDeclaration.Parameters["eventFocus"].EnumValues;
+        Assert.NotNull(eventFocusValues);
+        Assert.Contains("ApplicationCrash", eventFocusValues!);
     }
 
     [Theory]
