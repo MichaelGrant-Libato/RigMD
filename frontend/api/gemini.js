@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     const model =
       req.query?.model ||
       (payload && typeof payload === 'object' && payload.model) ||
-      'gemini-2.5-flash';
+      'gemini-3.5-flash';
 
     // If payload wrapped the Gemini request inside a .body property, unwrap it
     let geminiBody = payload;

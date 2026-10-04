@@ -276,7 +276,11 @@ public class GeminiReActLlmClient : IReActLlmClient
             },
             generationConfig = new
             {
-                temperature = 0.1
+                temperature = 0.1,
+                thinkingConfig = new
+                {
+                    thinkingBudget = 0
+                }
             }
         };
 
@@ -285,8 +289,7 @@ public class GeminiReActLlmClient : IReActLlmClient
         var defaultModels = new[]
         {
             "gemini-3.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-flash-latest",
+            "gemini-3.8-flash",
             "gemini-2.5-flash"
         };
 
@@ -299,7 +302,7 @@ public class GeminiReActLlmClient : IReActLlmClient
             try
             {
                 using var perModelCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                perModelCts.CancelAfter(TimeSpan.FromSeconds(6));
+                perModelCts.CancelAfter(TimeSpan.FromSeconds(10));
 
                 var url = !string.IsNullOrWhiteSpace(apiKey)
                     ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
