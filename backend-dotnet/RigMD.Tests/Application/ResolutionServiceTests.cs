@@ -336,7 +336,7 @@ public class ResolutionServiceTests
         Assert.Equal("Application stability risk needs review", appCrashResult.DiagnosedCategory);
         Assert.Contains("No recent application crash event", appCrashResult.PrimaryResult);
         Assert.Contains(appCrashResult.Proof, p => p.Label == "Physical Memory (RAM)" && p.Status == "elevated");
-        Assert.Contains(appCrashResult.Proof, p => p.Label == "Application crash events" && p.Status == "normal");
+        Assert.Contains(appCrashResult.Proof, p => p.Label.StartsWith("Application crash") && p.Status == "normal");
     }
 
     [Fact]

@@ -107,6 +107,10 @@ public class GeminiAiExplainer : IAiExplainer
                     var text = textElem.GetString()?.Trim();
                     if (!string.IsNullOrWhiteSpace(text))
                     {
+                        var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
+                            ? "Direct Gemini API"
+                            : $"Gemini Cloud Proxy ({proxyUrl})";
+                        _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
                         return text;
                     }
                 }
@@ -120,6 +124,7 @@ public class GeminiAiExplainer : IAiExplainer
             }
         }
 
+        _logger.LogInformation("[AI] Generating diagnostic explanation via Built-in Offline Fallback Engine");
         return await _offlineFallback.GenerateExplanationAsync(result, symptomPayload);
     }
 

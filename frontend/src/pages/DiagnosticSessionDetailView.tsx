@@ -968,6 +968,16 @@ export default function DiagnosticSessionDetailView({
                             session.diagnosed_category,
                           )}
                       </p>
+
+                      {session.diagnosed_category?.toLowerCase().includes('crash') ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Historical Check: Verifies whether new application crash or system stop events were logged after diagnosis.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Live Telemetry Check: Re-evaluates current live hardware readings against normal operational baselines.
+                        </p>
+                      )}
                     </div>
 
                     <motion.button

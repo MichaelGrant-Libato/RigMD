@@ -242,13 +242,6 @@ function parseComponentIds(raw?: string | null) {
 }
 
 function getSessionCheckLabel(session: SessionSummary) {
-  const alternateSymptom = (session as SessionSummary & { symptom?: string | null }).symptom;
-  const symptom = session.symptom_type?.trim() || alternateSymptom?.trim();
-
-  if (symptom) {
-    return symptom;
-  }
-
   const mode = session.diagnosis_mode?.trim().toLowerCase();
   const scenarioId = session.scenario_id?.trim();
   const componentIds = parseComponentIds(
@@ -264,18 +257,31 @@ function getSessionCheckLabel(session: SessionSummary) {
       (id) => COMPONENT_LABELS[id] ?? titleFromId(id),
     );
 
-    return `${labels.join(', ')} check`;
+    if (labels.length === 1) {
+      return `${labels[0]} check`;
+    }
+    if (labels.length === 2) {
+      return `${labels[0]} and ${labels[1]} check`;
+    }
+    return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]} check`;
   }
 
   if (mode === 'full') {
     return 'Full device check';
   }
 
+  const alternateSymptom = (session as SessionSummary & { symptom?: string | null }).symptom;
+  const symptom = session.symptom_type?.trim() || alternateSymptom?.trim();
+
+  if (symptom && symptom.toLowerCase() !== 'not available' && symptom.toLowerCase() !== 'unknown') {
+    return symptom;
+  }
+
   if (session.diagnosed_category) {
     return `${session.diagnosed_category} check`;
   }
 
-  return 'Device check';
+  return 'Full device check';
 }
 
 function getSessionSymptom(session: SessionSummary) {

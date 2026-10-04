@@ -58,6 +58,17 @@ public class GeminiReActLlmClient : IReActLlmClient
 
                 if (geminiDecision != null)
                 {
+                    var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
+                        ? "Direct Gemini API"
+                        : $"Gemini Cloud Proxy ({proxyUrl})";
+                    var toolLabel = geminiDecision.ToolCalls.FirstOrDefault()?.ToolName ??
+                                   geminiDecision.FinalProposal?.RecommendedToolName ??
+                                   "(Submit Plan)";
+                    _logger.LogInformation(
+                        "[AI] ReAct turn {Turn} decision made via {Mode} (Tool: {Tool})",
+                        context.CurrentTurn,
+                        modeLabel,
+                        toolLabel);
                     return geminiDecision;
                 }
             }
@@ -70,7 +81,15 @@ public class GeminiReActLlmClient : IReActLlmClient
             }
         }
 
-        return DecideWithLocalToolCallingEngine(context, availableTools);
+        var localDecision = DecideWithLocalToolCallingEngine(context, availableTools);
+        var localToolLabel = localDecision.ToolCalls.FirstOrDefault()?.ToolName ??
+                             localDecision.FinalProposal?.RecommendedToolName ??
+                             "(Submit Plan)";
+        _logger.LogInformation(
+            "[AI] ReAct turn {Turn} decision made via Built-in Offline ReAct Engine (Tool: {Tool})",
+            context.CurrentTurn,
+            localToolLabel);
+        return localDecision;
     }
 
     private string? ResolveApiKey()

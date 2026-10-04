@@ -744,4 +744,70 @@ public class ReActOrchestratorTests
         Assert.Equal("AIza••••••••9XYZ", masked);
         Assert.Equal(string.Empty, RigMD.Application.Services.RigMdAgentRuntimeSettingsStore.MaskApiKey(null));
     }
+
+    [Fact]
+    public async Task GeminiReActLlmClient_WhenProxyIsUnreachableOrFails_SilentlyFallsBackToLocalEngine()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gemini:ApiKey"] = "",
+                ["Gemini:ProxyUrl"] = "http://127.0.0.1:59999/unreachable-proxy"
+            })
+            .Build();
+
+        var llmClient = new GeminiReActLlmClient(new HttpClient(), config, NullLogger<GeminiReActLlmClient>.Instance);
+
+        var context = new ReActConversationContext
+        {
+            CurrentTurn = 1,
+            DiagnosedCategory = "Elevated Memory Pressure From Active Workloads",
+            UserSymptom = "RAM usage is 85%",
+            ScenarioId = "slow-system"
+        };
+
+        var availableTools = new List<AgentToolFunctionDeclaration>
+        {
+            new() { Name = "inspect_memory_and_processes", Description = "Inspect RAM" },
+            new() { Name = "clear_temp_files", Description = "Clear temp" }
+        };
+
+        var decision = await llmClient.DecideNextTurnAsync(context, availableTools);
+
+        Assert.NotNull(decision);
+        Assert.True(decision.ToolCalls.Count > 0 || decision.FinalProposal != null);
+        Assert.Equal("inspect_memory_and_processes", decision.ToolCalls.FirstOrDefault()?.ToolName);
+    }
+
+    [Fact]
+    public async Task GeminiAiExplainer_WhenProxyIsUnreachableOrFails_SilentlyFallsBackToOfflineTemplate()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gemini:ApiKey"] = "",
+                ["Gemini:ProxyUrl"] = "http://127.0.0.1:59999/unreachable-proxy"
+            })
+            .Build();
+
+        var offlineExplainer = new OfflineAiExplainer();
+        var explainer = new GeminiAiExplainer(
+            new HttpClient(),
+            config,
+            offlineExplainer,
+            NullLogger<GeminiAiExplainer>.Instance);
+
+        var diagnostic = new RigMD.Domain.Rules.DiagnosticResult
+        {
+            DiagnosedCategory = "Network connectivity and adapter issue",
+            ConfidenceLabel = "High",
+            RecommendedNextStep = "Run Network Reset"
+        };
+
+        var explanation = await explainer.GenerateExplanationAsync(diagnostic, new RigMD.Domain.Rules.DiagnosticSymptomPayload());
+
+        Assert.NotNull(explanation);
+        Assert.NotEmpty(explanation);
+        Assert.Contains("network", explanation, StringComparison.OrdinalIgnoreCase);
+    }
 }
