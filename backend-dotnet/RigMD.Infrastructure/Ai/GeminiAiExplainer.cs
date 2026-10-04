@@ -48,7 +48,8 @@ public class GeminiAiExplainer : IAiExplainer
         DiagnosticSymptomPayload symptomPayload)
     {
         var apiKey = ResolveApiKey();
-        if (string.IsNullOrWhiteSpace(apiKey))
+        var proxyUrl = ResolveProxyUrl();
+        if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(proxyUrl))
         {
             return await _offlineFallback.GenerateExplanationAsync(result, symptomPayload);
         }
@@ -81,7 +82,10 @@ public class GeminiAiExplainer : IAiExplainer
             try
             {
                 using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(6));
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+                var url = !string.IsNullOrWhiteSpace(apiKey)
+                    ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
+                    : $"{proxyUrl}?model={model}";
+
                 using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
                 using var response = await _httpClient.PostAsync(url, content, cts.Token);
 
@@ -122,6 +126,11 @@ public class GeminiAiExplainer : IAiExplainer
     private string? ResolveApiKey()
     {
         return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
+    }
+
+    private string? ResolveProxyUrl()
+    {
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"]);
     }
 
     private static string BuildPrompt(

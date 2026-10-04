@@ -43,12 +43,15 @@ public class GeminiReActLlmClient : IReActLlmClient
         CancellationToken cancellationToken = default)
     {
         var apiKey = ResolveApiKey();
-        if (!string.IsNullOrWhiteSpace(apiKey))
+        var proxyUrl = ResolveProxyUrl();
+
+        if (!string.IsNullOrWhiteSpace(apiKey) || !string.IsNullOrWhiteSpace(proxyUrl))
         {
             try
             {
                 var geminiDecision = await CallGeminiFunctionCallingAsync(
                     apiKey,
+                    proxyUrl,
                     context,
                     availableTools,
                     cancellationToken);
@@ -75,8 +78,14 @@ public class GeminiReActLlmClient : IReActLlmClient
         return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
     }
 
+    private string? ResolveProxyUrl()
+    {
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"]);
+    }
+
     private async Task<ReActModelTurnDecision?> CallGeminiFunctionCallingAsync(
-        string apiKey,
+        string? apiKey,
+        string? proxyUrl,
         ReActConversationContext context,
         IReadOnlyList<AgentToolFunctionDeclaration> availableTools,
         CancellationToken cancellationToken)
@@ -273,7 +282,9 @@ public class GeminiReActLlmClient : IReActLlmClient
                 using var perModelCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 perModelCts.CancelAfter(TimeSpan.FromSeconds(6));
 
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+                var url = !string.IsNullOrWhiteSpace(apiKey)
+                    ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
+                    : $"{proxyUrl}?model={model}";
                 using var resp = await client.PostAsync(
                     url,
                     new StringContent(jsonPayload, Encoding.UTF8, "application/json"),
