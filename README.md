@@ -377,6 +377,8 @@ Current automated test coverage includes:
   *(In release builds, RigMD uses a Windows Job Object and Mutex to automatically prevent stale orphan processes).*
 
 ### 3. Gemini API Key & Offline Brain
-* If no Gemini API key is configured in `appsettings.json`, you can paste it directly into the in-app **Settings** page.
+* The Settings page no longer accepts a pasted Gemini key. It only shows the active engine and lets you choose **Auto** or **Local-only** mode.
+* The installed app ships with **no** Gemini key and runs in local mode by default.
+* **For developers/testers only:** to enable Gemini, set the `GEMINI_API_KEY` environment variable, or put `{ "Gemini": { "ApiKey": "..." } }` in `backend-dotnet/RigMD.Api/appsettings.Local.json` (gitignored and excluded from the installer). Never commit a real key.
 * If you have no internet access or no API key, RigMD automatically switches to its built-in offline diagnostic engine so scanning and remediation never fail.
 

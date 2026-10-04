@@ -45,10 +45,10 @@ RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous
      - `RecurringPatternService`, `ResolutionService`, `WarningSignService` — session history and resolution tracking services.
 
 5. **Infrastructure & Windows Integration Layer (C#)**
-   - **Responsibilities**: Interfaces directly with Windows WMI, CIM, `LibreHardwareMonitorLib`, `System.Diagnostics`, Windows Event Logs (`wevtutil.exe`), and the Google Gemini Function-Calling API.
+   - **Responsibilities**: Interfaces directly with Windows WMI, CIM, Windows Performance Counters (user-mode only, no kernel drivers), `System.Diagnostics`, Windows Event Logs (`wevtutil.exe`), and the Google Gemini Function-Calling API.
    - **Project**: `RigMD.Infrastructure`
    - **Hardware & Sensor Providers** (implementing `IHardwareProvider.cs`):
-     - `HardwareMonitorService` (`LibreHardwareMonitorLib`) — real-time CPU/GPU package & core temperatures, loads, and dedicated VRAM sensors.
+     - `HardwareMonitorService` (user-mode ACPI/Performance Counter telemetry with thermal estimation fallback; no kernel driver) — CPU/GPU temperatures, loads, and VRAM readings.
      - `WmiCpuProvider`, `WmiGpuProvider`, `WmiMemoryProvider`, `WmiStorageProvider`, `WmiMotherboardProvider`, `WmiOperatingSystemProvider`, `WindowsNetworkProvider`, `ProcessProvider`, `WmiDeviceTypeProvider`, `WmiBatteryProvider`, `WmiPowerProvider`, `WmiDisplayProvider`, `WindowsSystemProfileService`.
    - **ReAct LLM Reasoning Client**:
      - `GeminiReActLlmClient` — invokes Google Gemini (`gemini-2.5-flash` / `gemini-2.0-flash`) free-tier native `functionDeclarations` when `Gemini:ApiKey` or `GEMINI_API_KEY` is configured, and automatically falls back to a built-in **$0.00 Local Tool-Calling ReAct Engine** that invokes the same `Tier0_ReadOnly` tools and synthesizes root-cause proposals from live JSON observations.
