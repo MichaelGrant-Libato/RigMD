@@ -21,8 +21,7 @@ public class GeminiAiExplainer : IAiExplainer
     private static readonly string[] CandidateModels =
     [
         "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-flash-latest",
+        "gemini-3.8-flash",
         "gemini-2.5-flash"
     ];
 
@@ -67,7 +66,11 @@ public class GeminiAiExplainer : IAiExplainer
             generationConfig = new
             {
                 temperature = 0.2,
-                maxOutputTokens = 260
+                maxOutputTokens = 1200,
+                thinkingConfig = new
+                {
+                    thinkingBudget = 0
+                }
             }
         };
 
@@ -81,7 +84,7 @@ public class GeminiAiExplainer : IAiExplainer
         {
             try
             {
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(6));
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
                 var url = !string.IsNullOrWhiteSpace(apiKey)
                     ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
                     : $"{proxyUrl}?model={model}";
@@ -98,20 +101,49 @@ public class GeminiAiExplainer : IAiExplainer
                 using var doc = JsonDocument.Parse(responseJson);
 
                 if (doc.RootElement.TryGetProperty("candidates", out var candidates) &&
-                    candidates.GetArrayLength() > 0 &&
-                    candidates[0].TryGetProperty("content", out var contentElem) &&
-                    contentElem.TryGetProperty("parts", out var parts) &&
-                    parts.GetArrayLength() > 0 &&
-                    parts[0].TryGetProperty("text", out var textElem))
+                    candidates.GetArrayLength() > 0)
                 {
-                    var text = textElem.GetString()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(text))
+                    var firstCandidate = candidates[0];
+                    var finishReason = firstCandidate.TryGetProperty("finishReason", out var frElem)
+                        ? frElem.GetString()
+                        : null;
+
+                    // Reject responses that were stopped prematurely due to token budget or safety triggers
+                    if (string.Equals(finishReason, "MAX_TOKENS", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(finishReason, "SAFETY", StringComparison.OrdinalIgnoreCase))
                     {
-                        var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
-                            ? "Direct Gemini API"
-                            : $"Gemini Cloud Proxy ({proxyUrl})";
-                        _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
-                        return text;
+                        _logger.LogWarning(
+                            "[AI] Gemini explanation truncated with finishReason {FinishReason} for model {Model}. Trying next candidate or fallback.",
+                            finishReason,
+                            model);
+                        continue;
+                    }
+
+                    if (firstCandidate.TryGetProperty("content", out var contentElem) &&
+                        contentElem.TryGetProperty("parts", out var parts) &&
+                        parts.GetArrayLength() > 0 &&
+                        parts[0].TryGetProperty("text", out var textElem))
+                    {
+                        var text = textElem.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            // Sanity check: Ensure text is complete (ends with terminal sentence punctuation)
+                            var lastChar = text[^1];
+                            if (lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ')' && lastChar != '"')
+                            {
+                                _logger.LogWarning(
+                                    "[AI] Gemini explanation appears cut off mid-sentence (ends with '{LastChar}') for model {Model}. Trying next candidate or fallback.",
+                                    lastChar,
+                                    model);
+                                continue;
+                            }
+
+                            var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
+                                ? "Direct Gemini API"
+                                : $"Gemini Cloud Proxy ({proxyUrl})";
+                            _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
+                            return text;
+                        }
                     }
                 }
             }

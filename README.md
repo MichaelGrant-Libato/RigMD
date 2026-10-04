@@ -377,7 +377,7 @@ Current automated test coverage includes:
   *(In release builds, RigMD uses a Windows Job Object and Mutex to automatically prevent stale orphan processes).*
 
 ### 3. Gemini Cloud Proxy & Offline Brain
-* **Zero User Configuration:** RigMD automatically routes through the team's secure Vercel serverless proxy (`https://rig-md.com/api/gemini`) where `GEMINI_API_KEY` is securely stored in Vercel Environment Variables. Users do not need to obtain or paste API keys.
+* **Zero User Configuration:** RigMD automatically routes through the team's secure Vercel serverless proxy (`https://www.rig-md.com/api/gemini`) where `GEMINI_API_KEY` is securely stored in Vercel Environment Variables. Users do not need to obtain or paste API keys.
 * **Dual-Mode Engine in Settings:** Users can toggle between **"Use Gemini when available"** (cloud AI proxy with silent local fallback) and **"Local-only mode"** (100% offline).
 * **Developer Local Override:** Developers can bypass the proxy by setting the `GEMINI_API_KEY` environment variable on their PC or using `appsettings.Local.json` (gitignored and excluded from installer).
 * **Guaranteed Offline Reliability:** If the cloud proxy times out, encounters a rate limit (429), or the PC has no internet, RigMD automatically and silently switches to its built-in offline ReAct diagnostic engine with zero errors.

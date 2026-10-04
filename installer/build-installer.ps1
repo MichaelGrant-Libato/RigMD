@@ -235,7 +235,7 @@ foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory))
             AllowedHosts = "localhost;127.0.0.1;[::1]"
             Gemini = [ordered]@{
                 ApiKey = ""
-                ProxyUrl = "https://rig-md.com/api/gemini"
+                ProxyUrl = "https://www.rig-md.com/api/gemini"
             }
             DATABASE_URL = ""
         }

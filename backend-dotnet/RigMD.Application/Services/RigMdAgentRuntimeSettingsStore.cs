@@ -119,6 +119,8 @@ public static class RigMdAgentRuntimeSettingsStore
         return null;
     }
 
+    public const string DefaultProxyUrl = "https://www.rig-md.com/api/gemini";
+
     public static string? ResolveEffectiveProxyUrl(string? configuredProxyUrl = null)
     {
         var settings = Load();
@@ -131,12 +133,18 @@ public static class RigMdAgentRuntimeSettingsStore
         var fromEnv = Environment.GetEnvironmentVariable("GEMINI_PROXY_URL");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
-            return fromEnv.Trim();
+            var envTrimmed = fromEnv.Trim();
+            return string.Equals(envTrimmed, "https://rig-md.com/api/gemini", StringComparison.OrdinalIgnoreCase)
+                ? DefaultProxyUrl
+                : envTrimmed;
         }
 
         if (!string.IsNullOrWhiteSpace(configuredProxyUrl))
         {
-            return configuredProxyUrl.Trim();
+            var configTrimmed = configuredProxyUrl.Trim();
+            return string.Equals(configTrimmed, "https://rig-md.com/api/gemini", StringComparison.OrdinalIgnoreCase)
+                ? DefaultProxyUrl
+                : configTrimmed;
         }
 
         return null;
