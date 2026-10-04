@@ -150,7 +150,7 @@ public class RescanPlugAndPlayDevicesTool : IRigMdAgentTool
                     new()
                     {
                         Label = "Connected device rescan",
-                        Before = "Device Manager reported an active device error",
+                        Before = "Connected devices not yet rescanned",
                         After = success ? "Rescan completed" : "Rescan did not complete cleanly",
                         Status = success ? "Completed" : "Failed",
                         Meaning = success

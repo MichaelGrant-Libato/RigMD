@@ -1017,8 +1017,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 : stabilityEvents.SystemCrashEvents;
             var eventCount = relevantEvents?.Count ?? 0;
             var label = scenarioId == "app-crashes"
-                ? "Application crash events"
-                : "System crash events";
+                ? "Application crash history (last 7 days)"
+                : "System crash history (last 7 days)";
 
             proof.Add(new AutomaticDiagnosisProof
             {
@@ -1028,7 +1028,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     : "Could not verify",
                 Status = !eventLogAvailable ? "elevated" : eventCount > 0 ? "high" : "normal",
                 Meaning = eventLogAvailable
-                    ? $"Windows Event Logs were checked for recent {label.ToLowerInvariant()}."
+                    ? $"Checked Windows Event Logs for {label.ToLowerInvariant()} within the last 7 days."
                     : stabilityEvents.QueryWarning ?? "Windows Event Logs could not be checked."
             });
         }

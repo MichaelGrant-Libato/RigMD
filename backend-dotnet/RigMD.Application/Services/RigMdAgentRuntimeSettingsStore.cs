@@ -119,6 +119,29 @@ public static class RigMdAgentRuntimeSettingsStore
         return null;
     }
 
+    public static string? ResolveEffectiveProxyUrl(string? configuredProxyUrl = null)
+    {
+        var settings = Load();
+        if (string.Equals(settings.PreferredMode, "local-only", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settings.PreferredMode, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var fromEnv = Environment.GetEnvironmentVariable("GEMINI_PROXY_URL");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            return fromEnv.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredProxyUrl))
+        {
+            return configuredProxyUrl.Trim();
+        }
+
+        return null;
+    }
+
     public static string MaskApiKey(string? key)
     {
         if (string.IsNullOrWhiteSpace(key))

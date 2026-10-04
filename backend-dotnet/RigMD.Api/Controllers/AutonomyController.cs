@@ -1063,16 +1063,27 @@ public class AutonomyController : ControllerBase
     {
         var settings = RigMdAgentRuntimeSettingsStore.Load();
         var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
-        var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"]);
+        var hasDirectKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var hasProxy = !string.IsNullOrWhiteSpace(effectiveProxy);
+        var isLocalOnly = string.Equals(settings.PreferredMode, "local-only", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(settings.PreferredMode, "local", StringComparison.OrdinalIgnoreCase);
+
+        var hasAi = !isLocalOnly && (hasDirectKey || hasProxy);
+        var activeEngine = isLocalOnly
+            ? "Local Deterministic ReAct Engine (100% Offline)"
+            : hasDirectKey
+                ? "Gemini Direct API Key + Local ReAct Fallback"
+                : hasProxy
+                    ? "Gemini Cloud Proxy (rig-md.com) + Local ReAct Fallback"
+                    : "Local Deterministic ReAct Engine (100% Offline)";
 
         return Ok(new
         {
             preferredMode = settings.PreferredMode,
             autoExecuteSafeTier1 = settings.AutoExecuteSafeTier1,
-            hasGeminiApiKey = hasKey,
-            activeEngine = hasKey
-                ? "Gemini Server Key + Local ReAct Fallback"
-                : "Local Deterministic ReAct Engine (100% Offline)",
+            hasGeminiApiKey = hasAi,
+            activeEngine = activeEngine,
             registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0
         });
     }
@@ -1085,16 +1096,27 @@ public class AutonomyController : ControllerBase
             request.AutoExecuteSafeTier1);
 
         var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
-        var hasKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"]);
+        var hasDirectKey = !string.IsNullOrWhiteSpace(effectiveKey);
+        var hasProxy = !string.IsNullOrWhiteSpace(effectiveProxy);
+        var isLocalOnly = string.Equals(saved.PreferredMode, "local-only", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(saved.PreferredMode, "local", StringComparison.OrdinalIgnoreCase);
+
+        var hasAi = !isLocalOnly && (hasDirectKey || hasProxy);
+        var activeEngine = isLocalOnly
+            ? "Local Deterministic ReAct Engine (100% Offline)"
+            : hasDirectKey
+                ? "Gemini Direct API Key + Local ReAct Fallback"
+                : hasProxy
+                    ? "Gemini Cloud Proxy (rig-md.com) + Local ReAct Fallback"
+                    : "Local Deterministic ReAct Engine (100% Offline)";
 
         return Ok(new
         {
             preferredMode = saved.PreferredMode,
             autoExecuteSafeTier1 = saved.AutoExecuteSafeTier1,
-            hasGeminiApiKey = hasKey,
-            activeEngine = hasKey
-                ? "Gemini Server Key + Local ReAct Fallback"
-                : "Local Deterministic ReAct Engine (100% Offline)",
+            hasGeminiApiKey = hasAi,
+            activeEngine = activeEngine,
             registeredToolCount = _toolRegistry?.GetAllTools().Count ?? 0
         });
     }
