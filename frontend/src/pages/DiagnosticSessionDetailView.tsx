@@ -29,6 +29,10 @@ import {
 import { apiFetch } from '../lib/api';
 
 import type { AutonomyResult } from '../services/autonomyService';
+import {
+  getResolutionCategory,
+  getTelemetryDeltaSummary,
+} from '../lib/pastChecksFormatting';
 
 interface ActionAttemptDetail {
   action_code: string;
@@ -955,9 +959,27 @@ export default function DiagnosticSessionDetailView({
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                        Resolution Status
-                      </h3>
+                      <div className="flex items-center gap-2.5">
+                        <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                          Resolution Status
+                        </h3>
+                        {(() => {
+                          const resInfo = getResolutionCategory(
+                            session.resolution_status,
+                            session.action_category,
+                            session.diagnosed_category,
+                            completedRemediationAction,
+                            proofShowsNoNewCrashes(session.resolution_proof),
+                          );
+                          return (
+                            <span
+                              className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${resInfo.className}`}
+                            >
+                              {resInfo.label}
+                            </span>
+                          );
+                        })()}
+                      </div>
 
                       <p className="mt-2 text-sm leading-relaxed text-slate-400">
                         {session.resolution_summary ||
@@ -977,6 +999,13 @@ export default function DiagnosticSessionDetailView({
                         <p className="mt-1 text-xs text-slate-500">
                           Live Telemetry Check: Re-evaluates current live hardware readings against normal operational baselines.
                         </p>
+                      )}
+
+                      {getTelemetryDeltaSummary(session.proof, session.resolution_proof) && (
+                        <div className="mt-3 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-3 text-xs text-cyan-200">
+                          <span className="font-bold text-cyan-300">What changed since last check: </span>
+                          {getTelemetryDeltaSummary(session.proof, session.resolution_proof)}
+                        </div>
                       )}
                     </div>
 

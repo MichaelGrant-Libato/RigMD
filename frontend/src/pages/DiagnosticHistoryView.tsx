@@ -25,13 +25,27 @@ import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, stagge
 import { apiDelete, apiFetch } from '../lib/api';
 import type { SessionSummary } from '../types/rigmd';
 
-const filters = [
-  'All Sessions',
-  'Monitor',
-  'Maintain',
-  'Troubleshoot',
-  'Escalate',
-  'Recurring Only',
+import {
+  getSessionCheckLabel,
+  getResolutionCategory,
+  matchesCheckType,
+} from '../lib/pastChecksFormatting';
+
+const CHECK_TYPE_OPTIONS = [
+  { value: 'all', label: 'All check types' },
+  { value: 'full', label: 'Full device checks' },
+  { value: 'component', label: 'Component checks' },
+  { value: 'scenario', label: 'Problem scenarios' },
+  { value: 'react', label: 'ReAct actions' },
+];
+
+const ACTION_FILTER_OPTIONS = [
+  { value: 'All Actions', label: 'All action tiers' },
+  { value: 'Recurring Only', label: 'Repeated checks' },
+  { value: 'Monitor', label: 'Monitor' },
+  { value: 'Maintain', label: 'Maintain' },
+  { value: 'Troubleshoot', label: 'Troubleshoot' },
+  { value: 'Escalate', label: 'Escalate' },
 ];
 
 const DEFAULT_VISIBLE_SESSIONS = 10;
@@ -111,29 +125,7 @@ function getConfidenceStyle(confidence: string) {
   return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
 
-function getResolutionLabel(status?: string) {
-  if (status === 'resolved') return 'Resolved';
-  if (status === 'still_active') return 'Still Active';
-  if (status === 'needs_recheck') return 'Needs Recheck';
 
-  return 'Open';
-}
-
-function getResolutionStyle(status?: string) {
-  if (status === 'resolved') {
-    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
-  }
-
-  if (status === 'still_active') {
-    return 'border-red-400/35 bg-red-400/10 text-red-300';
-  }
-
-  if (status === 'needs_recheck') {
-    return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
-  }
-
-  return 'border-cyan-400/35 bg-cyan-400/10 text-cyan-300';
-}
 
 function formatSessionDate(session: SessionSummary) {
   if (session.display_date) {
@@ -168,120 +160,6 @@ function formatSessionTime(createdAt?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-const SCENARIO_LABELS: Record<string, string> = {
-  'slow-system': 'Slow system check',
-  'slow-boot': 'Slow boot check',
-  'blue-screen-crash': 'Blue screen / crash check',
-  'driver-error': 'Driver problem check',
-  'no-display': 'Display problem check',
-  'overheating-loud-fan': 'Overheating / fan check',
-  'network-problem': 'Network problem check',
-  'network-issue': 'Network problem check',
-  'app-crashes': 'Application crashes check',
-  'stuttering-freezing': 'Stuttering / freezing check',
-  'storage-problem': 'Storage problem check',
-  'disk-full': 'Storage space check',
-  'rapid-battery-drain': 'Battery drain check',
-};
-
-const COMPONENT_LABELS: Record<string, string> = {
-  cpu: 'Processor',
-  memory: 'Memory',
-  gpu: 'GPU / Graphics',
-  storage: 'Storage',
-  os: 'Operating System',
-  drivers: 'Drivers',
-  battery: 'Battery / Power',
-  network: 'Network / Internet',
-  display: 'Display',
-};
-
-function titleFromId(value: string) {
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map(
-      (part) =>
-        part.charAt(0).toUpperCase() +
-        part.slice(1)
-    )
-    .join(' ');
-}
-
-function parseComponentIds(raw?: string | null) {
-  const value = raw?.trim();
-
-  if (!value) {
-    return [];
-  }
-
-  if (value.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(value);
-
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((id) => String(id).trim())
-          .filter(Boolean);
-      }
-    } catch {
-      // Fall back to the legacy comma parser below.
-    }
-  }
-
-  return value
-    .split(',')
-    .map((id) =>
-      id
-        .trim()
-        .replace(/^[\["']+|[\]"']+$/g, ''),
-    )
-    .filter(Boolean);
-}
-
-function getSessionCheckLabel(session: SessionSummary) {
-  const mode = session.diagnosis_mode?.trim().toLowerCase();
-  const scenarioId = session.scenario_id?.trim();
-  const componentIds = parseComponentIds(
-    session.component_ids,
-  );
-
-  if (mode === 'scenario' && scenarioId) {
-    return SCENARIO_LABELS[scenarioId] ?? `${titleFromId(scenarioId)} check`;
-  }
-
-  if (mode === 'component' && componentIds?.length) {
-    const labels = componentIds.map(
-      (id) => COMPONENT_LABELS[id] ?? titleFromId(id),
-    );
-
-    if (labels.length === 1) {
-      return `${labels[0]} check`;
-    }
-    if (labels.length === 2) {
-      return `${labels[0]} and ${labels[1]} check`;
-    }
-    return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]} check`;
-  }
-
-  if (mode === 'full') {
-    return 'Full device check';
-  }
-
-  const alternateSymptom = (session as SessionSummary & { symptom?: string | null }).symptom;
-  const symptom = session.symptom_type?.trim() || alternateSymptom?.trim();
-
-  if (symptom && symptom.toLowerCase() !== 'not available' && symptom.toLowerCase() !== 'unknown') {
-    return symptom;
-  }
-
-  if (session.diagnosed_category) {
-    return `${session.diagnosed_category} check`;
-  }
-
-  return 'Full device check';
 }
 
 function getSessionSymptom(session: SessionSummary) {
@@ -433,15 +311,21 @@ function SessionRow({
       </div>
 
       <div className="flex justify-center">
-        <span
-          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getResolutionStyle(
-            session.resolution_status
-          )}`}
-        >
-          {getResolutionLabel(
-            session.resolution_status
-          )}
-        </span>
+        {(() => {
+          const resInfo = getResolutionCategory(
+            session.resolution_status,
+            session.action_category,
+            session.diagnosed_category,
+            Boolean(session.last_action_status || session.last_action_summary),
+          );
+          return (
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${resInfo.className}`}
+            >
+              {resInfo.label}
+            </span>
+          );
+        })()}
       </div>
 
       <div className="flex justify-center gap-2">
@@ -505,8 +389,11 @@ export default function DiagnosticHistoryView({
   const [error, setError] =
     useState<string | null>(null);
 
-  const [filter, setFilter] =
-    useState('All Sessions');
+  const [checkTypeFilter, setCheckTypeFilter] =
+    useState('all');
+
+  const [actionFilter, setActionFilter] =
+    useState('All Actions');
 
   const [search, setSearch] =
     useState('');
@@ -575,7 +462,8 @@ export default function DiagnosticHistoryView({
       DEFAULT_VISIBLE_SESSIONS
     );
   }, [
-    filter,
+    checkTypeFilter,
+    actionFilter,
     search,
   ]);
 
@@ -586,22 +474,26 @@ export default function DiagnosticHistoryView({
 
       return sessions
         .filter((session) => {
+          if (!matchesCheckType(session, checkTypeFilter)) {
+            return false;
+          }
+
           const action =
             normalizeAction(
               session.action_category || ''
             );
 
           if (
-            filter === 'Recurring Only' &&
+            actionFilter === 'Recurring Only' &&
             !session.is_recurring
           ) {
             return false;
           }
 
           if (
-            filter !== 'All Sessions' &&
-            filter !== 'Recurring Only' &&
-            action !== filter
+            actionFilter !== 'All Actions' &&
+            actionFilter !== 'Recurring Only' &&
+            action !== actionFilter
           ) {
             return false;
           }
@@ -611,7 +503,7 @@ export default function DiagnosticHistoryView({
           }
 
           return (
-            getSessionSymptom(session).toLowerCase().includes(query) ||
+            getSessionCheckLabel(session).toLowerCase().includes(query) ||
             session.diagnosed_category
               ?.toLowerCase()
               .includes(query)
@@ -627,7 +519,8 @@ export default function DiagnosticHistoryView({
             ).getTime()
         );
     }, [
-      filter,
+      checkTypeFilter,
+      actionFilter,
       search,
       sessions,
     ]);
@@ -653,11 +546,13 @@ export default function DiagnosticHistoryView({
     filteredSessions.length;
 
   const hasActiveFilters =
-    filter !== 'All Sessions' ||
+    checkTypeFilter !== 'all' ||
+    actionFilter !== 'All Actions' ||
     search.trim().length > 0;
 
   const resetFilters = () => {
-    setFilter('All Sessions');
+    setCheckTypeFilter('all');
+    setActionFilter('All Actions');
     setSearch('');
   };
 
@@ -776,13 +671,22 @@ export default function DiagnosticHistoryView({
           </motion.div>
 
           <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <FilterDropdown
-                label="Filter"
-                value={filter}
-                onChange={setFilter}
-                options={filters.map((item) => ({ value: item, label: item === 'All Sessions' ? 'All checks' : item === 'Recurring Only' ? 'Repeated checks' : getPlainActionLabel(item) }))}
-              />
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <FilterDropdown
+                  label="Check Type"
+                  value={checkTypeFilter}
+                  onChange={setCheckTypeFilter}
+                  options={CHECK_TYPE_OPTIONS}
+                />
+
+                <FilterDropdown
+                  label="Action Tier"
+                  value={actionFilter}
+                  onChange={setActionFilter}
+                  options={ACTION_FILTER_OPTIONS}
+                />
+              </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <label className="rigmd-search-field relative block rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] transition-colors">

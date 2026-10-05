@@ -64,6 +64,8 @@ import type {
   AutonomyResult,
 } from '../services/autonomyService';
 
+import { getTelemetryDeltaSummary } from '../lib/pastChecksFormatting';
+
 interface NewDiagnosisViewProps {
   onDiagnosisComplete?: (sessionId: string) => void;
 }
@@ -602,22 +604,22 @@ function getResolutionView(
   if (value === 'resolved') {
     if (
       !hasCompletedAction &&
-      category.includes('crash') &&
+      (category.includes('crash') || category.includes('event')) &&
       noNewCrashes
     ) {
       return {
-        label: 'No New Crashes Observed',
+        label: 'No New Events',
         className:
           'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
         fallback:
-          'Fresh scan found no new crash events after this diagnosis. RigMD did not run a repair action for this result.',
+          'Windows Event Logs confirm no new crash or stop events occurred after this diagnosis.',
       };
     }
 
     return {
       label: hasCompletedAction
-        ? 'Resolved'
-        : 'No Longer Detected',
+        ? 'Resolved After Action'
+        : 'Resolved',
       className:
         'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
       fallback: hasCompletedAction
@@ -2861,6 +2863,13 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                     report.last_action_summary ||
                                     resolutionView.fallback}
                                 </p>
+
+                                {getTelemetryDeltaSummary(report.proof, report.resolution_proof) && (
+                                  <div className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-2.5 text-xs text-cyan-200">
+                                    <span className="font-bold text-cyan-300">What changed since last check: </span>
+                                    {getTelemetryDeltaSummary(report.proof, report.resolution_proof)}
+                                  </div>
+                                )}
                               </div>
 
                               <motion.button
