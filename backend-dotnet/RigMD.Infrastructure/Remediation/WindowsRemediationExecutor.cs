@@ -39,8 +39,8 @@ public class WindowsRemediationExecutor :
     {
         _logger.LogInformation(
             "WindowsRemediationExecutor: dispatching action '{ActionId}' ({ActionName})",
-            action.Id,
-            action.Name);
+            SanitizeLogValue(action.Id.ToString()),
+            SanitizeLogValue(action.Name));
 
         return action.Id switch
         {
@@ -69,6 +69,18 @@ public class WindowsRemediationExecutor :
                 CreateUnsupportedActionResult(
                     action)
         };
+    }
+
+    private static string SanitizeLogValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "n/a";
+        }
+
+        return value
+            .Replace("\r", "\\r")
+            .Replace("\n", "\\n");
     }
 
     private async Task<ExecutionResult>
