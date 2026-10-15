@@ -1,8 +1,11 @@
 import { applyCloudHeaders, boundedJson, cloudConfig } from './cloud-config.js';
 import { MODELS, REQUEST_BYTES, validatePayload } from './gemini-policy.js';
 
+export const CLOUD_TIMEOUT_MS = Object.freeze({ identity: 2000, quota: 2000, provider: 20000 });
+
 // Dependencies are explicit so access-control tests never consume a live API quota.
-export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.fetch,
+  timeoutSignal = milliseconds => AbortSignal.timeout(milliseconds), logger = console } = {}) {
   return async function handler(req, res) {
     const fail = (status, error) => res.status(status).json({ error, fallbackToLocal: true });
     if (!applyCloudHeaders(req, res)) return fail(403, 'Origin not permitted.');
@@ -30,9 +33,10 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
     if (typeof model !== 'string' || !MODELS.has(model)) return fail(400, 'Model not permitted.');
     const body = validatePayload(payload, model);
     if (!body) return fail(400, 'Request content is not permitted.');
+    let stage = 'identity';
     try {
       const userResponse = await fetchImpl(`${config.projectUrl}/auth/v1/user`, {
-        headers: { apikey: config.publicKey, Authorization: authorization }, signal: AbortSignal.timeout(2000), redirect: 'error',
+        headers: { apikey: config.publicKey, Authorization: authorization }, signal: timeoutSignal(CLOUD_TIMEOUT_MS.identity), redirect: 'error',
       });
       if (!userResponse.ok) {
         await userResponse.body?.cancel();
@@ -44,10 +48,11 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
         user.role !== 'authenticated' || user.is_anonymous === true || !user.email ||
         !user.email_confirmed_at || !Number.isFinite(Date.parse(user.email_confirmed_at)))
         return fail(403, 'A verified RigMD email account is required.');
+      stage = 'quota';
       const quotaResponse = await fetchImpl(`${config.projectUrl}/rest/v1/rpc/consume_rigmd_ai_quota`, {
         method: 'POST', headers: { apikey: serviceKey, 'Content-Type': 'application/json',
           ...(serviceKey.startsWith('ey') ? { Authorization: `Bearer ${serviceKey}` } : {}) },
-        body: JSON.stringify({ p_user_id: user.id }), signal: AbortSignal.timeout(2000), redirect: 'error',
+        body: JSON.stringify({ p_user_id: user.id }), signal: timeoutSignal(CLOUD_TIMEOUT_MS.quota), redirect: 'error',
       });
       if (!quotaResponse.ok) { await quotaResponse.body?.cancel(); return fail(503, 'Cloud usage limits are temporarily unavailable.'); }
       const quota = await boundedJson(quotaResponse, 4096);
@@ -57,9 +62,10 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
         res.setHeader('Retry-After', String(Math.min(86400, Math.max(1, Number(quota[0].retry_after_seconds) || 60))));
         return fail(429, 'Cloud AI usage limit reached. Local diagnostics are still available.');
       }
+      stage = 'provider';
       const googleResponse = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-        body: JSON.stringify(body), signal: AbortSignal.timeout(8000), redirect: 'error',
+        body: JSON.stringify(body), signal: timeoutSignal(CLOUD_TIMEOUT_MS.provider), redirect: 'error',
       });
       if (!googleResponse.ok) {
         await googleResponse.body?.cancel();
@@ -71,7 +77,9 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
       if (!data || !Array.isArray(data.candidates)) return fail(502, 'Cloud AI returned an invalid response.');
       return res.status(200).json(data);
     } catch (error) {
-      return fail(error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 503,
+      const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+      logger.warn('Cloud AI request interrupted.', { stage, category: timedOut ? 'timeout' : 'upstream-failure' });
+      return fail(timedOut ? 504 : 503,
         'Cloud AI is temporarily unavailable. Local diagnostics are still available.');
     }
   };

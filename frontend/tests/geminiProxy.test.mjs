@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGeminiHandler } from '../server/gemini-handler.js';
+import { readFile } from 'node:fs/promises';
+import { CLOUD_TIMEOUT_MS, createGeminiHandler } from '../server/gemini-handler.js';
 import { createConfigHandler } from '../api/cloud-ai-config.js';
 
 const env = { SUPABASE_URL: 'https://test-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fake',
@@ -15,17 +16,58 @@ const response = () => ({ code: 200, headers: {}, value: undefined,
 
 async function run(req = request(), overrides = {}) {
   const calls = [];
+  const warnings = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
-    if (url.endsWith('/auth/v1/user')) return overrides.auth ?? json(overrides.user ?? user);
-    if (url.includes('/rpc/')) return overrides.quota ?? json([{ allowed: true, retry_after_seconds: 0 }]);
+    if (url.endsWith('/auth/v1/user')) {
+      if (overrides.authError) throw overrides.authError;
+      return overrides.auth ?? json(overrides.user ?? user);
+    }
+    if (url.includes('/rpc/')) {
+      if (overrides.quotaError) throw overrides.quotaError;
+      return overrides.quota ?? json([{ allowed: true, retry_after_seconds: 0 }]);
+    }
     if (overrides.error) throw overrides.error;
     return overrides.google ?? json({ candidates: [{ content: { parts: [{ text: 'Safe response.' }] } }] });
   };
   const res = response();
-  await createGeminiHandler({ env: overrides.env ?? env, fetchImpl })(req, res);
-  return { res, calls };
+  await createGeminiHandler({ env: overrides.env ?? env, fetchImpl,
+    ...(overrides.timeoutSignal ? { timeoutSignal: overrides.timeoutSignal } : {}),
+    logger: { warn: (...args) => warnings.push(args) } })(req, res);
+  return { res, calls, warnings };
 }
+
+test('provider has a longer bounded budget with headroom inside the Vercel duration', async () => {
+  const budgets = [];
+  const { res, calls } = await run(request(), { timeoutSignal: milliseconds => {
+    budgets.push(milliseconds);
+    return new AbortController().signal;
+  } });
+  assert.equal(res.code, 200);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(budgets, [2000, 2000, 20000]);
+  const vercel = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const platformMs = vercel.functions['api/gemini.js'].maxDuration * 1000;
+  assert.ok(Object.values(CLOUD_TIMEOUT_MS).every(ms => Number.isFinite(ms) && ms > 0));
+  assert.ok(Object.values(CLOUD_TIMEOUT_MS).reduce((sum, ms) => sum + ms, 0) + 5000 <= platformMs);
+});
+
+test('interrupted stages fail safely without logging prompts, credentials, or raw exceptions', async () => {
+  for (const [key, stage, expectedCalls] of [['authError', 'identity', 1], ['quotaError', 'quota', 2], ['error', 'provider', 3]]) {
+    for (const name of ['TimeoutError', 'AbortError', 'Error']) {
+      const error = new Error(`private data ${env.GEMINI_API_KEY} ${env.SUPABASE_SECRET_KEY}`);
+      error.name = name;
+      const { res, calls, warnings } = await run(request(), { [key]: error });
+      const timedOut = name !== 'Error';
+      assert.equal(res.code, timedOut ? 504 : 503);
+      assert.equal(res.value.fallbackToLocal, true);
+      assert.equal(calls.length, expectedCalls);
+      assert.deepEqual(warnings, [['Cloud AI request interrupted.', { stage, category: timedOut ? 'timeout' : 'upstream-failure' }]]);
+      assert.ok(!JSON.stringify({ warnings, response: res.value }).includes(env.GEMINI_API_KEY));
+      assert.ok(!JSON.stringify({ warnings, response: res.value }).includes(env.SUPABASE_SECRET_KEY));
+    }
+  }
+});
 
 test('unauthenticated calls cannot reach Auth, quota, or Gemini even with a client ID', async () => {
   for (const authorization of [undefined, '', 'Bearer sb_publishable_fake', 'Bearer fake-token', ['Bearer a.b.c']]) {
