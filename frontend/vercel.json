@@ -1,4 +1,5 @@
 {
+  "functions": { "api/gemini.js": { "maxDuration": 15 } },
   "rewrites": [
     {
       "source": "/((?!api/).*)",
