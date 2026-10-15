@@ -69,12 +69,19 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
       });
       if (!googleResponse.ok) {
         await googleResponse.body?.cancel();
+        logger.warn('Cloud AI provider rejected request.', { model, status: googleResponse.status });
         if (googleResponse.status === 429) { res.setHeader('Retry-After', '60'); return fail(429, 'Cloud AI is busy. Try again later.'); }
         if ([400, 404].includes(googleResponse.status)) return fail(googleResponse.status, 'This cloud model could not serve the request.');
         return fail(502, 'Cloud AI could not complete this request.');
       }
       const data = await boundedJson(googleResponse, 256 * 1024);
-      if (!data || !Array.isArray(data.candidates)) return fail(502, 'Cloud AI returned an invalid response.');
+      if (!data || !Array.isArray(data.candidates) || data.candidates.length === 0) {
+        logger.warn('Cloud AI provider returned no candidates.', { model });
+        return fail(502, 'Cloud AI returned an invalid response.');
+      }
+      const reportedFinish = data.candidates[0]?.finishReason;
+      const finishReason = ['STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION'].includes(reportedFinish) ? reportedFinish : 'OTHER';
+      logger.info?.('Cloud AI provider response.', { model, status: googleResponse.status, finishReason });
       return res.status(200).json(data);
     } catch (error) {
       const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';

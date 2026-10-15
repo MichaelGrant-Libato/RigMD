@@ -17,6 +17,7 @@ const response = () => ({ code: 200, headers: {}, value: undefined,
 async function run(req = request(), overrides = {}) {
   const calls = [];
   const warnings = [];
+  const infos = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith('/auth/v1/user')) {
@@ -33,9 +34,27 @@ async function run(req = request(), overrides = {}) {
   const res = response();
   await createGeminiHandler({ env: overrides.env ?? env, fetchImpl,
     ...(overrides.timeoutSignal ? { timeoutSignal: overrides.timeoutSignal } : {}),
-    logger: { warn: (...args) => warnings.push(args) } })(req, res);
-  return { res, calls, warnings };
+    logger: { warn: (...args) => warnings.push(args), info: (...args) => infos.push(args) } })(req, res);
+  return { res, calls, warnings, infos };
 }
+
+test('provider status and completion logs contain only bounded metadata, never response data', async () => {
+  const rejected = await run(request(), { google: json({ error: { message: `${env.GEMINI_API_KEY} private prompt` } }, 503) });
+  assert.equal(rejected.res.code, 502);
+  assert.deepEqual(rejected.warnings, [['Cloud AI provider rejected request.', { model: 'gemini-3.5-flash', status: 503 }]]);
+  for (const reportedFinish of ['STOP', 'MAX_TOKENS', 'SAFETY', `unsafe\n${env.GEMINI_API_KEY}`]) {
+    const result = await run(request(), { google: json({ candidates: [{ finishReason: reportedFinish,
+      content: { parts: [{ text: `private text ${env.GEMINI_API_KEY}` }] } }] }) });
+    assert.equal(result.res.code, 200);
+    assert.deepEqual(result.infos, [['Cloud AI provider response.', { model: 'gemini-3.5-flash', status: 200,
+      finishReason: ['STOP', 'MAX_TOKENS', 'SAFETY'].includes(reportedFinish) ? reportedFinish : 'OTHER' }]]);
+    assert.ok(!JSON.stringify({ warnings: result.warnings, infos: result.infos }).includes(env.GEMINI_API_KEY));
+    assert.ok(!JSON.stringify(result.infos).includes('private text'));
+  }
+  const empty = await run(request(), { google: json({ candidates: [] }) });
+  assert.equal(empty.res.code, 502);
+  assert.deepEqual(empty.warnings, [['Cloud AI provider returned no candidates.', { model: 'gemini-3.5-flash' }]]);
+});
 
 test('provider has a longer bounded budget with headroom inside the Vercel duration', async () => {
   const budgets = [];
