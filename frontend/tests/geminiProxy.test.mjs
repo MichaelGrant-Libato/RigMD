@@ -6,6 +6,9 @@ import { createConfigHandler } from '../api/cloud-ai-config.js';
 
 const env = { SUPABASE_URL: 'https://test-project.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fake',
   SUPABASE_SECRET_KEY: 'sb_secret_fake_admin', GEMINI_API_KEY: 'fake-google-key' };
+const stagingOrigin = 'https://rig-md-git-work-local-891ed7-michaelgrantlibato7-9044s-projects.vercel.app';
+const stagingEnv = { ...env, SUPABASE_URL: 'https://qwytztbzvjgmqybdmrch.supabase.co',
+  VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'work/local-hardening-sync' };
 const user = { id: '89520f7c-2c44-4fef-9baa-e70f7cfa2de9', role: 'authenticated', email: 'test@example.com', email_confirmed_at: '2026-10-01T00:00:00Z' };
 const body = { contents: [{ role: 'user', parts: [{ text: 'Explain a diagnostic result.' }] }] };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -195,6 +198,103 @@ test('foreign browser origins are denied and allowed preflight never consumes qu
   const { res, calls } = await run(req);
   assert.equal(res.code, 204); assert.equal(calls.length, 0);
   assert.equal(res.headers['Access-Control-Allow-Origin'], req.headers.origin);
+});
+
+test('only the staging branch alias can preflight and read its public configuration', async () => {
+  const req = request(); req.method = 'OPTIONS'; req.headers.origin = stagingOrigin;
+  delete req.headers.authorization;
+  const { res, calls } = await run(req, { env: stagingEnv });
+  assert.equal(res.code, 204);
+  assert.equal(calls.length, 0);
+  assert.equal(res.headers['Access-Control-Allow-Origin'], stagingOrigin);
+  assert.equal(res.headers['Access-Control-Allow-Headers'], 'Authorization, Content-Type');
+  const preflight = response(); createConfigHandler(stagingEnv)(req, preflight);
+  assert.equal(preflight.code, 204);
+  const config = response(); createConfigHandler(stagingEnv)({ ...req, method: 'GET' }, config);
+  assert.equal(config.code, 200);
+  assert.equal(config.headers['Access-Control-Allow-Origin'], stagingOrigin);
+  assert.deepEqual(config.value, { supabaseUrl: stagingEnv.SUPABASE_URL, publishableKey: stagingEnv.SUPABASE_PUBLISHABLE_KEY });
+  assert.ok(!JSON.stringify(config.value).includes(stagingEnv.SUPABASE_SECRET_KEY));
+  assert.ok(!JSON.stringify(config.value).includes(stagingEnv.GEMINI_API_KEY));
+});
+
+test('staging origin requires Preview, the exact branch, and the effective staging project', async () => {
+  for (const changed of [
+    { VERCEL_ENV: 'production' }, { VERCEL_ENV: 'development' }, { VERCEL_ENV: undefined },
+    { VERCEL_GIT_COMMIT_REF: 'main' }, { VERCEL_GIT_COMMIT_REF: 'work/local-hardening-syn' },
+    { VERCEL_GIT_COMMIT_REF: undefined },
+    { SUPABASE_URL: 'https://rjictnjgmuvwzilipqcz.supabase.co' },
+    { SUPABASE_URL: 'https://other-project.supabase.co' },
+    { SUPABASE_URL: '', VITE_SUPABASE_URL: '' }, { SUPABASE_PUBLISHABLE_KEY: 'sb_secret_wrong' },
+    { SUPABASE_URL: 'https://rjictnjgmuvwzilipqcz.supabase.co', VITE_SUPABASE_URL: stagingEnv.SUPABASE_URL },
+  ]) {
+    const configEnv = { ...stagingEnv, ...changed };
+    for (const method of ['POST', 'OPTIONS']) {
+      const req = request(); req.method = method; req.headers.origin = stagingOrigin;
+      const { res, calls } = await run(req, { env: configEnv });
+      assert.equal(res.code, 403); assert.equal(calls.length, 0);
+      assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
+    }
+    for (const method of ['GET', 'OPTIONS']) {
+      const config = response(); createConfigHandler(configEnv)({ method, headers: { origin: stagingOrigin } }, config);
+      assert.equal(config.code, 403);
+      assert.equal(config.headers['Access-Control-Allow-Origin'], undefined);
+    }
+  }
+});
+
+test('other Preview deployments and lookalike staging origins remain blocked', async () => {
+  for (const origin of ['https://other-preview.vercel.app',
+    'https://rig-j8a2rbfz4-michaelgrantlibato7-9044s-projects.vercel.app',
+    `${stagingOrigin}.evil.example`, `${stagingOrigin}/`, `${stagingOrigin}:444`,
+    stagingOrigin.replace('https:', 'http:'), 'null', [stagingOrigin]]) {
+    const req = request(); req.headers.origin = origin;
+    const { res, calls } = await run(req, { env: stagingEnv });
+    assert.equal(res.code, 403); assert.equal(calls.length, 0);
+    const config = response(); createConfigHandler(stagingEnv)({ method: 'GET', headers: { origin } }, config);
+    assert.equal(config.code, 403);
+  }
+});
+
+test('staging origin still requires verified sign-in and quota before calling Gemini', async () => {
+  const req = request(); req.headers.origin = stagingOrigin;
+  const unsigned = structuredClone(req); delete unsigned.headers.authorization;
+  const denied = await run(unsigned, { env: stagingEnv });
+  assert.equal(denied.res.code, 401); assert.equal(denied.calls.length, 0);
+  const unverified = await run(req, { env: stagingEnv, user: { ...user, email_confirmed_at: null } });
+  assert.equal(unverified.res.code, 403); assert.equal(unverified.calls.length, 1);
+  const exhausted = await run(req, { env: stagingEnv, quota: json([{ allowed: false, retry_after_seconds: 60 }]) });
+  assert.equal(exhausted.res.code, 429); assert.equal(exhausted.calls.length, 2);
+  assert.equal(exhausted.res.headers['Retry-After'], '60');
+  const accepted = await run(req, { env: stagingEnv });
+  assert.equal(accepted.res.code, 200); assert.equal(accepted.calls.length, 3);
+  assert.equal(accepted.calls[0].url, `${stagingEnv.SUPABASE_URL}/auth/v1/user`);
+  assert.equal(accepted.calls[1].url, `${stagingEnv.SUPABASE_URL}/rest/v1/rpc/consume_rigmd_ai_quota`);
+  assert.equal(accepted.res.headers['Access-Control-Allow-Origin'], stagingOrigin);
+});
+
+test('staging accepts the existing VITE public configuration fallback', async () => {
+  const fallbackEnv = { ...stagingEnv, SUPABASE_URL: '', SUPABASE_PUBLISHABLE_KEY: '',
+    VITE_SUPABASE_URL: stagingEnv.SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY: stagingEnv.SUPABASE_PUBLISHABLE_KEY };
+  const req = request(); req.headers.origin = stagingOrigin;
+  const { res } = await run(req, { env: fallbackEnv });
+  assert.equal(res.code, 200);
+  const config = response(); createConfigHandler(fallbackEnv)({ method: 'GET', headers: { origin: stagingOrigin } }, config);
+  assert.equal(config.code, 200);
+  assert.equal(config.value.supabaseUrl, stagingEnv.SUPABASE_URL);
+});
+
+test('production retains its existing allowed origins and no-Origin requests', async () => {
+  const productionEnv = { ...env, VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main' };
+  for (const origin of [undefined, 'https://www.rig-md.com', 'https://rig-md.com',
+    'http://localhost:5273', 'http://127.0.0.1:5273', 'http://localhost:5173']) {
+    const req = request(); if (origin !== undefined) req.headers.origin = origin;
+    const { res } = await run(req, { env: productionEnv });
+    assert.equal(res.code, 200);
+    assert.equal(res.headers['Access-Control-Allow-Origin'], origin);
+    const config = response(); createConfigHandler(productionEnv)({ method: 'GET', headers: req.headers }, config);
+    assert.equal(config.code, 200);
+  }
 });
 
 test('public configuration never exposes administrator or Gemini credentials', () => {

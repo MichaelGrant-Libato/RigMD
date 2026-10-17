@@ -11,7 +11,7 @@ export function cloudConfig(env) {
   return { projectUrl, publicKey };
 }
 
-export function applyCloudHeaders(req, res) {
+export function applyCloudHeaders(req, res, env = process.env) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Vary', 'Origin');
@@ -19,6 +19,11 @@ export function applyCloudHeaders(req, res) {
   if (origin === undefined) return true;
   const allowed = new Set(['https://www.rig-md.com', 'https://rig-md.com',
     'http://localhost:5273', 'http://127.0.0.1:5273', 'http://localhost:5173']);
+  // This branch alias is trusted only in the isolated staging deployment.
+  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === 'work/local-hardening-sync' &&
+    cloudConfig(env)?.projectUrl === 'https://qwytztbzvjgmqybdmrch.supabase.co') {
+    allowed.add('https://rig-md-git-work-local-891ed7-michaelgrantlibato7-9044s-projects.vercel.app');
+  }
   if (typeof origin !== 'string' || !allowed.has(origin)) return false;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');

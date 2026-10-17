@@ -2,7 +2,7 @@ import { applyCloudHeaders, cloudConfig } from '../server/cloud-config.js';
 
 export function createConfigHandler(env) {
   return (req, res) => {
-    if (!applyCloudHeaders(req, res)) return res.status(403).json({ error: 'Origin not permitted.' });
+    if (!applyCloudHeaders(req, res, env)) return res.status(403).json({ error: 'Origin not permitted.' });
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'GET') { res.setHeader('Allow', 'GET, OPTIONS'); return res.status(405).end(); }
     const config = cloudConfig(env);
