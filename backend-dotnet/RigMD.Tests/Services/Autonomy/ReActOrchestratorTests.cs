@@ -445,6 +445,12 @@ public class ReActOrchestratorTests
     [InlineData("Thermal condition", 85d, 42d, VerificationStatus.Unresolved)]
     [InlineData("Thermal condition", 45d, 95d, VerificationStatus.Resolved)]
     [InlineData("Elevated CPU Utilization", null, 42d, VerificationStatus.Resolved)]
+    [InlineData("Elevated CPU Utilization", null, 79.9, VerificationStatus.Resolved)]
+    [InlineData("Elevated CPU Utilization", null, 79.99, VerificationStatus.Resolved)]
+    [InlineData("Elevated CPU Utilization", null, 80d, VerificationStatus.Unresolved)]
+    [InlineData("Elevated CPU Utilization", 45d, 80.1, VerificationStatus.Unresolved)]
+    [InlineData("Elevated CPU Utilization", 45d, 89.9, VerificationStatus.Unresolved)]
+    [InlineData("Elevated CPU Utilization", 45d, 90d, VerificationStatus.Unresolved)]
     [InlineData("Elevated CPU Utilization", 45d, 95d, VerificationStatus.Unresolved)]
     public async Task CpuAndThermalVerification_UsesTheRelevantMeasurement(
         string category, double? temperature, double usage, VerificationStatus expected)

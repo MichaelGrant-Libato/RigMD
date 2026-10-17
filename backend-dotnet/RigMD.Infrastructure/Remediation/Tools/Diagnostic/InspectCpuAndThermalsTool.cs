@@ -87,7 +87,7 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
         var payload = new
         {
             model = cpu.Name,
-            usagePercent = Math.Round(cpu.UsagePercent, 1),
+            usagePercent = cpu.UsagePercent,
             sensorLoadPercent = lhmCpuLoad.HasValue ? Math.Round(lhmCpuLoad.Value, 1) : (double?)null,
             temperatureCelsius = cpu.TemperatureCelsius,
             temperatureSource = cpu.TemperatureSource,

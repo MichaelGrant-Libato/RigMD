@@ -14,7 +14,7 @@ public class ResolutionResultDto
 
 public class ResolutionService
 {
-    private const double ElevatedCpuThreshold = 90;
+    private const double BatteryDrainCpuThreshold = 90;
     private const double SevereResourceThreshold = 85;
     private const double ElevatedMemoryThreshold = 80;
     private const double BrowserMemoryPressureMb = 3000;
@@ -58,7 +58,7 @@ public class ResolutionService
                     return CheckBootStartupResolution(hardware);
                 case "slow-system":
                 case "stuttering-freezing":
-                    return CheckOsPerformanceResolution(hardware);
+                    return CheckOsPerformanceResolution(hardware, CpuLoadThresholds.Responsiveness);
             }
         }
 
@@ -326,7 +326,7 @@ public class ResolutionService
         var chargePercent = battery.ChargePercent > 0
             ? battery.ChargePercent
             : battery.EstimatedChargeRemaining;
-        var cpuOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
+        var cpuOk = hardware.Cpu.UsagePercent < BatteryDrainCpuThreshold;
         var chargeOk = chargePercent > 15 || battery.IsCharging;
         var resolved = cpuOk && chargeOk;
 
@@ -379,7 +379,9 @@ public class ResolutionService
 
         var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
         var eventEvidenceOk = eventLogAvailable && eventsSinceDiagnosis.Count == 0;
-        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var cpuThreshold = kind == CrashResolutionKind.Application
+            ? CpuLoadThresholds.Elevated : CpuLoadThresholds.SystemStabilityRisk;
+        var cpuOk = cpuUsage < cpuThreshold;
         var ramOk = ramUsage < ElevatedMemoryThreshold;
         var driversOk = errCount == 0;
         var supportingSignalsOk = cpuOk && ramOk && driversOk;
@@ -453,7 +455,7 @@ public class ResolutionService
         var ramUsage = hardware.Ram.UsagePercent;
 
         var storageOk = primaryDisk == null || storageUsage < ElevatedStorageThreshold;
-        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var cpuOk = cpuUsage < CpuLoadThresholds.Startup;
         var ramOk = ramUsage < ElevatedMemoryThreshold;
         var resolved = storageOk && cpuOk && ramOk;
 
@@ -532,7 +534,7 @@ public class ResolutionService
         var tempC = hardware.Cpu.TemperatureCelsius;
         var tempOk = !tempC.HasValue || tempC.Value < ElevatedTempThresholdCelsius;
         var throttleOk = !hardware.Cpu.IsThermallyThrottling;
-        var cpuLoadOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
+        var cpuLoadOk = hardware.Cpu.UsagePercent < CpuLoadThresholds.Elevated;
         var gpuTemp = hardware.Gpu.TemperatureCelsius;
         var gpuTempOk = !gpuTemp.HasValue || gpuTemp.Value < ElevatedTempThresholdCelsius;
         var resolved = tempOk && throttleOk && gpuTempOk;
@@ -603,13 +605,13 @@ public class ResolutionService
         HardwareProfileDto hardware)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
-        var resolved = cpuUsage < ElevatedCpuThreshold;
+        var resolved = cpuUsage < CpuLoadThresholds.Elevated;
 
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan no longer shows very high processor activity. No active issue is detected for this saved check."
-                : "Fresh scan still shows very high processor activity.",
+                ? "Fresh scan shows processor activity below RigMD's elevated-load threshold. No active issue is detected for this saved check."
+                : "Fresh scan still shows elevated processor activity.",
             new object[]
             {
                 Proof(
@@ -622,7 +624,8 @@ public class ResolutionService
     }
 
     private static ResolutionResultDto CheckOsPerformanceResolution(
-        HardwareProfileDto hardware)
+        HardwareProfileDto hardware,
+        double cpuMustBeBelow = CpuLoadThresholds.Elevated)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
         var ramUsage = hardware.Ram.UsagePercent;
@@ -633,7 +636,7 @@ public class ResolutionService
         var browserMemoryMb = hardware.ProcessInsights.BrowserMemoryMb;
         var browserProcessCount = hardware.ProcessInsights.BrowserProcessCount;
 
-        var cpuOk = cpuUsage < ElevatedCpuThreshold;
+        var cpuOk = cpuUsage < cpuMustBeBelow;
         var ramOk = ramUsage < ElevatedMemoryThreshold;
         var storageOk = primaryDisk == null || storageUsage < ElevatedStorageThreshold;
         var browserOk = browserMemoryMb < BrowserMemoryPressureMb && browserProcessCount < 25;

@@ -254,7 +254,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             };
         }
 
-        if (EvalComponent("cpu") && cpuUsage >= 80)
+        if (EvalComponent("cpu") && cpuUsage >= CpuLoadThresholds.Elevated)
         {
             var primary = $"Processor (CPU) is experiencing elevated load ({cpuUsage:0.#}% on {hw.Cpu.Name}).";
             return new AutomaticDiagnosisResult
@@ -562,8 +562,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             (hw.Network.PingLatencyMs ?? 0) >= 120 ||
             (hw.Network.IsWifi && hw.Network.WifiSignalStrength is > 0 and <= 45);
         var storageIssue = smartFailing || maxDiskUsage >= 80;
-        var responsivenessIssue = cpuUsage >= 65 || ramUsage >= 75 || maxDiskUsage >= 80;
-        var startupIssue = maxDiskUsage >= 80 || cpuUsage >= 70;
+        var responsivenessIssue = cpuUsage >= CpuLoadThresholds.Responsiveness || ramUsage >= 75 || maxDiskUsage >= 80;
+        var startupIssue = maxDiskUsage >= 80 || cpuUsage >= CpuLoadThresholds.Startup;
         var batteryIssue = hw.Battery?.HasBattery == true &&
             !hw.Battery.IsCharging &&
             hw.Battery.EstimatedChargeRemaining <= 20;
@@ -571,8 +571,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
         var appCrashEventCount = stabilityEvents.ApplicationCrashEvents?.Count ?? 0;
         var systemCrashEventCount = stabilityEvents.SystemCrashEvents?.Count ?? 0;
-        var appCrashSupportingRisk = cpuUsage >= 80 || ramUsage >= 80 || hasDeviceErrors;
-        var systemCrashSupportingRisk = cpuUsage >= 85 || hasDeviceErrors;
+        var appCrashSupportingRisk = cpuUsage >= CpuLoadThresholds.Elevated || ramUsage >= 80 || hasDeviceErrors;
+        var systemCrashSupportingRisk = cpuUsage >= CpuLoadThresholds.SystemStabilityRisk || hasDeviceErrors;
 
         return scenarioId switch
         {
@@ -615,7 +615,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 PrimaryResult = $"Startup check recorded primary storage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} and CPU startup baseline at {cpuUsage:0.#}%.",
                 DiagnosedCategory = "Boot and startup failure",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = maxDiskUsage >= 80 || cpuUsage >= 70 ? "High" : "Medium",
+                ConfidenceLabel = maxDiskUsage >= 80 || cpuUsage >= CpuLoadThresholds.Startup ? "High" : "Medium",
                 Explanation = $"Startup performance check recorded boot drive usage at {maxDiskUsage:0.#}% on {hw.PrimaryStorageType} under power plan '{hw.ActivePowerPlan}'.",
                 RecommendedNextStep = "Review startup applications in Windows Settings or run the guided inspection below to check startup impact and clear temporary caches.",
                 Proof = proof,
@@ -646,7 +646,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     ? "Application crash history requires review"
                     : "Application stability risk needs review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = appCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= 80 || ramUsage >= 85 ? "High" : "Medium",
+                ConfidenceLabel = appCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= CpuLoadThresholds.Elevated || ramUsage >= 85 ? "High" : "Medium",
                 Explanation = appCrashEventCount > 0
                     ? $"Windows Event Logs show {appCrashEventCount} recent application crash event(s). Reliability Monitor can show which app failed and when."
                     : eventLogAvailable
@@ -679,7 +679,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     : $"System crash check needs review because supporting risk signals remain active: CPU {cpuUsage:0.#}% and Device Manager warnings {(hw.DeviceErrors?.Count ?? 0)}.",
                 DiagnosedCategory = "System crash or stop error requires review",
                 ActionCategory = "Troubleshoot",
-                ConfidenceLabel = systemCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= 85 ? "High" : "Medium",
+                ConfidenceLabel = systemCrashEventCount > 0 || hasDeviceErrors || cpuUsage >= CpuLoadThresholds.SystemStabilityRisk ? "High" : "Medium",
                 Explanation = systemCrashEventCount > 0
                     ? $"Windows Event Logs show {systemCrashEventCount} recent system crash or unexpected restart event(s). Checking stop-error logs and system file integrity is recommended."
                     : $"No recent stop-error event is visible, but live driver or processor signals still need review before the system crash scenario is considered clear.",
