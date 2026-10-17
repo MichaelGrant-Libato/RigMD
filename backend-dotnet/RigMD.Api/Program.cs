@@ -1,10 +1,12 @@
-using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Services;
 using RigMD.Infrastructure.Persistence;
+using RigMD.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+// SignalR browser transports use a query credential; do not log full request URLs.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 
 // Load optional local developer overrides (gitignored and excluded from publish/installer)
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -15,62 +17,18 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton(new RigMD.Api.Services.LocalApiSession(
+    Environment.GetEnvironmentVariable(RigMD.Api.Services.LocalApiSession.EnvironmentVariable)));
+builder.Services.AddSingleton<RigMD.Api.Services.LocalRemediationExecutionGate>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<RigMD.Api.Services.RemediationApprovalStore>();
+builder.Services.AddHttpClient("CloudAccount").RedactLoggedHeaders(_ => true)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<RigMD.Application.Contracts.Autonomy.ICloudAiSession>(services =>
+    new RigMD.Infrastructure.Ai.CloudAiSession(services.GetRequiredService<IHttpClientFactory>().CreateClient("CloudAccount"),
+        services.GetRequiredService<IConfiguration>(), services.GetRequiredService<TimeProvider>()));
 
-// Add server-side Rate Limiting to guard against F12 console spam, DoS, and API quota exhaustion
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.OnRejected = async (context, cancellationToken) =>
-    {
-        context.HttpContext.Response.ContentType = "application/json";
-        context.HttpContext.Response.Headers["Retry-After"] = "10";
-        await context.HttpContext.Response.WriteAsync(
-            "{\"detail\":\"Rate limit exceeded. Please wait a few seconds before sending additional requests.\"}",
-            cancellationToken);
-    };
-
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        var path = httpContext.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
-
-        // Static assets and SignalR hubs are not subject to REST API rate limiting
-        if (!path.StartsWith("/api/"))
-        {
-            return RateLimitPartition.GetNoLimiter("static-or-hub");
-        }
-
-        var clientKey = httpContext.Request.Headers["X-Client-ID"].FirstOrDefault()
-            ?? httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? "local-client";
-
-        // Strict tier for heavy AI / WMI / ReAct autonomy endpoints (protects Gemini free-tier quota & WMI)
-        if (path.StartsWith("/api/autonomy/") ||
-            path.Contains("/diagnosis/local-scan") ||
-            path.Contains("/diagnosis/analyze"))
-        {
-            return RateLimitPartition.GetFixedWindowLimiter(
-                $"heavy:{clientKey}",
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 8,
-                    Window = TimeSpan.FromSeconds(30),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
-        }
-
-        // Standard tier for live telemetry and summary polling endpoints
-        return RateLimitPartition.GetFixedWindowLimiter(
-            $"standard:{clientKey}",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 45,
-                Window = TimeSpan.FromSeconds(15),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            });
-    });
-});
+builder.Services.AddLocalApiRateLimiting();
 
 // Add CORS policy to allow only local React frontend origins
 builder.Services.AddCors(options =>
@@ -146,7 +104,9 @@ builder.Services.AddSingleton<RigMD.Infrastructure.Windows.IHardwareMonitorServi
 // Application Services
 // ---------------------------------------------------------------
 builder.Services.AddScoped<RigMD.Infrastructure.Ai.OfflineAiExplainer>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.GeminiAiExplainer>();
+builder.Services.AddHttpClient<RigMD.Application.Contracts.Ai.IAiExplainer, RigMD.Infrastructure.Ai.GeminiAiExplainer>()
+    .RedactLoggedHeaders(_ => true)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<RigMD.Application.Services.IDiagnosticEngineService,      RigMD.Application.Services.DiagnosticEngineService>();
 builder.Services.AddScoped<ResolutionService>();
 builder.Services.AddScoped<RecurringPatternService>();
@@ -182,7 +142,9 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool,
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RescanPlugAndPlayDevicesTool>();
 
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentToolRegistry, RigMD.Infrastructure.Remediation.Tools.RigMdAgentToolRegistry>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IReActLlmClient, RigMD.Infrastructure.Ai.GeminiReActLlmClient>();
+builder.Services.AddHttpClient<RigMD.Application.Contracts.Autonomy.IReActLlmClient, RigMD.Infrastructure.Ai.GeminiReActLlmClient>()
+    .RedactLoggedHeaders(_ => true)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
 builder.Services.AddHostedService<RigMD.Api.Services.TelemetryBackgroundService>();
 
@@ -280,46 +242,13 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowReact");
 app.UseHttpsRedirection();
 
-// Anti-penetration security headers & localhost cross-site request guard
-// (prevents MIME sniffing, clickjacking, referrer leakage, and cross-site port abuse from external websites)
+// Browser security headers. Local API/hub authentication is enforced below.
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     context.Response.Headers["X-Permitted-Cross-Domain-Policies"] = "none";
-
-    var path = context.Request.Path.Value ?? string.Empty;
-    if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
-    {
-        // Block requests initiated by external websites open in the user's browser
-        if (context.Request.Headers.TryGetValue("Origin", out var originValues))
-        {
-            var origin = originValues.FirstOrDefault() ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(origin) &&
-                !origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) &&
-                !origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase) &&
-                !origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) &&
-                !origin.StartsWith("https://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsync("{\"detail\":\"Cross-origin requests from external domains are forbidden.\"}");
-                return;
-            }
-        }
-
-        if (context.Request.Headers.TryGetValue("Sec-Fetch-Site", out var fetchSiteValues))
-        {
-            var fetchSite = fetchSiteValues.FirstOrDefault() ?? string.Empty;
-            if (string.Equals(fetchSite, "cross-site", StringComparison.OrdinalIgnoreCase) &&
-                !context.Request.Headers.ContainsKey("X-Client-ID"))
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsync("{\"detail\":\"Cross-site browser requests without local client authentication are forbidden.\"}");
-                return;
-            }
-        }
-    }
 
     await next();
 });
@@ -341,8 +270,8 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 
+app.UseMiddleware<RigMD.Api.Middleware.LocalApiAuthenticationMiddleware>();
 app.UseRateLimiter();
-app.UseMiddleware<RigMD.Api.Middleware.ClientIdMiddleware>();
 app.MapControllers();
 app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");
 app.MapHub<RigMD.Api.Hubs.TelemetryHub>("/hubs/telemetry");

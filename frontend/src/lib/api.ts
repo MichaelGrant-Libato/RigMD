@@ -1,6 +1,6 @@
 /**
- * Thin API wrappers that automatically inject the X-Client-ID header
- * into every request so the backend scopes data to this client.
+ * API wrappers authenticated by the desktop's per-launch local credential.
+ * X-Client-ID remains a compatibility hint, not an authorization boundary.
  */
 
 import axios, {
@@ -8,9 +8,12 @@ import axios, {
   type AxiosResponse,
 } from 'axios';
 import { getClientId } from './clientId';
+import { getLocalApiToken, localApiAuthHeaders } from './localApiSession';
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
+  getLocalApiToken()
+    ? window.location.origin
+    : import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5273';
 
 export async function apiFetch(
   path: string,
@@ -37,6 +40,8 @@ export async function apiFetch(
     headers.set('Content-Type', 'application/json');
   }
 
+  for (const [key, value] of Object.entries(localApiAuthHeaders())) headers.set(key, value);
+
   return fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,
@@ -58,6 +63,7 @@ export async function apiGet<T = unknown>(
     headers: {
       ...clientHeaders(),
       ...config.headers,
+      ...localApiAuthHeaders(),
     },
   });
 }
@@ -73,6 +79,7 @@ export async function apiPost<T = unknown>(
       'Content-Type': 'application/json',
       ...clientHeaders(),
       ...config.headers,
+      ...localApiAuthHeaders(),
     },
   });
 }
@@ -86,6 +93,7 @@ export async function apiDelete<T = unknown>(
     headers: {
       ...clientHeaders(),
       ...config.headers,
+      ...localApiAuthHeaders(),
     },
   });
 }

@@ -1,12 +1,14 @@
 using System;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Contracts.Ai;
+using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Services;
 using RigMD.Domain.Rules;
 
@@ -29,26 +31,30 @@ public class GeminiAiExplainer : IAiExplainer
     private readonly IConfiguration _configuration;
     private readonly OfflineAiExplainer _offlineFallback;
     private readonly ILogger<GeminiAiExplainer> _logger;
+    private readonly ICloudAiSession? _cloudSession;
 
     public GeminiAiExplainer(
         HttpClient httpClient,
         IConfiguration configuration,
         OfflineAiExplainer offlineFallback,
-        ILogger<GeminiAiExplainer> logger)
+        ILogger<GeminiAiExplainer> logger,
+        ICloudAiSession? cloudSession = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _offlineFallback = offlineFallback;
         _logger = logger;
+        _cloudSession = cloudSession;
     }
 
     public async Task<string> GenerateExplanationAsync(
         DiagnosticResult result,
         DiagnosticSymptomPayload symptomPayload)
     {
-        var apiKey = ResolveApiKey();
         var proxyUrl = ResolveProxyUrl();
-        if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(proxyUrl))
+        var proxy = RigMdAgentRuntimeSettingsStore.GetTrustedCloudProxyUri(proxyUrl);
+        var accessToken = proxy != null && _cloudSession != null ? await _cloudSession.GetAccessTokenAsync() : null;
+        if (proxy == null || accessToken == null)
         {
             return await _offlineFallback.GenerateExplanationAsync(result, symptomPayload);
         }
@@ -84,16 +90,16 @@ public class GeminiAiExplainer : IAiExplainer
         {
             try
             {
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
-                var url = !string.IsNullOrWhiteSpace(apiKey)
-                    ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
-                    : $"{proxyUrl}?model={model}";
-
-                using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-                using var response = await _httpClient.PostAsync(url, content, cts.Token);
+                using var cts = new System.Threading.CancellationTokenSource(RigMdAgentRuntimeSettingsStore.CloudRequestTimeout);
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{proxy}?model={Uri.EscapeDataString(model)}");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+                using var response = await _httpClient.SendAsync(request, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    if ((int)response.StatusCode is 401 or 403) await _cloudSession!.RejectAccessTokenAsync(accessToken);
+                    if ((int)response.StatusCode is not (400 or 404)) break;
                     continue;
                 }
 
@@ -104,47 +110,25 @@ public class GeminiAiExplainer : IAiExplainer
                     candidates.GetArrayLength() > 0)
                 {
                     var firstCandidate = candidates[0];
-                    var finishReason = firstCandidate.TryGetProperty("finishReason", out var frElem)
+                    var finishReason = firstCandidate.ValueKind == JsonValueKind.Object &&
+                        firstCandidate.TryGetProperty("finishReason", out var frElem) && frElem.ValueKind == JsonValueKind.String
                         ? frElem.GetString()
                         : null;
 
-                    // Reject responses that were stopped prematurely due to token budget or safety triggers
-                    if (string.Equals(finishReason, "MAX_TOKENS", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(finishReason, "SAFETY", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(finishReason, "SAFETY", StringComparison.OrdinalIgnoreCase))
                     {
-                        _logger.LogWarning(
-                            "[AI] Gemini explanation truncated with finishReason {FinishReason} for model {Model}. Trying next candidate or fallback.",
-                            finishReason,
-                            model);
-                        continue;
+                        break;
                     }
 
-                    if (firstCandidate.TryGetProperty("content", out var contentElem) &&
-                        contentElem.TryGetProperty("parts", out var parts) &&
-                        parts.GetArrayLength() > 0 &&
-                        parts[0].TryGetProperty("text", out var textElem))
+                    var text = ReadCompletedExplanation(firstCandidate);
+                    if (text != null)
                     {
-                        var text = textElem.GetString()?.Trim();
-                        if (!string.IsNullOrWhiteSpace(text))
-                        {
-                            // Sanity check: Ensure text is complete (ends with terminal sentence punctuation)
-                            var lastChar = text[^1];
-                            if (lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ')' && lastChar != '"')
-                            {
-                                _logger.LogWarning(
-                                    "[AI] Gemini explanation appears cut off mid-sentence (ends with '{LastChar}') for model {Model}. Trying next candidate or fallback.",
-                                    lastChar,
-                                    model);
-                                continue;
-                            }
-
-                            var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
-                                ? "Direct Gemini API"
-                                : $"Gemini Cloud Proxy ({proxyUrl})";
-                            _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
-                            return text;
-                        }
+                        var modeLabel = "Authenticated Gemini Cloud Proxy";
+                        _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
+                        return text;
                     }
+
+                    _logger.LogWarning("[AI] Gemini returned no completed explanation for model {Model}; trying next candidate or offline fallback.", model);
                 }
             }
             catch (Exception ex)
@@ -160,14 +144,27 @@ public class GeminiAiExplainer : IAiExplainer
         return await _offlineFallback.GenerateExplanationAsync(result, symptomPayload);
     }
 
-    private string? ResolveApiKey()
+    internal static string? ReadCompletedExplanation(JsonElement candidate)
     {
-        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
+        if (candidate.ValueKind != JsonValueKind.Object ||
+            !candidate.TryGetProperty("finishReason", out var finishReason) || finishReason.ValueKind != JsonValueKind.String ||
+            !string.Equals(finishReason.GetString(), "STOP", StringComparison.OrdinalIgnoreCase) ||
+            !candidate.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Object ||
+            !content.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
+            return null;
+
+        // Completion metadata, not punctuation, determines whether an answer finished.
+        var text = string.Concat(parts.EnumerateArray()
+            .Where(part => part.ValueKind == JsonValueKind.Object &&
+                (!part.TryGetProperty("thought", out var thought) || thought.ValueKind == JsonValueKind.False) &&
+                part.TryGetProperty("text", out var value) && value.ValueKind == JsonValueKind.String)
+            .Select(part => part.GetProperty("text").GetString())).Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
     private string? ResolveProxyUrl()
     {
-        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"]);
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"] ?? RigMdAgentRuntimeSettingsStore.DefaultProxyUrl);
     }
 
     private static string BuildPrompt(

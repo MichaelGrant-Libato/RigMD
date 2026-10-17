@@ -121,6 +121,17 @@ public static class RigMdAgentRuntimeSettingsStore
 
     public const string DefaultProxyUrl = "https://www.rig-md.com/api/gemini";
 
+    // Outlast the proxy's 30-second platform limit so it can return a controlled fallback.
+    public static readonly TimeSpan CloudRequestTimeout = TimeSpan.FromSeconds(35);
+
+    public static Uri? GetTrustedCloudProxyUri(string? configuredUrl)
+    {
+        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
+            !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
+            uri.AbsolutePath != "/api/gemini" || (uri.Host != "www.rig-md.com" && uri.Host != "rig-md.com")) return null;
+        return uri.Host == "rig-md.com" ? new Uri(DefaultProxyUrl) : uri;
+    }
+
     public static string? ResolveEffectiveProxyUrl(string? configuredProxyUrl = null)
     {
         var settings = Load();
@@ -147,7 +158,7 @@ public static class RigMdAgentRuntimeSettingsStore
                 : configTrimmed;
         }
 
-        return null;
+        return DefaultProxyUrl;
     }
 
     public static string MaskApiKey(string? key)

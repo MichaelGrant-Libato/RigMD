@@ -510,6 +510,32 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             };
         }
 
+        if (tool != null)
+        {
+            using var executionArgs = ParseJsonSafe(argsJson);
+            var currentPreview = await tool.PreviewImpactAsync(executionArgs.RootElement, cancellationToken);
+            if (!currentPreview.CanExecute)
+            {
+                return new OrchestrationResult
+                {
+                    Plan = plan,
+                    DryRunPreview = currentPreview,
+                    Safety = new SafetyEvaluation
+                    {
+                        IsApproved = false,
+                        RequiresUserConfirmation = true,
+                        RejectionReason = currentPreview.WhatWillHappen,
+                        Warnings = currentPreview.Warnings
+                    },
+                    Attempts = new List<RemediationAttempt>
+                    {
+                        new() { Action = actionDef, State = RemediationAttemptState.SafetyRejected,
+                            Notes = "Current safety conditions do not permit execution." }
+                    }
+                };
+            }
+        }
+
         var steps = new List<ReActTraceStep>();
         var traceBuilder = new StringBuilder();
         int stepCounter = 1;

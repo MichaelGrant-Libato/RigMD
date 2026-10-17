@@ -24,6 +24,7 @@
     <ProjectReference Include="..\RigMD.Api\RigMD.Api.csproj" />
     <ProjectReference Include="..\RigMD.Application\RigMD.Application.csproj" />
     <ProjectReference Include="..\RigMD.Domain\RigMD.Domain.csproj" />
+    <ProjectReference Include="..\tools\RigMD.QuotaChecks\RigMD.QuotaChecks.csproj" />
     <ProjectReference Include="..\RigMD.Infrastructure\RigMD.Infrastructure.csproj" />
   </ItemGroup>
 

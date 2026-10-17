@@ -51,6 +51,8 @@ public class AgentToolFunctionDeclaration
 /// </summary>
 public class ToolDryRunPreview
 {
+    public string? ApprovalToken { get; set; }
+    public DateTimeOffset? ApprovalExpiresAt { get; set; }
     public string ToolName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public ToolSafetyTier SafetyTier { get; set; }

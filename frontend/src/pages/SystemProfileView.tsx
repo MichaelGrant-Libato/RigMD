@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import { API_BASE_URL } from '../lib/api';
+import { getLocalApiToken } from '../lib/localApiSession';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
@@ -166,10 +168,10 @@ export default function SystemProfileView({
     if (!hasStats) return;
 
     let disposed = false;
-    const hubUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5273'}/hubs/telemetry`;
+    const hubUrl = `${API_BASE_URL}/hubs/telemetry`;
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl)
+      .withUrl(hubUrl, { accessTokenFactory: getLocalApiToken })
       .withAutomaticReconnect()
       .build();
 

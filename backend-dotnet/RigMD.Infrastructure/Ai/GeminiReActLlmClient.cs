@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -26,15 +27,18 @@ public class GeminiReActLlmClient : IReActLlmClient
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GeminiReActLlmClient> _logger;
+    private readonly ICloudAiSession? _cloudSession;
 
     public GeminiReActLlmClient(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<GeminiReActLlmClient> logger)
+        ILogger<GeminiReActLlmClient> logger,
+        ICloudAiSession? cloudSession = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _cloudSession = cloudSession;
     }
 
     public async Task<ReActModelTurnDecision> DecideNextTurnAsync(
@@ -42,25 +46,24 @@ public class GeminiReActLlmClient : IReActLlmClient
         IReadOnlyList<AgentToolFunctionDeclaration> availableTools,
         CancellationToken cancellationToken = default)
     {
-        var apiKey = ResolveApiKey();
         var proxyUrl = ResolveProxyUrl();
+        var proxy = RigMdAgentRuntimeSettingsStore.GetTrustedCloudProxyUri(proxyUrl);
+        var accessToken = proxy != null && _cloudSession != null ? await _cloudSession.GetAccessTokenAsync(cancellationToken) : null;
 
-        if (!string.IsNullOrWhiteSpace(apiKey) || !string.IsNullOrWhiteSpace(proxyUrl))
+        if (proxy != null && accessToken != null)
         {
             try
             {
                 var geminiDecision = await CallGeminiFunctionCallingAsync(
-                    apiKey,
-                    proxyUrl,
+                    accessToken,
+                    proxy.ToString(),
                     context,
                     availableTools,
                     cancellationToken);
 
                 if (geminiDecision != null)
                 {
-                    var modeLabel = !string.IsNullOrWhiteSpace(apiKey)
-                        ? "Direct Gemini API"
-                        : $"Gemini Cloud Proxy ({proxyUrl})";
+                    var modeLabel = "Authenticated Gemini Cloud Proxy";
                     var toolLabel = geminiDecision.ToolCalls.FirstOrDefault()?.ToolName ??
                                    geminiDecision.FinalProposal?.RecommendedToolName ??
                                    "(Submit Plan)";
@@ -92,18 +95,13 @@ public class GeminiReActLlmClient : IReActLlmClient
         return localDecision;
     }
 
-    private string? ResolveApiKey()
-    {
-        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration["Gemini:ApiKey"]);
-    }
-
     private string? ResolveProxyUrl()
     {
-        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"]);
+        return RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration["Gemini:ProxyUrl"] ?? RigMdAgentRuntimeSettingsStore.DefaultProxyUrl);
     }
 
     private async Task<ReActModelTurnDecision?> CallGeminiFunctionCallingAsync(
-        string? apiKey,
+        string accessToken,
         string? proxyUrl,
         ReActConversationContext context,
         IReadOnlyList<AgentToolFunctionDeclaration> availableTools,
@@ -302,18 +300,17 @@ public class GeminiReActLlmClient : IReActLlmClient
             try
             {
                 using var perModelCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                perModelCts.CancelAfter(TimeSpan.FromSeconds(10));
+                perModelCts.CancelAfter(RigMdAgentRuntimeSettingsStore.CloudRequestTimeout);
 
-                var url = !string.IsNullOrWhiteSpace(apiKey)
-                    ? $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}"
-                    : $"{proxyUrl}?model={model}";
-                using var resp = await client.PostAsync(
-                    url,
-                    new StringContent(jsonPayload, Encoding.UTF8, "application/json"),
-                    perModelCts.Token);
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{proxyUrl}?model={Uri.EscapeDataString(model)}");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                using var resp = await client.SendAsync(request, perModelCts.Token);
 
                 if (!resp.IsSuccessStatusCode)
                 {
+                    if ((int)resp.StatusCode is 401 or 403) await _cloudSession!.RejectAccessTokenAsync(accessToken);
+                    if ((int)resp.StatusCode is not (400 or 404)) break;
                     continue;
                 }
 

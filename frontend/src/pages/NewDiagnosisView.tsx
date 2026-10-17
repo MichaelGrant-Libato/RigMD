@@ -67,7 +67,7 @@ import type {
 import { getTelemetryDeltaSummary } from '../lib/pastChecksFormatting';
 
 interface NewDiagnosisViewProps {
-  onDiagnosisComplete?: (sessionId: string) => void;
+  onDiagnosisComplete: (sessionId: string) => void;
 }
 
 type DiagnosisMode =
@@ -1419,17 +1419,6 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
         const automaticReport = localResponse.data;
 
-        const snapshotResponse = await apiGet<AgentSnapshotResponse>(
-          '/api/hardware/snapshot',
-          {
-            headers: { 'X-Client-ID': AGENT_ID || 'local' },
-          }
-        );
-
-        if (snapshotResponse.data) {
-          setSnapshot(snapshotResponse.data);
-        }
-
         if (
           !automaticReport ||
           !automaticReport.diagnosed_category
@@ -1439,13 +1428,14 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
         );
       }
 
-      setReport(
-        automaticReport,
-      );
+      if (!automaticReport.session_id?.trim()) {
+        throw new Error('The check completed, but its saved result could not be opened. Please try again.');
+      }
 
       setDiagnosisStage(
         'completed',
       );
+      onDiagnosisComplete(automaticReport.session_id);
 
       } catch (err: any) {
         console.error(
