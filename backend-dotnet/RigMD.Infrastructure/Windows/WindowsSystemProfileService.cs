@@ -89,7 +89,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             try
             {
                 _hardwareMonitor.Tick();
-                cpuStats.TemperatureCelsius = _hardwareMonitor.GetCpuTemperature() ?? cpuStats.TemperatureCelsius;
+                cpuStats.SetTemperatureReading(_hardwareMonitor.GetCpuTemperatureReading());
                 gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature() ?? gpuStats.TemperatureCelsius;
 
                 var totalVramGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();

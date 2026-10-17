@@ -40,15 +40,19 @@ public class ReActOrchestratorTests
         IPowerProvider,
         IDeviceTypeProvider
     {
+        public double? CpuTemperature { get; set; } = 64.0;
+        public double CpuUsage { get; set; } = 42.0;
+
         public CpuStatsDto GetCpuStats() => new()
         {
             Name = "Intel Core i7-13700K",
-            UsagePercent = 42.0,
+            UsagePercent = CpuUsage,
             FrequencyMhz = 5100,
             MaxFrequencyMhz = 5400,
             Cores = 16,
             Threads = 24,
-            TemperatureCelsius = 64.0
+            TemperatureCelsius = CpuTemperature,
+            TemperatureSource = CpuTemperature.HasValue ? "test CPU sensor" : "Unavailable"
         };
 
         public MemoryStatsDto GetMemoryStats() => new()
@@ -114,7 +118,7 @@ public class ReActOrchestratorTests
     {
         public int ExecutionCount { get; private set; }
 
-        public string Name => "clear_temp_files";
+        public string Name { get; init; } = "clear_temp_files";
         public string DisplayName => "Clear Temporary Files";
         public string Description => "Safe test tool for clearing temporary files.";
         public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier1_SafeReversible;
@@ -433,6 +437,38 @@ public class ReActOrchestratorTests
         Assert.Equal("inspect_memory_and_processes", result.VerificationReport!.VerificationToolName);
         Assert.Equal(VerificationStatus.Unresolved, result.Verification);
         Assert.Contains("\"usagePercent\":82.9", result.VerificationReport.AfterSnapshotJson);
+    }
+
+    [Theory]
+    [InlineData("Thermal condition", null, 42d, VerificationStatus.Unknown)]
+    [InlineData("Thermal condition", 45d, 42d, VerificationStatus.Resolved)]
+    [InlineData("Thermal condition", 85d, 42d, VerificationStatus.Unresolved)]
+    [InlineData("Thermal condition", 45d, 95d, VerificationStatus.Resolved)]
+    [InlineData("Elevated CPU Utilization", null, 42d, VerificationStatus.Resolved)]
+    [InlineData("Elevated CPU Utilization", 45d, 95d, VerificationStatus.Unresolved)]
+    public async Task CpuAndThermalVerification_UsesTheRelevantMeasurement(
+        string category, double? temperature, double usage, VerificationStatus expected)
+    {
+        var providers = new StubProviders { CpuTemperature = temperature, CpuUsage = usage };
+        var fakeAction = new FakeSafeRemediationTool { Name = "terminate_processes" };
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
+        {
+            new InspectCpuAndThermalsTool(providers), fakeAction
+        });
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            registry,
+            new GeminiReActLlmClient(new HttpClient(),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" }).Build(),
+                NullLogger<GeminiReActLlmClient>.Instance));
+        var result = await orchestrator.RunExecutionCycleAsync(
+            new DiagnosticOutput { Id = Guid.NewGuid(), DiagnosticSessionId = Guid.NewGuid(), DiagnosedCategory = category },
+            new HardwareProfileDto(), userConsentProvided: true,
+            requestedToolName: "terminate_processes", requestedArgumentsJson: "{}");
+
+        Assert.Equal(1, fakeAction.ExecutionCount);
+        Assert.Equal("inspect_cpu_and_thermals", result.VerificationReport!.VerificationToolName);
+        Assert.Equal(expected, result.Verification);
     }
 
     [Fact]

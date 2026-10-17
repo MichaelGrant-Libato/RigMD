@@ -20,6 +20,7 @@ public class WmiCpuProvider : ICpuProvider
             ApplyFallback(dto);
         }
 
+        dto.SetTemperatureReading(CpuTemperatureSensorReader.Read());
         return dto;
     }
 
@@ -143,17 +144,9 @@ public class WmiCpuProvider : ICpuProvider
                     frequency;
             }
             
-            if (dto.UsagePercent > 85 && dto.MaxFrequencyMhz > 0 && dto.FrequencyMhz < (dto.MaxFrequencyMhz * 0.90))
-            {
-                dto.IsThermallyThrottling = true;
-            }
-
             break;
         }
 
-        dto.TemperatureCelsius ??= HardwareMonitorService.ReadThermalZoneTemperatureCelsius(
-            dto.UsagePercent,
-            dto.IsThermallyThrottling);
     }
 
     private static double TryConvertToDouble(

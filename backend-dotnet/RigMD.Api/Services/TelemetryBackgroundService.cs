@@ -69,7 +69,11 @@ public class TelemetryBackgroundService : BackgroundService
                     dto.CpuUsagePercent = Math.Round(_hardwareMonitor.GetCpuLoad() ?? 0, 1);
                 }
                 
-                dto.CpuTempCelsius = _hardwareMonitor.GetCpuTemperature();
+                var cpuTemperature = _hardwareMonitor.GetCpuTemperatureReading();
+                dto.CpuTempCelsius = cpuTemperature?.Celsius;
+                dto.CpuTemperatureSource = cpuTemperature?.Source ?? "Unavailable";
+                dto.CpuTemperatureSensorIdentifier = cpuTemperature?.SensorIdentifier;
+                dto.CpuTemperatureCapturedAtUtc = cpuTemperature?.CapturedAtUtc;
                 
                 try { if (_processCounter != null) dto.CpuProcesses = (int)_processCounter.NextValue(); } catch {}
                 try { if (_threadCounter != null) dto.CpuThreads = (int)_threadCounter.NextValue(); } catch {}

@@ -80,7 +80,8 @@ public class ResolutionServiceTests
             browserMemoryMb: 500,
             cpuUsage: 18,
             storageUsage: 52,
-            dnsResolutionSucceeded: true);
+            dnsResolutionSucceeded: true,
+            cpuTemp: 45);
 
         Assert.Equal("resolved", _service.CheckResolution("Critical Memory Pressure", hardware).resolution_status);
         Assert.Equal("resolved", _service.CheckResolution("Thermal Throttling Detected", hardware).resolution_status);
@@ -166,7 +167,8 @@ public class ResolutionServiceTests
             browserMemoryMb: 2100, // Above 1500 MB browser threshold
             cpuUsage: 22,
             storageUsage: 50,
-            dnsResolutionSucceeded: true);
+            dnsResolutionSucceeded: true,
+            cpuTemp: 45);
 
         var overheatingResult = autoService.Diagnose(new AutomaticDiagnosisInput
         {
@@ -348,7 +350,8 @@ public class ResolutionServiceTests
             browserMemoryMb: 3800,
             cpuUsage: 20,
             storageUsage: 45,
-            dnsResolutionSucceeded: true);
+            dnsResolutionSucceeded: true,
+            cpuTemp: 45);
 
         // Even if an older saved session had 'Elevated Memory Pressure From Active Workloads',
         // passing scenarioId='overheating-loud-fan' or 'driver-error' checks thermal or driver status instead of RAM/Browser.

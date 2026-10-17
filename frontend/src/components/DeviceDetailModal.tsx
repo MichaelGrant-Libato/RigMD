@@ -6,6 +6,7 @@ import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
+import { formatTemperature } from '../lib/temperatureTelemetry';
 import type { HardwareStats } from '../types/rigmd';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
@@ -34,11 +35,12 @@ interface TelemetryPoint {
   CpuSpeedMhz: number;
   RamUsedGb: number;
   GpuMemoryUsedGb: number;
-  CpuTempCelsius?: number;
+  CpuTempCelsius?: number | null;
+  CpuTemperatureSource?: string;
   CpuProcesses?: number;
   CpuThreads?: number;
   CpuHandles?: number;
-  GpuTempCelsius?: number;
+  GpuTempCelsius?: number | null;
   GpuMemoryTotalGb?: number;
   Disks: DiskTelemetryPoint[];
 }
@@ -52,11 +54,12 @@ interface RawTelemetryPayload {
   cpuSpeedMhz?: number;
   ramUsedGb?: number;
   gpuMemoryUsedGb?: number;
-  cpuTempCelsius?: number;
+  cpuTempCelsius?: number | null;
+  cpuTemperatureSource?: string;
   cpuProcesses?: number;
   cpuThreads?: number;
   cpuHandles?: number;
-  gpuTempCelsius?: number;
+  gpuTempCelsius?: number | null;
   gpuMemoryTotalGb?: number;
   disks?: Array<{
     deviceId: string;
@@ -118,6 +121,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             RamUsedGb: telemetry.ramUsedGb || 0,
             GpuMemoryUsedGb: telemetry.gpuMemoryUsedGb || 0,
             CpuTempCelsius: telemetry.cpuTempCelsius,
+            CpuTemperatureSource: telemetry.cpuTemperatureSource,
             CpuProcesses: telemetry.cpuProcesses,
             CpuThreads: telemetry.cpuThreads,
             CpuHandles: telemetry.cpuHandles,
@@ -393,7 +397,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   <div><p className="text-xs text-slate-400">Threads</p><p className="text-xl text-white">{latestData?.CpuThreads || stats.cpu.threads || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Handles</p><p className="text-xl text-white">{latestData?.CpuHandles || stats.cpu.handles || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Base speed</p><p className="text-xl text-white">{(stats.cpu.max_frequency_mhz ? stats.cpu.max_frequency_mhz / 1000 : 0).toFixed(2)} GHz</p></div>
-                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.CpuTempCelsius ? `${Math.round(latestData.CpuTempCelsius)}°C` : (stats.cpu.temperature_celsius ? `${Math.round(stats.cpu.temperature_celsius)}°C` : 'N/A')}</p></div>
+                  <div title={`Source: ${(latestData ? latestData.CpuTemperatureSource : stats.cpu.temperature_source) || 'Unavailable'}`}><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(stats.cpu.temperature_celsius, latestData?.CpuTempCelsius, Boolean(latestData))}</p></div>
                   <div><p className="text-xs text-slate-400">Sockets</p><p className="text-xl text-white">{stats.cpu.sockets || 1}</p></div>
                   <div><p className="text-xs text-slate-400">Cores</p><p className="text-xl text-white">{stats.cpu.cores}</p></div>
                   <div><p className="text-xs text-slate-400">Logical processors</p><p className="text-xl text-white">{stats.cpu.threads}</p></div>
@@ -421,7 +425,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <>
                   <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.GpuUsagePercent || 0}%</p></div>
                   <div><p className="text-xs text-slate-400">GPU Memory</p><p className="text-xl text-white">{latestData?.GpuMemoryUsedGb || 0} / {stats.gpu.dedicated_memory_gb || stats.gpu.vram_gb} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{latestData?.GpuTempCelsius ? `${Math.round(latestData.GpuTempCelsius)}°C` : (stats.gpu.temperature_celsius ? `${Math.round(stats.gpu.temperature_celsius)}°C` : 'N/A')}</p></div>
+                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(stats.gpu.temperature_celsius, latestData?.GpuTempCelsius, Boolean(latestData))}</p></div>
                   <div><p className="text-xs text-slate-400">Driver version</p><p className="text-sm text-white">{stats.gpu.driver}</p></div>
                   <div><p className="text-xs text-slate-400">Driver date</p><p className="text-sm text-white">{stats.gpu.driver_date || 'Unknown'}</p></div>
                   <div><p className="text-xs text-slate-400">DirectX version</p><p className="text-sm text-white">{stats.gpu.directx_version || 'Unknown'}</p></div>

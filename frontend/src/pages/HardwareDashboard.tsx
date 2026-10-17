@@ -127,7 +127,10 @@ function agentSnapshotToHardwareStats(
       l3_cache_mb: hardware.cpu.l3CacheMb,
       processes: hardware.cpu.processes,
       handles: hardware.cpu.handles,
-      temperature_celsius: hardware.cpu.temperatureCelsius ?? undefined,
+      temperature_celsius: hardware.cpu.temperatureCelsius ?? null,
+      temperature_source: hardware.cpu.temperatureSource,
+      temperature_sensor_identifier: hardware.cpu.temperatureSensorIdentifier,
+      temperature_captured_at_utc: hardware.cpu.temperatureCapturedAtUtc,
     },
 
     gpu: {
