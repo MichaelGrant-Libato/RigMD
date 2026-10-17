@@ -20,7 +20,6 @@ namespace RigMD.Application.Services.Autonomy;
 /// </summary>
 public class AutonomousOrchestrator : IAutonomousOrchestrator
 {
-    private const double ElevatedCpuThreshold = 90;
     private const double ElevatedMemoryThreshold = 80;
     private const double BrowserMemoryPressureMb = 3000;
     private const int BrowserProcessPressureCount = 25;
@@ -838,7 +837,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         {
             var usage = TryReadDouble(afterSnapshot?.DataJson, "usagePercent");
             return !usage.HasValue ? VerificationStatus.Unknown
-                : usage.Value < ElevatedCpuThreshold ? VerificationStatus.Resolved : VerificationStatus.Unresolved;
+                : usage.Value < CpuLoadThresholds.Elevated ? VerificationStatus.Resolved : VerificationStatus.Unresolved;
         }
 
         if (IsThermalIssue(category) && ToolIs(toolName, "inspect_cpu_and_thermals"))
