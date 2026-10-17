@@ -8,7 +8,7 @@ export function createGeminiHandler({ env = process.env, fetchImpl = globalThis.
   timeoutSignal = milliseconds => AbortSignal.timeout(milliseconds), logger = console } = {}) {
   return async function handler(req, res) {
     const fail = (status, error) => res.status(status).json({ error, fallbackToLocal: true });
-    if (!applyCloudHeaders(req, res)) return fail(403, 'Origin not permitted.');
+    if (!applyCloudHeaders(req, res, env)) return fail(403, 'Origin not permitted.');
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') { res.setHeader('Allow', 'POST, OPTIONS'); return fail(405, 'Method not permitted.'); }
     const authorization = req.headers?.authorization;
