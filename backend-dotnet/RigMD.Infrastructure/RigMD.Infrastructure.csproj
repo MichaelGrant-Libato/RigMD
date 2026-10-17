@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RigMD.Application\RigMD.Application.csproj" />
+    <InternalsVisibleTo Include="RigMD.Tests" />
   </ItemGroup>
 
   <ItemGroup>

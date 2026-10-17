@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -18,6 +19,7 @@ public partial class App : System.Windows.Application
     private bool _ownsMutex;
     private Process? _apiProcess;
     private IntPtr _jobHandle = IntPtr.Zero;
+    private readonly string _localApiToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
     private const string ApiHost = "localhost";
     private const int ApiPort = 5273;
@@ -55,7 +57,7 @@ public partial class App : System.Windows.Application
 
             await WaitForApiReady();
 
-            var window = new MainWindow();
+            var window = new MainWindow(_localApiToken);
             MainWindow = window;
             window.Show();
         }
@@ -142,6 +144,8 @@ public partial class App : System.Windows.Application
 
         _apiProcess.StartInfo.EnvironmentVariables[
             "ASPNETCORE_URLS"] = ApiUrl;
+        _apiProcess.StartInfo.EnvironmentVariables[
+            "RIGMD_LOCAL_API_TOKEN"] = _localApiToken;
 
         if (!_apiProcess.Start())
         {

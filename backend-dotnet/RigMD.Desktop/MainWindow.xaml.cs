@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 
@@ -7,8 +8,12 @@ namespace RigMD.Desktop;
 
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    private readonly string _localApiToken;
+    private static readonly Uri LocalApiOrigin = new("http://localhost:5273");
+
+    public MainWindow(string localApiToken)
     {
+        _localApiToken = localApiToken;
         InitializeComponent();
         Loaded += MainWindow_Loaded;
     }
@@ -31,6 +36,20 @@ public partial class MainWindow : Window
                     userDataFolder: userDataFolder);
 
             await Browser.EnsureCoreWebView2Async(environment);
+            Browser.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
+            Browser.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
+            Browser.CoreWebView2.NavigationStarting += (_, args) =>
+            {
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||
+                    target.GetLeftPart(UriPartial.Authority) != LocalApiOrigin.GetLeftPart(UriPartial.Authority))
+                    args.Cancel = true;
+            };
+            Browser.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
+
+            // Only the trusted local page receives the per-launch credential; never persist it.
+            await Browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                $"if (window.location.origin === {JsonSerializer.Serialize(LocalApiOrigin.GetLeftPart(UriPartial.Authority))}) " +
+                $"Object.defineProperty(window, '__rigmdLocalApiToken', {{ value: {JsonSerializer.Serialize(_localApiToken)}, writable: false, configurable: false }});");
 
 #if !DEBUG
             // Lock down F12 DevTools, right-click Inspect, and browser accelerator keys in Release/Installed builds

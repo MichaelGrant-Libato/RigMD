@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
@@ -35,6 +35,7 @@ import {
   getBackendErrorMessage,
   getMemoryAppCandidates,
   previewAgentTool,
+  previewCloseSelectedApp,
   runAutonomyExecution,
   runAutonomyPreview,
   startRemediationStream,
@@ -1106,6 +1107,7 @@ export default function AutonomyRemediationPanel({
 
   const [customDryRun, setCustomDryRun] =
     useState<ToolDryRunPreview | null>(null);
+  const previewSequence = useRef(0);
 
   const [previewError, setPreviewError] =
     useState<string | null>(null);
@@ -1173,6 +1175,8 @@ export default function AutonomyRemediationPanel({
     Boolean(previewResult) &&
     userConsentProvided &&
     !requestActive &&
+    !previewError &&
+    Boolean(effectiveDryRun?.approvalToken && effectiveDryRun.toolName === activeToolId) &&
     (effectiveDryRun?.canExecute ?? true) &&
     (!isCloseSelectedAppMode || selectedProcessNames.length > 0);
 
@@ -1195,8 +1199,12 @@ export default function AutonomyRemediationPanel({
   );
 
   const handleToolSelectionChange = async (nextToolId: string) => {
+    const sequence = ++previewSequence.current;
     setActiveToolId(nextToolId);
+    setIsPreviewLoading(false);
     setUserConsentProvided(false);
+    setCustomDryRun(null);
+    setPreviewError(null);
 
     if (nextToolId === previewResult?.proposedTool?.toolName) {
       setCustomDryRun(null);
@@ -1217,10 +1225,31 @@ export default function AutonomyRemediationPanel({
     }
 
     try {
-      const preview = await previewAgentTool(nextToolId, {});
-      setCustomDryRun(preview);
-    } catch {
-      setCustomDryRun(null);
+      setIsPreviewLoading(true);
+      const preview = await previewAgentTool(nextToolId, {}, sessionId);
+      if (sequence === previewSequence.current) setCustomDryRun(preview);
+    } catch (error) {
+      if (sequence === previewSequence.current) setPreviewError(getBackendErrorMessage(error));
+    } finally {
+      if (sequence === previewSequence.current) setIsPreviewLoading(false);
+    }
+  };
+
+  const handleAppSelectionChange = async (nextNames: string[]) => {
+    const sequence = ++previewSequence.current;
+    setSelectedProcessNames(nextNames);
+    setUserConsentProvided(false);
+    setCustomDryRun(null);
+    setPreviewError(null);
+    if (nextNames.length === 0) return;
+    setIsPreviewLoading(true);
+    try {
+      const preview = await previewCloseSelectedApp(sessionId, nextNames);
+      if (sequence === previewSequence.current) setCustomDryRun(preview);
+    } catch (error) {
+      if (sequence === previewSequence.current) setPreviewError(getBackendErrorMessage(error));
+    } finally {
+      if (sequence === previewSequence.current) setIsPreviewLoading(false);
     }
   };
 
@@ -1230,6 +1259,7 @@ export default function AutonomyRemediationPanel({
     }
 
     setIsPreviewLoading(true);
+    previewSequence.current++;
     setPreviewError(null);
     setExecuteError(null);
     setExecutionResult(null);
@@ -1298,10 +1328,13 @@ export default function AutonomyRemediationPanel({
     try {
       const result = isCloseSelectedAppMode
         ? await closeSelectedApp({
+            sessionId,
+            approvalToken: effectiveDryRun?.approvalToken,
             processNames: selectedProcessNames,
             confirmed: true,
           })
         : await runAutonomyExecution({
+            approvalToken: effectiveDryRun?.approvalToken,
             sessionId,
             diagnosedCategory,
             userConsentProvided: true,
@@ -1318,6 +1351,7 @@ export default function AutonomyRemediationPanel({
       onExecutionComplete?.(result);
     } catch (error) {
       setExecuteError(getBackendErrorMessage(error));
+      setUserConsentProvided(false);
     } finally {
       setIsExecuteLoading(false);
       setLiveProgressLine(null);
@@ -1445,6 +1479,9 @@ export default function AutonomyRemediationPanel({
               <button
                 type="button"
                 onClick={() => setReviewOpen(false)}
+                disabled={requestActive}
+                aria-label="Close review"
+                title="Close review"
                 className="rounded-lg border border-[var(--rigmd-border)] p-2 text-slate-400 hover:text-white"
               >
                 <X size={16} />
@@ -1452,6 +1489,11 @@ export default function AutonomyRemediationPanel({
             </div>
 
             <div className="mt-5 space-y-4">
+              {(previewError || executeError) && (
+                <p role="alert" className="break-words rounded-lg border border-red-400/30 p-3 text-sm text-red-200">
+                  {previewError || executeError}
+                </p>
+              )}
               {/* 1. Multi-Turn ReAct Trace Timeline */}
               {displayedSteps.length > 0 && (
                 <ReActTimeline steps={displayedSteps} />
@@ -1616,11 +1658,12 @@ export default function AutonomyRemediationPanel({
                             type="checkbox"
                             name="memory-app"
                             checked={selected}
+                            disabled={requestActive}
                             onChange={() =>
-                              setSelectedProcessNames((prev) =>
+                              void handleAppSelectionChange(
                                 selected
-                                  ? prev.filter((name) => name !== app.name)
-                                  : [...prev, app.name],
+                                  ? selectedProcessNames.filter((name) => name !== app.name)
+                                  : [...selectedProcessNames, app.name],
                               )
                             }
                             className="mt-1"

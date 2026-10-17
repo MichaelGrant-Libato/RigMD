@@ -8,6 +8,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
+import CloudAiAccountPanel from '../components/CloudAiAccountPanel';
 import {
   getAgentSettings,
   getBackendErrorMessage,
@@ -81,6 +82,7 @@ export default function SettingsView() {
 
       <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-6 pb-10">
+          <CloudAiAccountPanel onAccountChanged={() => { void getAgentSettings().then(setSettings).catch(() => setErrorMessage('Could not refresh AI status.')); }} />
           {isLoading ? (
             <div className="flex items-center gap-3 rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6 text-sm text-slate-300">
               <RefreshCw size={18} className="animate-spin text-cyan-300" />
@@ -180,7 +182,7 @@ export default function SettingsView() {
                       }`}
                     >
                       {settings?.hasGeminiApiKey
-                        ? 'Configured by app'
+                        ? 'Account connected'
                         : 'Offline fallback only'}
                     </span>
                   </div>

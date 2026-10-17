@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using RigMD.Api.Hubs;
+using RigMD.Api.Services;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
@@ -89,6 +90,9 @@ public class AutonomyController : ControllerBase
     private readonly ILogger<AutonomyController> _logger;
     private readonly IRigMdAgentToolRegistry? _toolRegistry;
     private readonly IConfiguration? _configuration;
+    private readonly RigMD.Api.Services.LocalRemediationExecutionGate _executionGate;
+    private readonly RemediationApprovalStore _approvals;
+    private readonly ICloudAiSession? _cloudSession;
 
     public AutonomyController(
         IAutonomousOrchestrator orchestrator,
@@ -98,7 +102,10 @@ public class AutonomyController : ControllerBase
         IHubContext<RemediationHub> hubContext,
         ILogger<AutonomyController> logger,
         IRigMdAgentToolRegistry? toolRegistry = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        RigMD.Api.Services.LocalRemediationExecutionGate? executionGate = null,
+        RemediationApprovalStore? approvals = null,
+        ICloudAiSession? cloudSession = null)
     {
         _orchestrator = orchestrator;
         _profileService = profileService;
@@ -108,6 +115,9 @@ public class AutonomyController : ControllerBase
         _logger = logger;
         _toolRegistry = toolRegistry;
         _configuration = configuration;
+        _executionGate = executionGate ?? new();
+        _approvals = approvals ?? new(TimeProvider.System);
+        _cloudSession = cloudSession;
     }
 
     public class PreviewRequest
@@ -158,6 +168,25 @@ public class AutonomyController : ControllerBase
             result.Plan.SessionId = sessionId.ToString();
         }
 
+        var preview = result.DryRunPreview ?? result.ProposedTool?.DryRunPreview;
+        var proposed = result.ProposedTool;
+        var action = result.Plan?.PlannedActions.FirstOrDefault();
+        var toolName = proposed?.ToolName ?? action?.Id;
+        if (preview?.CanExecute == true && result.Safety?.IsApproved == true &&
+            !string.IsNullOrWhiteSpace(toolName) && _toolRegistry?.GetTool(toolName) != null)
+        {
+            try
+            {
+                AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", sessionId,
+                    toolName, proposed?.ArgumentsJson ?? action?.ToolArgumentsJson));
+            }
+            catch (JsonException)
+            {
+                preview.CanExecute = false;
+                preview.Warnings.Add("The proposed arguments are invalid. Request a new review.");
+            }
+        }
+
         return Ok(result);
     }
 
@@ -193,13 +222,58 @@ public class AutonomyController : ControllerBase
 
     public class CloseSelectedAppRequest
     {
+        public string SessionId { get; set; } = string.Empty;
+        public string? ApprovalToken { get; set; }
         public string ProcessName { get; set; } = string.Empty;
         public List<string> ProcessNames { get; set; } = new();
         public bool Confirmed { get; set; }
     }
 
+    private static List<string> SelectedProcessNames(CloseSelectedAppRequest request) =>
+        (request.ProcessNames.Count > 0 ? request.ProcessNames : new List<string> { request.ProcessName })
+            .Select(NormalizeProcessName).Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static RemediationApprovalStore.Scope CloseAppScope(Guid sessionId, List<string> names) =>
+        RemediationApprovalStore.CreateScope("close-app", sessionId, "close_selected_app",
+            JsonSerializer.Serialize(new { processNames = names.Select(name => name.ToLowerInvariant()).ToArray() }));
+
+    [HttpPost("close-selected-app/preview")]
+    public async Task<IActionResult> PreviewCloseSelectedApp([FromBody] CloseSelectedAppRequest request)
+    {
+        if (!Guid.TryParse(request.SessionId, out var sessionId))
+            return BadRequest(new { message = "A valid diagnostic session ID is required." });
+        if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+            return NotFound(new { message = "Diagnostic session was not found." });
+        var names = SelectedProcessNames(request);
+        if (names.Count is < 1 or > 5 || names.Any(name => !IsEligibleUserApp(name)))
+            return BadRequest(new { message = "Choose between one and five eligible apps." });
+        var hardware = _profileService.GetLiveSystemProfile();
+        if (names.Any(name => !hardware.ProcessInsights.TopMemoryApps.Any(app =>
+            app.MemoryMb >= 100 && app.Name.Equals(name, StringComparison.OrdinalIgnoreCase))))
+            return BadRequest(new { message = "A selected app is no longer memory-heavy. Refresh and choose again." });
+        var preview = new ToolDryRunPreview
+        {
+            ToolName = "close_selected_app", DisplayName = "Close selected apps", CanExecute = true,
+            SafetyTier = ToolSafetyTier.Tier2_DestructiveOrAdmin, RequiresUserConfirmation = true,
+            AffectedTargets = names, AffectedItemsCount = names.Count,
+            WhatWillHappen = $"Close {string.Join(", ", names.Select(ToDisplayName))}.",
+            Warnings = new() { "Save your work first. Selected apps may lose unsaved work, tabs, meetings, or downloads." }
+        };
+        AttachApproval(preview, CloseAppScope(sessionId, names));
+        return Ok(preview);
+    }
+
+    private void AttachApproval(ToolDryRunPreview preview, RemediationApprovalStore.Scope scope)
+    {
+        var approval = _approvals.Issue(scope);
+        preview.ToolName = scope.ToolName;
+        preview.ApprovalToken = approval.Token;
+        preview.ApprovalExpiresAt = approval.ExpiresAt;
+    }
+
     [HttpPost("close-selected-app")]
-    public IActionResult CloseSelectedApp(
+    public async Task<IActionResult> CloseSelectedApp(
         [FromBody] CloseSelectedAppRequest request)
     {
         if (!request.Confirmed)
@@ -210,18 +284,18 @@ public class AutonomyController : ControllerBase
             });
         }
 
-        var processNames =
-            request.ProcessNames.Count > 0
-                ? request.ProcessNames
-                : new List<string> { request.ProcessName };
+        using var executionLease = _executionGate.TryEnter();
+        if (executionLease == null)
+            return Conflict(new { message = "Another fix is running. Wait for it to finish before trying again." });
 
-        var selectedProcessNames =
-            processNames
-                .Select(NormalizeProcessName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(5)
-                .ToList();
+        if (!Guid.TryParse(request.SessionId, out var sessionId))
+            return BadRequest(new { message = "A valid diagnostic session ID is required." });
+        if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+            return NotFound(new { message = "Diagnostic session was not found." });
+        var selectedProcessNames = SelectedProcessNames(request);
+        if (selectedProcessNames.Count > 5 ||
+            !_approvals.TryConsume(request.ApprovalToken, CloseAppScope(sessionId, selectedProcessNames)))
+            return Conflict(new { message = "This approval expired, changed, or was already used. Review the selected apps again." });
 
         if (selectedProcessNames.Count == 0)
         {
@@ -249,6 +323,7 @@ public class AutonomyController : ControllerBase
         var selectedApps =
             beforeHardware.ProcessInsights.TopMemoryApps
                 .Where(app =>
+                    app.MemoryMb >= 100 &&
                     selectedProcessNames.Contains(
                         app.Name,
                         StringComparer.OrdinalIgnoreCase))
@@ -380,6 +455,7 @@ public class AutonomyController : ControllerBase
 
     public class ExecuteRequest
     {
+        public string? ApprovalToken { get; set; }
         public string SessionId { get; set; } = string.Empty;
         public string DiagnosedCategory { get; set; } = string.Empty;
         public bool UserConsentProvided { get; set; }
@@ -394,6 +470,13 @@ public class AutonomyController : ControllerBase
     [HttpPost("execute")]
     public async Task<IActionResult> Execute([FromBody] ExecuteRequest request)
     {
+        if (!request.UserConsentProvided)
+            return BadRequest(new { message = "Review the safety preview and approve this action before continuing." });
+
+        using var executionLease = _executionGate.TryEnter();
+        if (executionLease == null)
+            return Conflict(new { message = "Another fix is running. Wait for it to finish before trying again." });
+
         if (!Guid.TryParse(request.SessionId, out var sessionId))
         {
             return BadRequest(new
@@ -412,6 +495,21 @@ public class AutonomyController : ControllerBase
                 message = "Diagnostic session was not found."
             });
         }
+
+        if (string.IsNullOrWhiteSpace(request.ToolName))
+            return BadRequest(new { message = "Select the action shown in the preview." });
+        RemediationApprovalStore.Scope approvalScope;
+        try
+        {
+            approvalScope = RemediationApprovalStore.CreateScope("remediation", sessionId,
+                request.ToolName, request.ToolArgumentsJson);
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new { message = "Tool arguments must be a valid JSON object." });
+        }
+        if (!_approvals.TryConsume(request.ApprovalToken, approvalScope))
+            return Conflict(new { message = "This approval expired, changed, or was already used. Review the action again." });
 
         // Real hardware is used for safety evaluation and as the
         // persisted pre-execution system snapshot.
@@ -1006,6 +1104,8 @@ public class AutonomyController : ControllerBase
         [FromBody] ToolInvocationRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Arguments.ValueKind != JsonValueKind.Object)
+            return BadRequest(new { message = "Tool arguments must be a JSON object." });
         if (_toolRegistry == null)
         {
             return StatusCode(503, new { message = "Tool registry is not configured." });
@@ -1018,6 +1118,15 @@ public class AutonomyController : ControllerBase
         }
 
         var preview = await tool.PreviewImpactAsync(request.Arguments, cancellationToken);
+        if (tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly && preview.CanExecute)
+        {
+            if (!Guid.TryParse(request.SessionId, out var sessionId))
+                return BadRequest(new { message = "A valid diagnostic session ID is required." });
+            if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+                return NotFound(new { message = "Diagnostic session was not found." });
+            AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", sessionId,
+                tool.Name, request.Arguments.GetRawText()));
+        }
         return Ok(preview);
     }
 
@@ -1026,6 +1135,8 @@ public class AutonomyController : ControllerBase
         [FromBody] ToolInvocationRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Arguments.ValueKind != JsonValueKind.Object)
+            return BadRequest(new { message = "Tool arguments must be a JSON object." });
         if (_toolRegistry == null)
         {
             return StatusCode(503, new { message = "Tool registry is not configured." });
@@ -1036,6 +1147,12 @@ public class AutonomyController : ControllerBase
         {
             return NotFound(new { message = $"Tool '{request.ToolName}' is not registered." });
         }
+
+        if (tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "System-changing tools require the diagnostic review and approval workflow."
+            });
 
         Action<string>? progressReporter = null;
         if (!string.IsNullOrWhiteSpace(request.SessionId))
@@ -1062,19 +1179,15 @@ public class AutonomyController : ControllerBase
     public IActionResult GetAgentSettings()
     {
         var settings = RigMdAgentRuntimeSettingsStore.Load();
-        var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
-        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"]);
-        var hasDirectKey = !string.IsNullOrWhiteSpace(effectiveKey);
-        var hasProxy = !string.IsNullOrWhiteSpace(effectiveProxy);
+        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"] ?? RigMdAgentRuntimeSettingsStore.DefaultProxyUrl);
+        var hasProxy = RigMdAgentRuntimeSettingsStore.GetTrustedCloudProxyUri(effectiveProxy) != null;
         var isLocalOnly = string.Equals(settings.PreferredMode, "local-only", StringComparison.OrdinalIgnoreCase) ||
                           string.Equals(settings.PreferredMode, "local", StringComparison.OrdinalIgnoreCase);
 
-        var hasAi = !isLocalOnly && (hasDirectKey || hasProxy);
+        var hasAi = !isLocalOnly && hasProxy && _cloudSession?.Status.SignedIn == true;
         var activeEngine = isLocalOnly
             ? "Local Deterministic ReAct Engine (100% Offline)"
-            : hasDirectKey
-                ? "Gemini Direct API Key + Local ReAct Fallback"
-                : hasProxy
+            : hasAi
                     ? "Gemini Cloud Proxy (rig-md.com) + Local ReAct Fallback"
                     : "Local Deterministic ReAct Engine (100% Offline)";
 
@@ -1095,19 +1208,15 @@ public class AutonomyController : ControllerBase
             request.PreferredMode,
             request.AutoExecuteSafeTier1);
 
-        var effectiveKey = RigMdAgentRuntimeSettingsStore.ResolveEffectiveGeminiApiKey(_configuration?["Gemini:ApiKey"]);
-        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"]);
-        var hasDirectKey = !string.IsNullOrWhiteSpace(effectiveKey);
-        var hasProxy = !string.IsNullOrWhiteSpace(effectiveProxy);
+        var effectiveProxy = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl(_configuration?["Gemini:ProxyUrl"] ?? RigMdAgentRuntimeSettingsStore.DefaultProxyUrl);
+        var hasProxy = RigMdAgentRuntimeSettingsStore.GetTrustedCloudProxyUri(effectiveProxy) != null;
         var isLocalOnly = string.Equals(saved.PreferredMode, "local-only", StringComparison.OrdinalIgnoreCase) ||
                           string.Equals(saved.PreferredMode, "local", StringComparison.OrdinalIgnoreCase);
 
-        var hasAi = !isLocalOnly && (hasDirectKey || hasProxy);
+        var hasAi = !isLocalOnly && hasProxy && _cloudSession?.Status.SignedIn == true;
         var activeEngine = isLocalOnly
             ? "Local Deterministic ReAct Engine (100% Offline)"
-            : hasDirectKey
-                ? "Gemini Direct API Key + Local ReAct Fallback"
-                : hasProxy
+            : hasAi
                     ? "Gemini Cloud Proxy (rig-md.com) + Local ReAct Fallback"
                     : "Local Deterministic ReAct Engine (100% Offline)";
 

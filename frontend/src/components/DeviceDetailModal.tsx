@@ -4,6 +4,7 @@ import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity } from 'lucide-
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '../lib/api';
+import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
 import type { HardwareStats } from '../types/rigmd';
 
@@ -96,7 +97,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     const connectSignalR = async () => {
       const hubUrl = `${API_BASE_URL}/hubs/telemetry`;
       const connection = new signalR.HubConnectionBuilder()
-        .withUrl(hubUrl)
+        .withUrl(hubUrl, { accessTokenFactory: getLocalApiToken })
         .withAutomaticReconnect()
         .build();
 

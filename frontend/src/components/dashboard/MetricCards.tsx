@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import type { HardwareStats } from '../../types/rigmd';
 import { Cpu, MemoryStick, HardDrive, Wifi, Cable, Network, Thermometer } from 'lucide-react';
+import { formatStorageCapacity, storageCapacitySummary, storageUsagePercent, validReading } from '../../lib/storageTelemetry';
 
 /* ─── CPU Card ─── */
 export function CpuCard({ stats }: { stats: HardwareStats | null }) {
@@ -114,7 +115,8 @@ export function MemoryCard({ stats }: { stats: HardwareStats | null }) {
 /* ─── Storage Card (Per-drive bars) ─── */
 export function StorageCard({ stats }: { stats: HardwareStats | null }) {
   const drives = stats?.storage_drives ?? [];
-  const overallPercent = stats?.disk?.usage_percent ?? null;
+  const overallPercent = storageUsagePercent({ ...stats?.disk, size_gb: stats?.disk?.total_gb });
+  const capacity = storageCapacitySummary(drives, stats?.disk);
 
   function barColor(percent: number) {
     if (percent >= 90) return '#fb7185';
@@ -135,25 +137,33 @@ export function StorageCard({ stats }: { stats: HardwareStats | null }) {
         <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Storage</span>
       </div>
 
+      <p className="mt-3 break-words text-lg font-semibold tabular-nums text-white" data-testid="storage-capacity">
+        {capacity}
+      </p>
+
       {drives.length > 0 ? (
         <div className="mt-3 space-y-2.5">
           {drives.slice(0, 3).map((d, i) => {
-            const pct = d.usage_percent ?? 0;
+            const pct = storageUsagePercent(d);
             return (
               <div key={i}>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="max-w-[70%] truncate text-[11px] text-slate-300">{d.model || `Drive ${i + 1}`}</span>
-                  <span className="text-[11px] font-semibold tabular-nums text-slate-300">{Math.round(pct)}%</span>
+                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-300">{pct !== null ? `${Math.round(pct)}%` : 'Not available'}</span>
                 </div>
                 <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.04]">
                   <motion.div
                     className="h-full rounded-full"
-                    style={{ backgroundColor: barColor(pct) }}
+                    style={{ backgroundColor: pct === null ? '#64748b' : barColor(pct) }}
                     initial={{ width: 0 }}
-                    animate={{ width: `${pct}%` }}
+                    animate={{ width: `${pct ?? 0}%` }}
                     transition={{ duration: 0.8, delay: i * 0.1, ease: 'easeOut' }}
                   />
                 </div>
+                <p className="mt-1 break-words text-[11px] tabular-nums text-slate-400">
+                  {formatStorageCapacity(d.used_gb, d.size_gb)}
+                  {validReading(d.used_gb) === null && validReading(d.size_gb) !== null ? ' (used space unavailable)' : ''}
+                </p>
               </div>
             );
           })}

@@ -9,6 +9,9 @@ using RigMD.Domain.Entities;
 using RigMD.Domain.Rules;
 using Microsoft.AspNetCore.SignalR;
 using RigMD.Api.Hubs;
+using RigMD.Api.Services;
+using RigMD.Infrastructure.Remediation.Tools;
+using System.Text.Json;
 
 namespace RigMD.Tests.Api;
 
@@ -123,10 +126,12 @@ public class AutonomyControllerTests
         var remediationRepository =
             new FakeRemediationRepository();
 
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var approval = approvals.Issue(RemediationApprovalStore.CreateScope("remediation", sessionId, action.Id, "{}"));
         var controller = CreateController(
             orchestrator,
             diagnostic,
-            remediationRepository);
+            remediationRepository, approvals: approvals);
 
         var result = await controller.Execute(
             new AutonomyController.ExecuteRequest
@@ -134,7 +139,10 @@ public class AutonomyControllerTests
                 SessionId = sessionId.ToString(),
                 DiagnosedCategory =
                     diagnostic.DiagnosedCategory,
-                UserConsentProvided = true
+                UserConsentProvided = true,
+                ToolName = action.Id,
+                ToolArgumentsJson = "{}",
+                ApprovalToken = approval.Token
             });
 
         var okResult =
@@ -232,7 +240,7 @@ public class AutonomyControllerTests
                 UserConsentProvided = false
             });
 
-        Assert.IsType<OkObjectResult>(result);
+        Assert.IsType<BadRequestObjectResult>(result);
 
         Assert.Equal(
             0,
@@ -245,7 +253,9 @@ public class AutonomyControllerTests
     private static AutonomyController CreateController(
         FakeOrchestrator orchestrator,
         DiagnosticOutput diagnostic,
-        FakeRemediationRepository remediationRepository)
+        FakeRemediationRepository remediationRepository,
+        RemediationApprovalStore? approvals = null,
+        IRigMdAgentToolRegistry? registry = null)
     {
         return new AutonomyController(
             orchestrator,
@@ -254,7 +264,108 @@ public class AutonomyControllerTests
                 diagnostic),
             remediationRepository,
             new FakeHubContext(),
-            NullLogger<AutonomyController>.Instance);
+            NullLogger<AutonomyController>.Instance, registry, approvals: approvals);
+    }
+
+    [Fact]
+    public async Task PreviewApproval_AuthorizesExactlyOneExecution()
+    {
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible) { CanPreviewExecute = true };
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var controller = CreateController(new FakeOrchestrator(), CreateDiagnostic(), new FakeRemediationRepository(),
+            approvals, new RigMdAgentToolRegistry(new[] { tool }));
+        var sessionId = Guid.NewGuid();
+        using var arguments = JsonDocument.Parse("{}");
+        var previewResponse = Assert.IsType<OkObjectResult>(await controller.PreviewTool(new()
+        {
+            SessionId = sessionId.ToString(), ToolName = tool.Name, Arguments = arguments.RootElement
+        }, CancellationToken.None));
+        var preview = Assert.IsType<ToolDryRunPreview>(previewResponse.Value);
+        Assert.NotNull(preview.ApprovalToken);
+        var request = new AutonomyController.ExecuteRequest
+        {
+            SessionId = sessionId.ToString(), UserConsentProvided = true,
+            ToolName = tool.Name, ToolArgumentsJson = "{}", ApprovalToken = preview.ApprovalToken
+        };
+        Assert.IsType<OkObjectResult>(await controller.Execute(request));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(request));
+        // The fake orchestrator is inert; no real tool was invoked by this controller test.
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Execute_WithoutPreviewApproval_IsRejectedEvenWithConsent()
+    {
+        var controller = CreateController(new FakeOrchestrator(), CreateDiagnostic(), new FakeRemediationRepository());
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new()
+        {
+            SessionId = Guid.NewGuid().ToString(), UserConsentProvided = true,
+            ToolName = "clear_temp_files", ToolArgumentsJson = "{}"
+        }));
+    }
+
+    [Fact]
+    public async Task CloseSelectedApp_WithoutPreviewApproval_IsRejectedEvenWithConfirmation()
+    {
+        var controller = CreateController(new FakeOrchestrator(), CreateDiagnostic(), new FakeRemediationRepository());
+        Assert.IsType<ConflictObjectResult>(await controller.CloseSelectedApp(new()
+        {
+            SessionId = Guid.NewGuid().ToString(), Confirmed = true,
+            ProcessNames = new() { "notepad" }
+        }));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MainPreview_BindsApprovalToTheArgumentsActuallyShown(bool changeArguments)
+    {
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible);
+        var orchestrator = new FakeOrchestrator
+        {
+            PreviewResult = new OrchestrationResult
+            {
+                Plan = CreatePlan(), Safety = new SafetyEvaluation { IsApproved = true },
+                DryRunPreview = new ToolDryRunPreview { CanExecute = true },
+                ProposedTool = new ProposedToolInvocation { ToolName = tool.Name, ArgumentsJson = "{\"target\":\"previewed\"}" }
+            }
+        };
+        var controller = CreateController(orchestrator, CreateDiagnostic(), new FakeRemediationRepository(),
+            registry: new RigMdAgentToolRegistry(new[] { tool }));
+        var sessionId = Guid.NewGuid();
+        var response = Assert.IsType<OkObjectResult>(await controller.Preview(new() { SessionId = sessionId.ToString() }));
+        var preview = Assert.IsType<OrchestrationResult>(response.Value).DryRunPreview!;
+        Assert.NotNull(preview.ApprovalToken);
+        Assert.Equal(tool.Name, preview.ToolName);
+        var execution = await controller.Execute(new()
+        {
+            SessionId = sessionId.ToString(), UserConsentProvided = true,
+            ToolName = tool.Name, ApprovalToken = preview.ApprovalToken,
+            ToolArgumentsJson = changeArguments ? "{\"target\":\"changed\"}" : "{\"target\":\"previewed\"}"
+        });
+        if (changeArguments) Assert.IsType<ConflictObjectResult>(execution);
+        else Assert.IsType<OkObjectResult>(execution);
+    }
+
+    [Fact]
+    public async Task SelectedAppPreview_DoesNotCloseProcesses_AndBindsTheSelection()
+    {
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var controller = CreateController(new FakeOrchestrator(), CreateDiagnostic(), new FakeRemediationRepository(), approvals);
+        var sessionId = Guid.NewGuid();
+        var response = Assert.IsType<OkObjectResult>(await controller.PreviewCloseSelectedApp(new()
+        {
+            SessionId = sessionId.ToString(), ProcessNames = new() { "chrome" }
+        }));
+        var preview = Assert.IsType<ToolDryRunPreview>(response.Value);
+        Assert.Equal(new[] { "chrome" }, preview.AffectedTargets);
+        Assert.NotNull(preview.ApprovalToken);
+        // A changed selection is rejected before CloseApp can enumerate or close any process.
+        Assert.IsType<ConflictObjectResult>(await controller.CloseSelectedApp(new()
+        {
+            SessionId = sessionId.ToString(), ProcessNames = new() { "calculator" },
+            Confirmed = true, ApprovalToken = preview.ApprovalToken
+        }));
     }
 
     private static DiagnosticOutput CreateDiagnostic()
@@ -348,7 +459,11 @@ public class AutonomyControllerTests
         {
             return new HardwareProfileDto
             {
-                OsVersion = "Windows 11"
+                OsVersion = "Windows 11",
+                ProcessInsights = new ProcessInsightsDto
+                {
+                    TopMemoryApps = new() { new() { Name = "chrome", MemoryMb = 256, ProcessCount = 1 } }
+                }
             };
         }
     }

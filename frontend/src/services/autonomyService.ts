@@ -1,5 +1,6 @@
 import { API_BASE_URL, apiGet, apiPost } from '../lib/api';
 import * as signalR from '@microsoft/signalr';
+import { getLocalApiToken } from '../lib/localApiSession';
 
 export interface AutonomyActionDef {
   id?: string;
@@ -63,6 +64,8 @@ export interface ReActTraceStep {
 }
 
 export interface ToolDryRunPreview {
+  approvalToken?: string;
+  approvalExpiresAt?: string;
   toolName: string;
   displayName: string;
   safetyTier: string | number;
@@ -121,6 +124,7 @@ export interface AutonomyResult {
 }
 
 export interface AutonomyRequest {
+  approvalToken?: string;
   sessionId: string;
   diagnosedCategory: string;
   userConsentProvided?: boolean;
@@ -144,6 +148,8 @@ interface MemoryAppsResponse {
 }
 
 interface CloseSelectedAppRequest {
+  sessionId: string;
+  approvalToken?: string;
   processNames: string[];
   confirmed: boolean;
 }
@@ -160,7 +166,7 @@ export async function startRemediationStream(
   }
 
   remediationHubConnection = new signalR.HubConnectionBuilder()
-    .withUrl(`${API_BASE_URL}/hubs/remediation`)
+    .withUrl(`${API_BASE_URL}/hubs/remediation`, { accessTokenFactory: getLocalApiToken })
     .withAutomaticReconnect()
     .build();
 
@@ -204,6 +210,7 @@ export async function runAutonomyPreview({
 }
 
 export async function runAutonomyExecution({
+  approvalToken,
   sessionId,
   diagnosedCategory,
   userConsentProvided = false,
@@ -213,6 +220,7 @@ export async function runAutonomyExecution({
   const response = await apiPost<AutonomyResult>(
     '/api/autonomy/execute',
     {
+      approvalToken,
       sessionId,
       diagnosedCategory,
       userConsentProvided,
@@ -234,12 +242,14 @@ export async function getRegisteredAgentTools() {
 export async function previewAgentTool(
   toolName: string,
   args: Record<string, unknown> = {},
+  sessionId?: string,
 ) {
   const response = await apiPost<ToolDryRunPreview>(
     '/api/autonomy/tools/preview',
     {
       toolName,
       arguments: args,
+      sessionId,
     },
   );
   return response.data;
@@ -254,17 +264,28 @@ export async function getMemoryAppCandidates() {
 }
 
 export async function closeSelectedApp({
+  sessionId,
+  approvalToken,
   processNames,
   confirmed,
 }: CloseSelectedAppRequest) {
   const response = await apiPost<AutonomyResult>(
     '/api/autonomy/close-selected-app',
     {
+      sessionId,
+      approvalToken,
       processNames,
       confirmed,
     },
   );
 
+  return response.data;
+}
+
+export async function previewCloseSelectedApp(sessionId: string, processNames: string[]) {
+  const response = await apiPost<ToolDryRunPreview>('/api/autonomy/close-selected-app/preview', {
+    sessionId, processNames,
+  });
   return response.data;
 }
 

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 using RigMD.Application.Contracts.Common;
 
 namespace RigMD.Api.Services;
@@ -15,19 +16,10 @@ public class HttpCurrentClientProvider : ICurrentClientProvider
     public string GetCurrentClientId()
     {
         var httpContext = _httpContextAccessor.HttpContext;
-        if (httpContext == null) return string.Empty;
+        if (httpContext?.User.Identity?.IsAuthenticated != true)
+            throw new UnauthorizedAccessException("A local desktop session is required.");
 
-        if (httpContext.Request.Headers.TryGetValue("X-Client-ID", out var headerVal) && 
-            !string.IsNullOrWhiteSpace(headerVal))
-        {
-            return headerVal.ToString().Trim();
-        }
-
-        if (httpContext.Items.TryGetValue("ClientId", out var itemVal) && itemVal != null)
-        {
-            return itemVal.ToString()?.Trim() ?? string.Empty;
-        }
-
-        return string.Empty;
+        return httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? throw new UnauthorizedAccessException("The local session identity is missing.");
     }
 }
