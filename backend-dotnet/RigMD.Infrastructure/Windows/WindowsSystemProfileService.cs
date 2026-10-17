@@ -203,7 +203,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var errors = new List<DeviceErrorDto>();
         try
         {
-            using var searcher = new System.Management.ManagementObjectSearcher("SELECT Name, DeviceID, ConfigManagerErrorCode, Status FROM Win32_PnPEntity WHERE ConfigManagerErrorCode <> 0");
+            using var searcher = new System.Management.ManagementObjectSearcher("SELECT Name, DeviceID, PNPClass, ClassGuid, ConfigManagerErrorCode, Status FROM Win32_PnPEntity WHERE ConfigManagerErrorCode <> 0");
             foreach (var obj in searcher.Get())
             {
                 var name = obj["Name"]?.ToString() ?? "Unknown Device";
@@ -215,6 +215,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
                 {
                     Name = name,
                     DeviceId = deviceId,
+                    PnpClass = obj["PNPClass"]?.ToString() ?? string.Empty,
+                    ClassGuid = obj["ClassGuid"]?.ToString() ?? string.Empty,
                     ErrorCode = errorCode,
                     Description = $"Device reported error code {errorCode}. Status: {status}"
                 });

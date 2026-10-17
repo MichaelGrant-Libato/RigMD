@@ -36,8 +36,9 @@ public class ResolutionService
                 case "overheating-loud-fan":
                     return CheckThermalResolution(hardware);
                 case "driver-error":
-                case "no-display":
                     return CheckDriverAndDisplayResolution(hardware);
+                case "no-display":
+                    return CheckDriverAndDisplayResolution(hardware, graphicsOnly: true, includeMonitors: true);
                 case "network-problem":
                 case "network-issue":
                     return CheckNetworkResolution(hardware);
@@ -86,7 +87,9 @@ public class ResolutionService
 
             if (parsedComponents.All(c => c is "drivers" or "gpu" or "display"))
             {
-                return CheckDriverAndDisplayResolution(hardware);
+                return CheckDriverAndDisplayResolution(hardware,
+                    graphicsOnly: !parsedComponents.Contains("drivers"),
+                    includeMonitors: parsedComponents.Contains("display"));
             }
 
             if (parsedComponents.Contains("cpu") && parsedComponents.Count == 1)
@@ -195,7 +198,10 @@ public class ResolutionService
 
         if (category.Contains("driver") || category.Contains("display"))
         {
-            return CheckDriverAndDisplayResolution(hardware);
+            var graphicsOnly = parsedComponents.Overlaps(new[] { "gpu", "display" }) &&
+                !parsedComponents.Overlaps(new[] { "drivers", "peripherals", "audio" });
+            return CheckDriverAndDisplayResolution(hardware, graphicsOnly,
+                includeMonitors: parsedComponents.Contains("display"));
         }
 
         return CheckSevereResourceResolution(hardware);
@@ -247,43 +253,51 @@ public class ResolutionService
     }
 
     private static ResolutionResultDto CheckDriverAndDisplayResolution(
-        HardwareProfileDto hardware)
+        HardwareProfileDto hardware,
+        bool graphicsOnly = false,
+        bool includeMonitors = false)
     {
-        var errCount = hardware.DeviceErrors?.Count ?? 0;
+        var errCount = DeviceErrorAttribution.Select(hardware.DeviceErrors, graphicsOnly, includeMonitors).Count;
         var gpuTemp = hardware.Gpu.TemperatureCelsius;
         var gpuTempOk = !gpuTemp.HasValue || gpuTemp.Value < ElevatedTempThresholdCelsius;
         var driversOk = errCount == 0;
-        var resolved = driversOk && gpuTempOk;
+        var displaysOk = !includeMonitors || hardware.ConnectedDisplays > 0;
+        var resolved = driversOk && gpuTempOk && displaysOk;
+        var errorScope = graphicsOnly ? "selected graphics hardware" : "all hardware";
+        var graphicsErrors = DeviceErrorAttribution.Select(hardware.DeviceErrors, graphicsOnly: true, includeMonitors: includeMonitors).Count;
+        var graphicsOk = graphicsErrors == 0 && gpuTempOk && displaysOk;
 
         var gpuSummaryValue = gpuTemp.HasValue
             ? $"{hardware.Gpu.Name} ({gpuTemp.Value:0.#}°C, Driver {hardware.Gpu.Driver})"
             : $"{hardware.Gpu.Name} (Driver {hardware.Gpu.Driver})";
 
-        var unresolvedSummary = !driversOk && !gpuTempOk
-            ? $"Fresh scan still shows {errCount} device error code(s) and elevated graphics adapter temperature."
-            : !driversOk
-                ? $"Fresh scan still shows {errCount} active Device Manager error(s). The graphics adapter is operating normally."
-                : "Fresh scan still shows elevated graphics adapter temperature. Device Manager is not reporting active driver errors.";
+        var unresolvedSummary = !displaysOk
+            ? "Fresh scan does not detect a connected display; the display issue cannot be marked resolved."
+            : !driversOk && !gpuTempOk
+                ? $"Fresh scan still shows {errCount} device error code(s) for {errorScope} and elevated graphics adapter temperature."
+                : !driversOk
+                    ? $"Fresh scan still shows {errCount} active Device Manager error(s) for {errorScope}."
+                    : "Fresh scan still shows elevated graphics adapter temperature. Device Manager is not reporting active driver errors in the checked scope.";
 
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan shows zero PnP device error codes and normal graphics adapter readings."
+                ? $"Fresh scan shows zero PnP device error codes for {errorScope} and no elevated graphics temperature reading."
                 : unresolvedSummary,
             new object[]
             {
                 Proof(
-                    "Device Manager Errors",
+                    graphicsOnly ? "Graphics Device Errors" : "Device Manager Errors",
                     errCount == 0 ? "0 active errors" : $"{errCount} active error(s)",
                     driversOk,
-                    "All hardware drivers are reporting healthy status (ErrorCode = 0).",
-                    "One or more devices still report a non-zero ConfigManagerErrorCode."),
+                    $"No active device error codes were reported for {errorScope}.",
+                    $"One or more devices in {errorScope} still report a non-zero ConfigManagerErrorCode."),
                 Proof(
                     "Graphics adapter",
                     gpuSummaryValue,
-                    gpuTempOk,
-                    $"Graphics adapter and {Math.Max(hardware.ConnectedDisplays, 1)} connected display(s) are operating normally.",
-                    "Graphics adapter temperature is still elevated.")
+                    graphicsOk,
+                    $"No active graphics-class error or elevated temperature was reported; {hardware.ConnectedDisplays} connected display(s) detected.",
+                    "A graphics-class device error, elevated temperature, or missing display still requires review.")
             });
     }
 

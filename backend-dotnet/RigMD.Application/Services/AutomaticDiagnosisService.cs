@@ -106,7 +106,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             ? hw.AllDisks.Max(d => d.UsagePercent)
             : hw.StorageDrives.FirstOrDefault()?.UsagePercent ?? 0;
         var smartFailing = hw.StorageDrives.Any(d => d.IsFailingSmart);
-        var hasDeviceErrors = hw.DeviceErrors is { Count: > 0 };
+        var graphicsOnly = (mode == "scenario" && scenarioId == "no-display") ||
+            (mode == "component" && selectedComponents.Overlaps(new[] { "gpu", "display" }) &&
+             !selectedComponents.Overlaps(new[] { "drivers", "peripherals", "audio" }));
+        var deviceErrorsInScope = DeviceErrorAttribution.Select(hw.DeviceErrors, graphicsOnly,
+            includeMonitors: scenarioId == "no-display" || selectedComponents.Contains("display"));
+        var hasDeviceErrors = deviceErrorsInScope.Count > 0;
         var browserMemoryMb = hw.ProcessInsights?.BrowserMemoryMb ?? 0;
         var browserProcs = hw.ProcessInsights?.BrowserProcessCount ?? 0;
         var memLeakWarning = hw.ProcessInsights?.MemoryLeakWarning;
@@ -121,7 +126,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             ramUsage,
             maxDiskUsage,
             smartFailing,
-            hasDeviceErrors,
+            deviceErrorsInScope.Count,
             browserMemoryMb,
             browserProcs);
 
@@ -172,7 +177,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (EvalComponent("drivers", "gpu", "display", "peripherals", "audio") && hasDeviceErrors)
         {
-            var firstErr = hw.DeviceErrors.First();
+            var firstErr = deviceErrorsInScope.First();
             var primary = $"Windows Device Manager reported error code {firstErr.ErrorCode} on '{firstErr.Name}'.";
             return new AutomaticDiagnosisResult
             {
@@ -453,7 +458,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (selectedComponents.Contains("gpu") || selectedComponents.Contains("display"))
         {
             componentSummaries.Add(
-                $"GPU / Graphics ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}) is operating normally across {hw.ConnectedDisplays} display(s).");
+                $"No active device error was reported for the selected graphics hardware ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} connected display(s)).");
         }
 
         if (selectedComponents.Contains("drivers"))
@@ -898,7 +903,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         double ramUsage,
         double maxDiskUsage,
         bool smartFailing,
-        bool hasDeviceErrors,
+        int deviceErrorCount,
         double browserMemoryMb,
         int browserProcs)
     {
@@ -959,10 +964,10 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             proof.Add(new AutomaticDiagnosisProof
             {
                 Label = driverErrorInScope ? "Graphics & Drivers" : "Graphics Thermal Context",
-                Value = driverErrorInScope && hasDeviceErrors
-                    ? $"{hw.DeviceErrors.Count} PnP Device Error(s)"
+                Value = driverErrorInScope && deviceErrorCount > 0
+                    ? $"{deviceErrorCount} PnP Device Error(s)"
                     : $"{hw.Gpu.Name}{gpuTempText} (OK)",
-                Status = driverErrorInScope && hasDeviceErrors ? "high" : "normal",
+                Status = driverErrorInScope && deviceErrorCount > 0 ? "high" : "normal",
                 Meaning = driverErrorInScope
                     ? $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
                     : $"GPU context is shown only for thermal correlation; driver warnings are handled under Driver or Display checks."

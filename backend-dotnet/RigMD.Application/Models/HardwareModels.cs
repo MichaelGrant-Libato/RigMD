@@ -169,6 +169,8 @@ public class DeviceErrorDto
 {
     public string Name { get; set; } = string.Empty;
     public string DeviceId { get; set; } = string.Empty;
+    public string PnpClass { get; set; } = string.Empty;
+    public string ClassGuid { get; set; } = string.Empty;
     public uint ErrorCode { get; set; }
     public string Description { get; set; } = string.Empty;
 }
