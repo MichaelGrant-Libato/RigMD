@@ -834,6 +834,13 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             return EvaluateNetworkEvidence(afterSnapshot?.DataJson);
         }
 
+        if (category.Contains("cpu") && !IsThermalIssue(category) && ToolIs(toolName, "inspect_cpu_and_thermals"))
+        {
+            var usage = TryReadDouble(afterSnapshot?.DataJson, "usagePercent");
+            return !usage.HasValue ? VerificationStatus.Unknown
+                : usage.Value < ElevatedCpuThreshold ? VerificationStatus.Resolved : VerificationStatus.Unresolved;
+        }
+
         if (IsThermalIssue(category) && ToolIs(toolName, "inspect_cpu_and_thermals"))
         {
             return EvaluateThermalEvidence(afterSnapshot?.DataJson);
@@ -885,8 +892,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
     private static bool IsThermalIssue(string category) =>
         category.Contains("thermal") ||
         category.Contains("overheat") ||
-        category.Contains("fan") ||
-        category.Contains("cpu");
+        category.Contains("fan");
 
     private static bool IsBatteryIssue(string category) =>
         category.Contains("battery") ||
@@ -1007,21 +1013,22 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
 
     private static VerificationStatus EvaluateThermalEvidence(string? json)
     {
-        var cpuUsage = TryReadDouble(json, "usagePercent");
         var tempCelsius = TryReadDouble(json, "temperatureCelsius");
         var throttling = TryReadBool(json, "isThermallyThrottling");
 
-        if (!cpuUsage.HasValue && !tempCelsius.HasValue && !throttling.HasValue)
+        if (!tempCelsius.HasValue && !throttling.HasValue)
         {
             return VerificationStatus.Unknown;
         }
 
-        var cpuOk = !cpuUsage.HasValue || cpuUsage.Value < ElevatedCpuThreshold;
         var tempOk = !tempCelsius.HasValue || tempCelsius.Value < ElevatedTempThresholdCelsius;
 
-        return cpuOk && tempOk && throttling != true
+        if (!tempOk || throttling == true)
+            return VerificationStatus.Unresolved;
+
+        return tempCelsius.HasValue && throttling.HasValue
             ? VerificationStatus.Resolved
-            : VerificationStatus.Unresolved;
+            : VerificationStatus.Unknown;
     }
 
     private static VerificationStatus EvaluateBatteryEvidence(string? json)

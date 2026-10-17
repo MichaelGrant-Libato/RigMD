@@ -227,9 +227,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         }
 
         // 4. CPU & Thermal checks
-        if (EvalComponent("cpu", "thermal") && (hw.Cpu.IsThermallyThrottling || (cpuTemp.HasValue && cpuTemp.Value >= 85)))
+        if ((EvalComponent("cpu", "thermal") && (hw.Cpu.IsThermallyThrottling || cpuTemp is >= 85)) ||
+            (EvalComponent("thermal", "gpu") && hw.Gpu.TemperatureCelsius is >= 85))
         {
-            var primary = $"Thermal pressure detected on {hw.Cpu.Name} ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermal throttling active")}).";
+            var primary = hw.Cpu.IsThermallyThrottling || cpuTemp is >= 85
+                ? $"Thermal pressure detected on {hw.Cpu.Name} ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermal throttling reported; CPU temperature unavailable")})."
+                : $"Graphics temperature is elevated on {hw.Gpu.Name} ({hw.Gpu.TemperatureCelsius:0.#}°C). CPU temperature is {(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "unavailable")}.";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -370,6 +373,9 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         // 8. Scoped Component-driven healthy verdict when user explicitly selected specific parts
         if (mode == "component" && selectedComponents.Count > 0)
         {
+            if (selectedComponents.Contains("thermal") && !cpuTemp.HasValue)
+                return BuildThermalUnavailableDiagnosis(targetScopeLabels, proof);
+
             return BuildComponentHealthyDiagnosis(
                 selectedComponents,
                 targetScopeLabels,
@@ -430,7 +436,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (selectedComponents.Contains("cpu"))
         {
-            var tempPart = cpuTemp.HasValue ? $", {cpuTemp.Value:0.#}°C" : ", thermals normal";
+            var tempPart = cpuTemp.HasValue ? $", {cpuTemp.Value:0.#}°C" : ", CPU temperature unavailable";
             componentSummaries.Add(
                 $"Processor (CPU) is operating normally ({cpuUsage:0.#}% load on {hw.Cpu.Name}{tempPart}).");
         }
@@ -440,7 +446,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             var tempPart = cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C CPU" : "normal thermal state";
             var gpuTempPart = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C GPU" : string.Empty;
             componentSummaries.Add(
-                $"Thermal / Cooling is operating normally ({tempPart}{gpuTempPart}, no thermal throttling detected).");
+                $"Thermal / Cooling readings are below RigMD's thermal threshold ({tempPart}{gpuTempPart}, no thermal throttling reported).");
         }
 
         if (selectedComponents.Contains("storage"))
@@ -544,8 +550,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         List<AutomaticDiagnosisProof> proof)
     {
         var thermalIssue = hw.Cpu.IsThermallyThrottling ||
-            (cpuTemp.HasValue && cpuTemp.Value >= 75) ||
-            cpuUsage >= 75;
+            (cpuTemp.HasValue && cpuTemp.Value >= 85) || hw.Gpu.TemperatureCelsius is >= 85;
+        var thermalSummary = $"Thermal check recorded CPU temperature {(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "unavailable")}, GPU temperature {(hw.Gpu.TemperatureCelsius.HasValue ? $"{hw.Gpu.TemperatureCelsius.Value:0.#}°C" : "unavailable")}, and processor load {cpuUsage:0.#}% under power plan '{hw.ActivePowerPlan}'.";
         var networkIssue = hw.Network == null ||
             !hw.Network.HasActiveAdapter ||
             !hw.Network.HasIpv4Address ||
@@ -738,6 +744,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Inspect display adapter driver status."
                 }
             },
+            "overheating-loud-fan" when !thermalIssue && !cpuTemp.HasValue =>
+                BuildThermalUnavailableDiagnosis(targetScopeLabels, proof),
             "overheating-loud-fan" when !thermalIssue => BuildScenarioHealthyDiagnosis(
                 targetScopeLabels,
                 $"No active overheating detected. Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "no thermal throttling reported")}) under power plan '{hw.ActivePowerPlan}'.",
@@ -749,11 +757,11 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : hw.Cpu.IsThermallyThrottling ? "throttling active" : "thermals nominal")}) under power plan '{hw.ActivePowerPlan}'.",
+                PrimaryResult = thermalSummary,
                 DiagnosedCategory = "Thermal condition",
                 ActionCategory = "Maintain",
-                ConfidenceLabel = hw.Cpu.IsThermallyThrottling || (cpuTemp.HasValue && cpuTemp.Value >= 80) || cpuUsage >= 75 ? "High" : "Medium",
-                Explanation = $"Thermal check recorded CPU load at {cpuUsage:0.#}% ({(cpuTemp.HasValue ? $"{cpuTemp.Value:0.#}°C" : "thermals nominal")}) under power plan '{hw.ActivePowerPlan}'.",
+                ConfidenceLabel = "High",
+                Explanation = thermalSummary,
                 RecommendedNextStep = "Check fan airflow and vents, or run the guided inspection below to check processor temperatures and close heat-generating tasks.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
@@ -865,6 +873,27 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         };
     }
 
+    private static AutomaticDiagnosisResult BuildThermalUnavailableDiagnosis(
+        IReadOnlyList<string> targetScopeLabels,
+        List<AutomaticDiagnosisProof> proof) => new()
+    {
+        ComponentStatus = ComponentStatus.Present,
+        TargetScope = targetScopeLabels,
+        PrimaryResult = "CPU temperature could not be verified because an identified CPU sensor is unavailable.",
+        DiagnosedCategory = "Thermal telemetry unavailable",
+        ActionCategory = "Monitor",
+        ConfidenceLabel = "Low",
+        Explanation = "Processor workload is not a temperature measurement. Missing sensor data cannot confirm normal thermals or overheating.",
+        RecommendedNextStep = "Review available sensor support and recheck when a CPU sensor reading is available. Do not infer a temperature from processor load or GPU readings.",
+        Proof = proof,
+        VerificationTarget = new AutomaticVerificationTarget
+        {
+            Target = "task_manager",
+            Label = "Task Manager - Performance",
+            Description = "Review processor activity separately; Task Manager does not verify CPU temperature."
+        }
+    };
+
     private static AutomaticDiagnosisResult BuildScenarioHealthyDiagnosis(
         IReadOnlyList<string> targetScopeLabels,
         string primaryResult,
@@ -915,13 +944,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (Include("cpu", "thermal", "os"))
         {
-            var tempText = cpuTemp.HasValue ? $", Temp: {cpuTemp.Value:0.#}°C" : string.Empty;
+            var tempText = cpuTemp.HasValue ? $", Temp: {cpuTemp.Value:0.#}°C" : ", CPU temperature unavailable";
             proof.Add(new AutomaticDiagnosisProof
             {
                 Label = "Processor (CPU)",
                 Value = $"{cpuUsage:0.#}% load{tempText}",
-                Status = cpuUsage >= 85 || hw.Cpu.IsThermallyThrottling ? "high" : cpuUsage >= 65 ? "elevated" : "normal",
-                Meaning = $"{hw.Cpu.Name} ({hw.Cpu.Cores}C/{hw.Cpu.Threads}T @ {hw.Cpu.FrequencyMhz} MHz)."
+                Status = cpuUsage >= 85 || hw.Cpu.IsThermallyThrottling || cpuTemp is >= 85 ? "high" : cpuUsage >= 65 ? "elevated" : !cpuTemp.HasValue ? "unknown" : "normal",
+                Meaning = $"{hw.Cpu.Name} ({hw.Cpu.Cores}C/{hw.Cpu.Threads}T @ {hw.Cpu.FrequencyMhz} MHz). CPU temperature source: {hw.Cpu.TemperatureSource}."
             });
         }
 
@@ -960,14 +989,14 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 activeScopeKeys.Contains("peripherals") ||
                 activeScopeKeys.Contains("audio") ||
                 (mode == "component" && selectedComponents.Contains("gpu"));
-            var gpuTempText = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C" : string.Empty;
+            var gpuTempText = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C" : ", GPU temperature unavailable";
             proof.Add(new AutomaticDiagnosisProof
             {
                 Label = driverErrorInScope ? "Graphics & Drivers" : "Graphics Thermal Context",
                 Value = driverErrorInScope && deviceErrorCount > 0
                     ? $"{deviceErrorCount} PnP Device Error(s)"
-                    : $"{hw.Gpu.Name}{gpuTempText} (OK)",
-                Status = driverErrorInScope && deviceErrorCount > 0 ? "high" : "normal",
+                    : $"{hw.Gpu.Name}{gpuTempText}",
+                Status = (driverErrorInScope && deviceErrorCount > 0) || hw.Gpu.TemperatureCelsius is >= 85 ? "high" : "normal",
                 Meaning = driverErrorInScope
                     ? $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
                     : $"GPU context is shown only for thermal correlation; driver warnings are handled under Driver or Display checks."

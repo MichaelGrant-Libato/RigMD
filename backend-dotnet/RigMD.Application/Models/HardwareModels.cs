@@ -17,6 +17,17 @@ public class CpuStatsDto
     public int Processes { get; set; }
     public int Handles { get; set; }
     public double? TemperatureCelsius { get; set; }
+    public string TemperatureSource { get; set; } = "Unavailable";
+    public string? TemperatureSensorIdentifier { get; set; }
+    public DateTimeOffset? TemperatureCapturedAtUtc { get; set; }
+
+    public void SetTemperatureReading(CpuTemperatureReading? reading)
+    {
+        TemperatureCelsius = reading?.Celsius;
+        TemperatureSource = reading?.Source ?? "Unavailable";
+        TemperatureSensorIdentifier = reading?.SensorIdentifier;
+        TemperatureCapturedAtUtc = reading?.CapturedAtUtc;
+    }
 }
 
 public enum ComponentStatus

@@ -94,7 +94,9 @@ public class ResolutionService
 
             if (parsedComponents.Contains("cpu") && parsedComponents.Count == 1)
             {
-                return CheckThermalResolution(hardware);
+                return (diagnosedCategory ?? string.Empty).Contains("thermal", StringComparison.OrdinalIgnoreCase)
+                    ? CheckThermalResolution(hardware)
+                    : CheckCpuResolution(hardware);
             }
 
             if (parsedComponents.Contains("memory") && parsedComponents.Count == 1)
@@ -533,37 +535,55 @@ public class ResolutionService
         var cpuLoadOk = hardware.Cpu.UsagePercent < ElevatedCpuThreshold;
         var gpuTemp = hardware.Gpu.TemperatureCelsius;
         var gpuTempOk = !gpuTemp.HasValue || gpuTemp.Value < ElevatedTempThresholdCelsius;
-        var resolved = tempOk && throttleOk && cpuLoadOk && gpuTempOk;
+        var resolved = tempOk && throttleOk && gpuTempOk;
+
+        if (resolved && !tempC.HasValue)
+        {
+            return new ResolutionResultDto
+            {
+                resolution_status = "needs_recheck",
+                resolution_summary = "CPU temperature is unavailable. Low processor activity and no reported throttling do not verify that the thermal issue is resolved.",
+                resolution_proof = new object[]
+                {
+                    new { label = "Processor temperature", value = "Unavailable", status = "unknown",
+                        meaning = "No identified CPU temperature sensor reading is available; no temperature was estimated." }
+                }
+            };
+        }
 
         var tempDisplay = tempC.HasValue
             ? $"{tempC.Value:0.#}°C ({hardware.Cpu.UsagePercent:0.#}% load)"
-            : $"Nominal ({hardware.Cpu.UsagePercent:0.#}% load)";
+            : $"Unavailable ({hardware.Cpu.UsagePercent:0.#}% load)";
 
         return CreateResult(
             resolved,
             resolved
-                ? "Fresh scan shows processor temperature and throttling within normal limits. No active issue is detected for this saved check."
-                : "Fresh scan still shows elevated processor temperature or thermal throttling behavior.",
+                ? "Fresh scan shows measured processor temperature and any available graphics temperature below RigMD's thermal threshold, with no processor thermal throttling reported. No active issue is detected for this saved check."
+                : "Fresh scan still shows elevated CPU or GPU temperature, or reported processor thermal throttling.",
             new List<object>
             {
-                Proof(
+                !tempC.HasValue ? (object)new
+                {
+                    label = "Processor temperature", value = tempDisplay, status = "unknown",
+                    meaning = "Processor load does not measure CPU temperature."
+                } : Proof(
                     "Processor temperature",
                     tempDisplay,
                     tempOk,
-                    "Processor temperature is within safe operating limits.",
+                    "Processor temperature is below RigMD's 85 C thermal threshold.",
                     "Processor temperature is still elevated (>= 85°C)."),
                 Proof(
                     "Processor throttling",
-                    hardware.Cpu.IsThermallyThrottling ? "Still observed" : "Not observed",
+                    hardware.Cpu.IsThermallyThrottling ? "Reported" : "Not reported",
                     throttleOk,
-                    "RigMD no longer sees the processor slowing itself down because of heat.",
-                    "RigMD still sees signs that the processor may be slowing itself down because of heat."),
+                    "No processor thermal throttling was reported; this is not a temperature measurement.",
+                    "Processor thermal throttling was reported."),
                 Proof(
                     "Processor activity",
                     $"{hardware.Cpu.UsagePercent:0.##}%",
                     cpuLoadOk,
-                    "Processor activity is low enough that it is not currently creating thermal pressure.",
-                    "Processor activity is still high enough to keep heat or fan noise active.")
+                    "Processor activity is below the high-use range; it is not a temperature measurement.",
+                    "Processor activity is high; temperature is assessed separately from workload.")
             }
             .Concat(gpuTemp.HasValue
                 ? new object[]
@@ -572,7 +592,7 @@ public class ResolutionService
                         "Graphics temperature",
                         $"{gpuTemp.Value:0.#}°C",
                         gpuTempOk,
-                        "Graphics temperature is within safe operating limits.",
+                        "Graphics temperature is below RigMD's 85 C thermal threshold.",
                         "Graphics temperature is still elevated and may affect fan noise.")
                 }
                 : Array.Empty<object>())

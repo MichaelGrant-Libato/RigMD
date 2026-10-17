@@ -61,7 +61,10 @@ public class HardwareController : ControllerBase
                     cores = profile.Cpu.Cores,
                     threads = profile.Cpu.Threads,
                     frequency_mhz = profile.Cpu.FrequencyMhz,
-                    temperature_celsius = profile.Cpu.TemperatureCelsius
+                    temperature_celsius = profile.Cpu.TemperatureCelsius,
+                    temperature_source = profile.Cpu.TemperatureSource,
+                    temperature_sensor_identifier = profile.Cpu.TemperatureSensorIdentifier,
+                    temperature_captured_at_utc = profile.Cpu.TemperatureCapturedAtUtc
                 },
                 gpu = new
                 {

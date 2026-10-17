@@ -13,6 +13,9 @@ public class TelemetryUpdateDto
     public double CpuUsagePercent { get; set; }
     public double CpuSpeedMhz { get; set; }
     public double? CpuTempCelsius { get; set; }
+    public string CpuTemperatureSource { get; set; } = "Unavailable";
+    public string? CpuTemperatureSensorIdentifier { get; set; }
+    public DateTimeOffset? CpuTemperatureCapturedAtUtc { get; set; }
     public int CpuProcesses { get; set; }
     public int CpuThreads { get; set; }
     public int CpuHandles { get; set; }

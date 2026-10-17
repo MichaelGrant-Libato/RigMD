@@ -28,7 +28,7 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
     public string DisplayName => "Inspect CPU & Thermal Sensors";
 
     public string Description =>
-        "Reads live CPU utilization percentage, clock frequency vs. max frequency, core/thread count, thermal throttling flags, and live CPU package temperature in Celsius via WMI and LibreHardwareMonitor.";
+        "Reads CPU utilization, clock frequency, core/thread count, reported thermal throttling, and identified CPU temperature sensors where available. Missing CPU temperature is not estimated.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -75,7 +75,7 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
             try
             {
                 _hardwareMonitor.Tick();
-                cpu.TemperatureCelsius ??= _hardwareMonitor.GetCpuTemperature();
+                cpu.SetTemperatureReading(_hardwareMonitor.GetCpuTemperatureReading());
                 lhmCpuLoad = _hardwareMonitor.GetCpuLoad();
             }
             catch
@@ -90,6 +90,9 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
             usagePercent = Math.Round(cpu.UsagePercent, 1),
             sensorLoadPercent = lhmCpuLoad.HasValue ? Math.Round(lhmCpuLoad.Value, 1) : (double?)null,
             temperatureCelsius = cpu.TemperatureCelsius,
+            temperatureSource = cpu.TemperatureSource,
+            temperatureSensorIdentifier = cpu.TemperatureSensorIdentifier,
+            temperatureCapturedAtUtc = cpu.TemperatureCapturedAtUtc,
             isThermallyThrottling = cpu.IsThermallyThrottling,
             frequencyMhz = Math.Round(cpu.FrequencyMhz, 0),
             maxFrequencyMhz = Math.Round(cpu.MaxFrequencyMhz, 0),
@@ -102,10 +105,10 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
 
         var tempSummary = cpu.TemperatureCelsius.HasValue
             ? $"{cpu.TemperatureCelsius.Value:F1}°C"
-            : "sensor unavailable (requires admin or supported SuperIO)";
+            : "CPU sensor unavailable; temperature is not estimated";
 
         var summary =
-            $"CPU '{cpu.Name}' at {cpu.UsagePercent:F1}% load ({cpu.FrequencyMhz:F0}/{cpu.MaxFrequencyMhz:F0} MHz), Temp: {tempSummary}, Throttling: {cpu.IsThermallyThrottling}.";
+            $"CPU '{cpu.Name}' at {cpu.UsagePercent:F1}% load ({cpu.FrequencyMhz:F0}/{cpu.MaxFrequencyMhz:F0} MHz), Temp: {tempSummary}, Source: {cpu.TemperatureSource}, Thermal throttling reported: {cpu.IsThermallyThrottling}.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

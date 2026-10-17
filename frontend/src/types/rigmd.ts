@@ -76,6 +76,9 @@ export interface AgentHardwareSnapshot {
     processes?: number;
     handles?: number;
     temperatureCelsius?: number | null;
+    temperatureSource?: string;
+    temperatureSensorIdentifier?: string | null;
+    temperatureCapturedAtUtc?: string | null;
   };
 
   gpu: {
@@ -264,7 +267,10 @@ export interface HardwareStats {
     l3_cache_mb?: number;
     processes?: number;
     handles?: number;
-    temperature_celsius?: number;
+    temperature_celsius?: number | null;
+    temperature_source?: string;
+    temperature_sensor_identifier?: string | null;
+    temperature_captured_at_utc?: string | null;
   };
   gpu: {
     name: string;

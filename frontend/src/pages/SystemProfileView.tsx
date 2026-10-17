@@ -20,6 +20,7 @@ import {
 import TopHeader from '../components/TopHeader';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
+import { formatTemperature, validTemperature } from '../lib/temperatureTelemetry';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
@@ -159,8 +160,8 @@ export default function SystemProfileView({
   isRefreshingHardware,
   onRefreshHardware,
 }: SystemProfileViewProps) {
-  const [liveCpuTemp, setLiveCpuTemp] = useState<number | null>(null);
-  const [liveGpuTemp, setLiveGpuTemp] = useState<number | null>(null);
+  const [liveCpuTemp, setLiveCpuTemp] = useState<number | null | undefined>(undefined);
+  const [liveGpuTemp, setLiveGpuTemp] = useState<number | null | undefined>(undefined);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
   const hasStats = Boolean(stats);
 
@@ -175,10 +176,10 @@ export default function SystemProfileView({
       .withAutomaticReconnect()
       .build();
 
-    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number; gpuTempCelsius?: number }) => {
+    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number | null; gpuTempCelsius?: number | null }) => {
       if (disposed) return;
-      if (telemetry.cpuTempCelsius !== undefined) setLiveCpuTemp(telemetry.cpuTempCelsius);
-      if (telemetry.gpuTempCelsius !== undefined) setLiveGpuTemp(telemetry.gpuTempCelsius);
+      setLiveCpuTemp(validTemperature(telemetry.cpuTempCelsius));
+      setLiveGpuTemp(validTemperature(telemetry.gpuTempCelsius));
     });
 
     connectionRef.current = connection;
@@ -344,7 +345,7 @@ export default function SystemProfileView({
                     icon={Cpu}
                     title="Processor"
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
-                    helper={liveCpuTemp != null ? `Temperature: ${Math.round(liveCpuTemp)}°C` : (stats.cpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.cpu.temperature_celsius)}°C` : 'Temperature not available')}
+                    helper={`Temperature: ${formatTemperature(stats.cpu.temperature_celsius, liveCpuTemp, liveCpuTemp !== undefined)}`}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}
@@ -376,7 +377,7 @@ export default function SystemProfileView({
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
-                    helper={liveGpuTemp != null ? `Temperature: ${Math.round(liveGpuTemp)}°C` : (stats.gpu.temperature_celsius != null ? `Temperature: ${Math.round(stats.gpu.temperature_celsius)}°C` : 'Temperature not available')}
+                    helper={`Temperature: ${formatTemperature(stats.gpu.temperature_celsius, liveGpuTemp, liveGpuTemp !== undefined)}`}
                     tone="neutral"
                     onClick={() => handleCardClick('GPU')}
                   />
