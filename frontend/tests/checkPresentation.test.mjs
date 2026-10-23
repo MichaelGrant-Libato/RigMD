@@ -15,6 +15,44 @@ test('read-only follow-up is available for saved checks regardless of repair cat
   for (const value of [null, undefined, {}, { session_id: '' }, { session_id: '   ' }]) assert.equal(canCheckCurrentStatus(value), false);
 });
 
+test('awaiting follow-up panels are neutral regardless of the original findings', () => {
+  const baselines = [
+    { diagnosis_mode: 'component', component_ids: '["battery"]', diagnosed_category: 'Scanner evidence unavailable', action_category: 'Monitor',
+      proof: [{ metric_id: 'battery_charge', value: '79% (AC Power)', status: 'normal' },
+        { metric_id: 'battery_drain', value: 'Not verified', status: 'unknown' }] },
+    { diagnosis_mode: 'component', component_ids: '["cpu"]', diagnosed_category: 'Scanner evidence unavailable', action_category: 'Monitor',
+      proof: [{ metric_id: 'cpu_usage', value: '19.2%', status: 'normal' },
+        { metric_id: 'cpu_temperature', value: 'Unavailable', status: 'unknown' }] },
+    { diagnosis_mode: 'component', component_ids: '["memory"]', diagnosed_category: 'High Memory Pressure', action_category: 'Troubleshoot', proof: [memory()] },
+    check
+  ];
+  for (const baseline of baselines) {
+    const original = JSON.stringify(baseline);
+    for (const resolution_status of [undefined, 'open', 'Open']) {
+      for (const resolution_proof of [undefined, []]) {
+        const saved = { ...baseline, resolution_status, resolution_proof };
+        assert.equal(getCheckStatus(saved).label, 'Awaiting follow-up');
+        assert.equal(getCheckPanelClassName(saved), 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]');
+      }
+    }
+    assert.equal(JSON.stringify(baseline), original);
+  }
+  assert.doesNotMatch(getCheckPanelClassName({ ...baselines[0], resolution_status: 'needs_recheck', resolution_proof: [] }), /orange|red|emerald/);
+});
+
+test('completed partial checks keep amber and confirmed outcomes keep their existing colours', () => {
+  const battery = { diagnosis_mode: 'component', component_ids: '["battery"]', diagnosed_category: 'Scanner evidence unavailable', action_category: 'Monitor',
+    proof: [{ metric_id: 'battery_charge', value: '79% (AC Power)', status: 'normal' },
+      { metric_id: 'battery_drain', value: 'Not verified', status: 'unknown' }] };
+  const partial = { ...battery, resolution_status: 'needs_recheck', resolution_proof: battery.proof };
+  assert.equal(getCheckStatus(partial).label, 'Partially checked');
+  assert.match(getCheckPanelClassName(partial), /border-orange-500/);
+  assert.match(getCheckPanelClassName({ ...partial, resolution_status: 'resolved' }), /border-orange-500/);
+  const memoryCheck = { diagnosed_category: 'High Memory Pressure', proof: [memory()] };
+  assert.match(getCheckPanelClassName({ ...memoryCheck, resolution_status: 'still_active', resolution_proof: [memory()] }), /border-red-500/);
+  assert.match(getCheckPanelClassName({ ...memoryCheck, resolution_status: 'resolved', resolution_proof: [memory('62%', 'normal')] }), /border-emerald-500/);
+});
+
 test('a processor Monitor check stays partial when its temperature cannot be verified', () => {
   const cpu = { diagnosis_mode: 'component', component_ids: '["cpu"]', diagnosed_category: 'Scanner evidence unavailable', action_category: 'Monitor',
     proof: [{ metric_id: 'cpu_usage', value: '19.2%', status: 'normal' }, { metric_id: 'cpu_temperature', value: 'Unavailable', status: 'unknown' }] };

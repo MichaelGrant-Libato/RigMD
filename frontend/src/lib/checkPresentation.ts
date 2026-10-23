@@ -155,8 +155,9 @@ export function getCheckCoverageNotice(check: CheckPresentationInput & { confide
 }
 
 export function getCheckPanelClassName(check: CheckPresentationInput) {
-  const category = getCheckStatus(check).category;
-  if (crashMetric(check)) return 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]';
+  const status = getCheckStatus(check);
+  if (crashMetric(check) || status.label === 'Awaiting follow-up') return 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]';
+  const category = status.category;
   if (category === 'resolved_after_action') return 'border-emerald-500/35 bg-emerald-500/[0.06]';
   if (category === 'still_active') return 'border-red-500/35 bg-red-500/[0.06]';
   if (category === 'needs_recheck') return 'border-orange-500/35 bg-orange-500/[0.06]';
