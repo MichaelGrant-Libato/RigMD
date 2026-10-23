@@ -16,12 +16,193 @@ public class ResolutionService
 {
     private const double BatteryDrainCpuThreshold = 90;
     private const double SevereResourceThreshold = 85;
-    private const double ElevatedMemoryThreshold = 80;
-    private const double BrowserMemoryPressureMb = 3000;
+    private const double ElevatedMemoryThreshold = MemoryPressureRules.HighUsagePercent;
     private const double ElevatedStorageThreshold = 80;
     private const double ElevatedTempThresholdCelsius = 85;
 
     public ResolutionResultDto CheckResolution(
+        string diagnosedCategory,
+        HardwareProfileDto hardware,
+        string? scenarioId = null,
+        string? componentIds = null,
+        DateTimeOffset? sessionCreatedAt = null,
+        string? diagnosisMode = null,
+        object[]? originalProof = null)
+    {
+        var components = ParseComponentIds(componentIds);
+        var normalizedScenario = DiagnosticScopeMapper.NormalizeScenarioId(scenarioId);
+        var checkComponentCondition = !string.IsNullOrWhiteSpace(normalizedScenario) || components.Count > 0 ||
+            string.Equals(diagnosisMode, "full", StringComparison.OrdinalIgnoreCase);
+        var result = checkComponentCondition
+            ? CheckComponentCondition(hardware, components, string.Equals(diagnosisMode, "full", StringComparison.OrdinalIgnoreCase), normalizedScenario, sessionCreatedAt, diagnosedCategory, originalProof)
+            : EvaluateResolution(diagnosedCategory, hardware, scenarioId, componentIds, sessionCreatedAt);
+        var missingCpu = hardware.Cpu.UsageAvailable == false || !double.IsFinite(hardware.Cpu.UsagePercent) || hardware.Cpu.UsagePercent is < 0 or > 100;
+        var missingMemory = hardware.Ram.UsageAvailable == false || !MemoryPressureRules.IsValidUsage(hardware.Ram.UsagePercent);
+        var missingStorage = !hardware.AllDisks.Any() && !hardware.StorageDrives.Any(d => d.UsagePercent.HasValue);
+        var missing = false;
+        var active = false;
+        var proof = new List<object>();
+        foreach (var item in result.resolution_proof)
+        {
+            var reading = JsonSerializer.SerializeToElement(item);
+            var label = reading.TryGetProperty("label", out var name) ? name.GetString() ?? "" : "";
+            if ((missingCpu && label is "Processor activity" or "Processor load") ||
+                (missingMemory && label is "Memory use" or "Memory pressure") ||
+                (missingStorage && label is "Main storage use" or "Storage use"))
+            {
+                missing = true;
+                proof.Add(new { label, value = "Unavailable", status = "unknown",
+                    meaning = "The measurement could not be obtained. It is not zero or a normal reading." });
+            }
+            else
+            {
+                var status = reading.TryGetProperty("status", out var state) ? state.GetString() : "";
+                active |= status is "high" or "elevated" or "still needs attention";
+                proof.Add(item);
+            }
+        }
+        if (missing)
+        {
+            result.resolution_proof = proof.ToArray();
+            var thermalOnly = (diagnosedCategory ?? "").Contains("thermal", StringComparison.OrdinalIgnoreCase) ||
+                DiagnosticScopeMapper.NormalizeScenarioId(scenarioId) == "overheating-loud-fan";
+            if (!thermalOnly && !active)
+            {
+                result.resolution_status = "needs_recheck";
+                result.resolution_summary = "Required resource readings were unavailable. A normal or fixed result could not be confirmed.";
+            }
+        }
+        result.resolution_proof = result.resolution_proof.Select(item =>
+        {
+            var reading = JsonSerializer.SerializeToElement(item);
+            string Text(string key) => reading.TryGetProperty(key, out var property) && property.ValueKind == JsonValueKind.String
+                ? property.GetString() ?? "" : "";
+            var label = Text("label");
+            var metric = Text("metric_id");
+            if (string.IsNullOrEmpty(metric)) metric = label switch
+            {
+                "Processor activity" or "Processor load" => "cpu_usage",
+                "Memory use" or "Memory pressure" => "memory_usage",
+                "CPU temperature" or "Processor temperature" => "cpu_temperature",
+                "GPU temperature" or "Graphics temperature" => "gpu_temperature",
+                "Main storage use" or "Storage use" => "storage_usage",
+                "Storage health warning" => "storage_health",
+                _ => ""
+            };
+            var capturedAt = Text("captured_at");
+            return (object)new { metric_id = metric, captured_at = string.IsNullOrEmpty(capturedAt) ? result.resolution_checked_at : capturedAt,
+                evidence_kind = string.IsNullOrEmpty(Text("evidence_kind")) ? ReadingEvidence.Kind(metric, Text("status")) : Text("evidence_kind"),
+                rule_version = string.IsNullOrEmpty(Text("rule_version")) ? ReadingEvidence.RuleVersion : Text("rule_version"),
+                window_kind = Text("window_kind"), window_start = Text("window_start"), window_end = Text("window_end"),
+                label, value = Text("value"), status = Text("status"), meaning = Text("meaning") };
+        }).ToArray();
+        var comparison = CompareOriginalWarnings(originalProof ?? [], result.resolution_proof);
+        if (!string.IsNullOrEmpty(comparison)) result.resolution_summary = comparison + " " + result.resolution_summary;
+        return result;
+    }
+
+    private static string CompareOriginalWarnings(object[] original, object[] latest)
+    {
+        static string Field(JsonElement row, string key) => row.ValueKind == JsonValueKind.Object &&
+            row.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
+        static bool Warning(string status) => status is "high" or "elevated" or "still needs attention";
+        var before = original.Select(item => JsonSerializer.SerializeToElement(item)).ToArray();
+        var after = latest.Select(item => JsonSerializer.SerializeToElement(item)).ToArray();
+        var targets = before.Where(row => Field(row, "metric_id").Length > 0 && Warning(Field(row, "status"))).ToArray();
+        if (targets.Length == 0) return "";
+        var messages = new List<string>();
+        foreach (var target in targets)
+        {
+            var matches = after.Where(row => Field(row, "metric_id") == Field(target, "metric_id")).ToArray();
+            if (Field(target, "metric_id") is "application_crash_history" or "system_crash_history")
+            {
+                var followUp = matches.FirstOrDefault();
+                var since = Field(followUp, "window_kind") == "since_diagnosis" || Field(followUp, "label").Contains("since diagnosis", StringComparison.OrdinalIgnoreCase);
+                messages.Add(since && Field(followUp, "status") is "normal" or "normal now" && Field(followUp, "value") == "0 found"
+                    ? "No new matching crash records were found during the follow-up period. Earlier saved records remain in this report; this does not prove a repair."
+                    : since && matches.Any(row => Warning(Field(row, "status")))
+                        ? "Matching crash records were found during the follow-up period. Review the affected app or stop code; a cause is not established."
+                        : "The crash-record checks cover different or unverified periods. Their counts do not establish improvement.");
+                continue;
+            }
+            var state = matches.Any(row => Warning(Field(row, "status"))) ? "still detected"
+                : matches.Length > 0 && matches.All(row => Field(row, "status") is "normal" or "normal now")
+                    ? "no longer detected in this reading" : "could not be verified";
+            messages.Add($"Original warning - {Field(target, "label")}: {state}.");
+        }
+        var added = after.Where(row => Warning(Field(row, "status")) &&
+            before.Any(old => Field(old, "metric_id") == Field(row, "metric_id")) &&
+            !targets.Any(old => Field(old, "metric_id") == Field(row, "metric_id"))).ToArray();
+        if (added.Length > 0) messages.Add($"Other warnings now detected: {string.Join(", ", added.Select(row => Field(row, "label")))}.");
+        return string.Join(" ", messages);
+    }
+
+    private static ResolutionResultDto CheckComponentCondition(HardwareProfileDto hardware, HashSet<string> components, bool full,
+        string? scenario = null, DateTimeOffset? sessionCreatedAt = null, string? originalCategory = null, object[]? originalProof = null)
+    {
+        // Reuse the initial check's scope and rules instead of rechecking only its highest-priority finding.
+        var checkedAt = DateTimeOffset.UtcNow;
+        var condition = new AutomaticDiagnosisService().Diagnose(new AutomaticDiagnosisInput
+        {
+            Mode = !string.IsNullOrWhiteSpace(scenario) ? "scenario" : full ? "full" : "component", ComponentIds = components.ToArray(), ScenarioId = scenario,
+            Hardware = hardware, CapturedAt = checkedAt,
+            EventsSince = scenario is "app-crashes" or "blue-screen-crash" ? sessionCreatedAt : null
+        });
+        if (condition.ConfidenceLabel == "NotApplicable")
+            return new ResolutionResultDto
+            {
+                resolution_status = "not_applicable", resolution_checked_at = checkedAt.ToString("o"),
+                resolution_summary = condition.PrimaryResult + ". No repair or repeated sensor check is indicated.",
+                resolution_proof = condition.Proof.Select(p => (object)new
+                {
+                    label = p.Label, value = p.Value, status = "info", meaning = p.Meaning,
+                    evidence_kind = "reported_status", rule_version = ReadingEvidence.RuleVersion
+                }).ToArray()
+            };
+        var warnings = condition.Proof.Where(p => p.Status is "high" or "elevated" or "still needs attention").ToArray();
+        var unavailable = condition.Proof.Where(p => p.Status == "unknown").ToArray();
+        var crashCheck = scenario is "app-crashes" or "blue-screen-crash";
+        var originalWarnings = (originalProof ?? []).Select(item => JsonSerializer.SerializeToElement(item)).Where(row =>
+            row.TryGetProperty("status", out var status) && status.GetString() is "high" or "elevated" or "still needs attention")
+            .Select(row => row.TryGetProperty("metric_id", out var metric) ? metric.GetString() : null).ToHashSet();
+        var requiredUnavailable = crashCheck ? unavailable.Where(p =>
+            p.MetricId is "application_crash_history" or "system_crash_history" or "event_query_coverage" ||
+            originalWarnings.Contains(p.MetricId) ||
+            p.MetricId == "memory_usage" && (originalCategory ?? "").Contains("memory", StringComparison.OrdinalIgnoreCase) ||
+            p.MetricId == "cpu_usage" && (originalCategory ?? "").Contains("processor", StringComparison.OrdinalIgnoreCase)).ToArray() : unavailable;
+        var incomplete = requiredUnavailable.Length > 0 || condition.Proof.Count == 0 ||
+            condition.ComponentStatus == ComponentStatus.NotPresent ||
+            !crashCheck && condition.DiagnosedCategory.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+        var active = warnings.Length > 0 || (!incomplete && condition.ActionCategory is "Troubleshoot" or "Escalate" or "Repair");
+        var summary = active
+            ? warnings.Length > 0
+                ? $"Readings needing attention: {string.Join(", ", warnings.Select(p => p.Label))}."
+                : condition.PrimaryResult
+            : crashCheck && !incomplete
+                ? sessionCreatedAt.HasValue
+                    ? "No new matching crash records were found since the original check. This observation does not confirm that a recurring crash is fixed."
+                    : "No matching crash records were found in the queried period. This observation does not confirm that a recurring crash is fixed."
+            : incomplete
+                ? "The available readings do not show a warning, but the selected condition could not be fully checked."
+                : "The checked readings are within their configured limits at this time.";
+        if (unavailable.Length > 0)
+            summary += $" Could not verify: {string.Join(", ", unavailable.Select(p => p.Label))}.";
+        summary += " This is a current-readings check, not a hardware-health test or confirmation of a repair. Workload can change without user action.";
+        return new ResolutionResultDto
+        {
+            resolution_status = active ? "still_active" : incomplete ? "needs_recheck" : "resolved",
+            resolution_checked_at = checkedAt.ToString("o"), resolution_summary = summary,
+            resolution_proof = condition.Proof.Select(p => (object)new
+            {
+                metric_id = p.MetricId, captured_at = (p.CapturedAt ?? checkedAt).ToString("o"),
+                evidence_kind = p.EvidenceKind, rule_version = p.RuleVersion,
+                window_kind = p.WindowKind, window_start = p.WindowStart?.ToString("o"), window_end = p.WindowEnd?.ToString("o"),
+                label = p.Label, value = p.Value, status = p.Status, meaning = p.Meaning
+            }).ToArray()
+        };
+    }
+
+    private ResolutionResultDto EvaluateResolution(
         string diagnosedCategory,
         HardwareProfileDto hardware,
         string? scenarioId = null,
@@ -58,7 +239,8 @@ public class ResolutionService
                     return CheckBootStartupResolution(hardware);
                 case "slow-system":
                 case "stuttering-freezing":
-                    return CheckOsPerformanceResolution(hardware, CpuLoadThresholds.Responsiveness);
+                    return CheckOsPerformanceResolution(hardware, CpuLoadThresholds.Responsiveness,
+                        MemoryPressureRules.ResponsivenessUsagePercent);
             }
         }
 
@@ -101,10 +283,7 @@ public class ResolutionService
 
             if (parsedComponents.Contains("memory") && parsedComponents.Count == 1)
             {
-                return CheckMemoryResolution(
-                    hardware,
-                    memoryMustBeBelow: ElevatedMemoryThreshold,
-                    issueName: "elevated memory use");
+                return CheckMemoryPressureResolution(hardware, explicitMemoryScan: true);
             }
         }
 
@@ -148,23 +327,17 @@ public class ResolutionService
 
         if (category.Contains("high memory pressure") || category.Contains("critical memory pressure") || category.Contains("memory resource pressure") || category.Contains("memory pressure / high ram"))
         {
-            return CheckMemoryResolution(
-                hardware,
-                memoryMustBeBelow: ElevatedMemoryThreshold,
-                issueName: "very high memory use");
+            return CheckMemoryPressureResolution(hardware);
         }
 
         if (category.Contains("elevated memory pressure"))
         {
-            return CheckWorkloadMemoryResolution(hardware);
+            return CheckMemoryPressureResolution(hardware, explicitMemoryScan: true);
         }
 
         if (category.Contains("elevated memory usage") || category.Contains("memory"))
         {
-            return CheckMemoryResolution(
-                hardware,
-                memoryMustBeBelow: ElevatedMemoryThreshold,
-                issueName: "elevated memory use");
+            return CheckMemoryPressureResolution(hardware);
         }
 
         if (category.Contains("storage health"))
@@ -364,7 +537,7 @@ public class ResolutionService
         CrashResolutionKind kind)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
-        var ramUsage = hardware.Ram.UsagePercent;
+        var ramUsage = hardware.Ram.UsageAvailable == false ? double.NaN : hardware.Ram.UsagePercent;
         var errCount = hardware.DeviceErrors?.Count ?? 0;
 
         var sinceUtc = (sessionCreatedAt ?? DateTimeOffset.UtcNow.AddHours(-24)).ToUniversalTime();
@@ -382,7 +555,8 @@ public class ResolutionService
         var cpuThreshold = kind == CrashResolutionKind.Application
             ? CpuLoadThresholds.Elevated : CpuLoadThresholds.SystemStabilityRisk;
         var cpuOk = cpuUsage < cpuThreshold;
-        var ramOk = ramUsage < ElevatedMemoryThreshold;
+        var validRamUsage = MemoryPressureRules.IsValidUsage(ramUsage);
+        var ramOk = kind == CrashResolutionKind.System || (validRamUsage && ramUsage < ElevatedMemoryThreshold);
         var driversOk = errCount == 0;
         var supportingSignalsOk = cpuOk && ramOk && driversOk;
         var resolved = eventEvidenceOk && supportingSignalsOk;
@@ -403,14 +577,16 @@ public class ResolutionService
                 $"No new {issueLabel} events were found in Windows Event Logs after this diagnosis.",
                 eventLogAvailable
                     ? $"Windows Event Logs still show {eventsSinceDiagnosis.Count} {issueLabel} event(s) after this diagnosis."
-                    : "RigMD could not confirm Windows Event Log evidence, so the saved crash check should not be marked fixed yet."),
-            Proof(
-                "Memory pressure",
-                $"{ramUsage:0.##}%",
-                ramOk,
-                "Memory use is below RigMD's high-use range, so RAM pressure is not currently contributing to instability.",
-                "Memory use is still high enough to contribute to app instability or freezes.")
+                    : "RigMD could not confirm Windows Event Log evidence, so the saved crash check should not be marked fixed yet.")
         };
+
+        if (kind == CrashResolutionKind.Application)
+            proofItems.Add(validRamUsage ? Proof(
+                "Memory pressure", $"{ramUsage:0.##}%", ramOk,
+                "Memory use is below this application-stability check's pressure threshold.",
+                "Memory use is still high enough to contribute to app instability or freezes.")
+                : new { label = "Memory pressure", value = "Unavailable", status = "unknown",
+                    meaning = "An invalid RAM reading cannot verify application-stability memory pressure." });
 
         if (kind == CrashResolutionKind.System || errCount > 0)
         {
@@ -434,7 +610,7 @@ public class ResolutionService
                     "Processor activity is still elevated and may contribute to instability."));
         }
 
-        return CreateResult(
+        var result = CreateResult(
             resolved,
             resolved
                 ? $"Fresh scan found no new {issueLabel} events after this diagnosis, and supporting telemetry is stable."
@@ -444,6 +620,12 @@ public class ResolutionService
                     eventsSinceDiagnosis.Count,
                     supportingSignalsOk),
             proofItems.ToArray());
+        if (kind == CrashResolutionKind.Application && !validRamUsage && eventEvidenceOk && cpuOk && driversOk)
+        {
+            result.resolution_status = "needs_recheck";
+            result.resolution_summary = "Fresh scan could not verify RAM pressure because the memory reading is unavailable.";
+        }
+        return result;
     }
 
     private static ResolutionResultDto CheckBootStartupResolution(
@@ -495,9 +677,9 @@ public class ResolutionService
         var primaryDisk = GetPrimaryDisk(hardware);
         var storageUsage = primaryDisk?.UsagePercent ?? 0;
 
-        var cpuOk = cpuUsage < SevereResourceThreshold;
-        var ramOk = ramUsage < SevereResourceThreshold;
-        var storageOk = storageUsage < SevereResourceThreshold;
+        var cpuOk = cpuUsage < CpuLoadThresholds.Elevated;
+        var ramOk = ramUsage < MemoryPressureRules.HighUsagePercent;
+        var storageOk = storageUsage < ElevatedStorageThreshold;
         var resolved = cpuOk && ramOk && storageOk;
 
         return CreateResult(
@@ -605,6 +787,13 @@ public class ResolutionService
         HardwareProfileDto hardware)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
+        if (hardware.Cpu.UsageAvailable == false || !double.IsFinite(cpuUsage) || cpuUsage is < 0 or > 100)
+            return new ResolutionResultDto
+            {
+                resolution_status = "needs_recheck", resolution_summary = "Processor activity could not be measured.",
+                resolution_proof = new object[] { new { label = "Processor activity", value = "Unavailable", status = "unknown",
+                    meaning = "A failed activity measurement is not zero activity." } }
+            };
         var resolved = cpuUsage < CpuLoadThresholds.Elevated;
 
         return CreateResult(
@@ -625,24 +814,22 @@ public class ResolutionService
 
     private static ResolutionResultDto CheckOsPerformanceResolution(
         HardwareProfileDto hardware,
-        double cpuMustBeBelow = CpuLoadThresholds.Elevated)
+        double cpuMustBeBelow = CpuLoadThresholds.Elevated,
+        double memoryMustBeBelow = MemoryPressureRules.HighUsagePercent)
     {
         var cpuUsage = hardware.Cpu.UsagePercent;
         var ramUsage = hardware.Ram.UsagePercent;
         var primaryDisk = GetPrimaryDisk(hardware);
         var storageUsage = primaryDisk?.UsagePercent ?? 0;
 
-        var memoryWarning = hardware.ProcessInsights.MemoryLeakWarning;
-        var browserMemoryMb = hardware.ProcessInsights.BrowserMemoryMb;
-        var browserProcessCount = hardware.ProcessInsights.BrowserProcessCount;
+        var memoryWarning = hardware.ProcessInsights?.MemoryLeakWarning;
 
         var cpuOk = cpuUsage < cpuMustBeBelow;
-        var ramOk = ramUsage < ElevatedMemoryThreshold;
+        var ramOk = MemoryPressureRules.IsValidUsage(ramUsage) && ramUsage < memoryMustBeBelow;
         var storageOk = primaryDisk == null || storageUsage < ElevatedStorageThreshold;
-        var browserOk = browserMemoryMb < BrowserMemoryPressureMb && browserProcessCount < 25;
         var warningOk = string.IsNullOrWhiteSpace(memoryWarning);
 
-        var resolved = cpuOk && ramOk && storageOk && browserOk && warningOk;
+        var resolved = cpuOk && ramOk && storageOk && warningOk;
 
         var proofItems = new List<object>
         {
@@ -652,12 +839,12 @@ public class ResolutionService
                 cpuOk,
                 "Processor activity is within normal operating limits.",
                 "Processor activity is still elevated and may slow down system responsiveness."),
-            Proof(
-                "Memory use",
-                $"{ramUsage:0.##}%",
-                ramOk,
-                "Memory use is back below RigMD's high-use range.",
-                "Memory use is still above RigMD's high-use range."),
+            MemoryPressureRules.IsValidUsage(ramUsage) ? Proof(
+                "Memory use", $"{ramUsage:0.##}%", ramOk,
+                "Memory use is below this performance check's pressure threshold.",
+                "Memory use is still above this performance check's pressure threshold.")
+                : new { label = "Memory use", value = "Unavailable", status = "unknown",
+                    meaning = "An invalid RAM reading cannot verify memory pressure." },
             Proof(
                 "Main storage use",
                 primaryDisk == null ? "Not available" : $"{storageUsage:0.##}%",
@@ -665,17 +852,6 @@ public class ResolutionService
                 "Main storage free space is within a healthy range.",
                 "Main storage space is still tight and may affect Windows responsiveness.")
         };
-
-        if (!browserOk || browserMemoryMb >= 1500)
-        {
-            proofItems.Add(
-                Proof(
-                    "Browser workload",
-                    $"{browserMemoryMb:0.##} MB across {browserProcessCount} processes",
-                    browserOk,
-                    "Browser workload is within normal limits.",
-                    "Browser workload is still heavy enough to affect performance."));
-        }
 
         if (!warningOk)
         {
@@ -688,72 +864,66 @@ public class ResolutionService
                     "RigMD still sees app memory behavior that needs attention."));
         }
 
-        return CreateResult(
+        var result = CreateResult(
             resolved,
             resolved
                 ? "Fresh scan shows processor, memory, and storage operating within normal limits. No active issue is detected for this saved check."
                 : "Fresh scan still shows system resource pressure or app memory behavior that may affect performance.",
             proofItems.ToArray());
+        if (!MemoryPressureRules.IsValidUsage(ramUsage) && cpuOk && storageOk && warningOk)
+        {
+            result.resolution_status = "needs_recheck";
+            result.resolution_summary = "Fresh scan could not verify RAM pressure because the memory reading is unavailable.";
+        }
+        return result;
     }
 
-    private static ResolutionResultDto CheckMemoryResolution(
-        HardwareProfileDto hardware,
-        double memoryMustBeBelow,
-        string issueName)
-    {
-        var ramUsage = hardware.Ram.UsagePercent;
-        var resolved = ramUsage < memoryMustBeBelow;
-
-        return CreateResult(
-            resolved,
-            resolved
-                ? $"Fresh scan no longer shows {issueName}. No active issue is detected for this saved check."
-                : $"Fresh scan still shows {issueName}.",
-            new object[]
-            {
-                Proof(
-                    "Memory use",
-                    $"{ramUsage:0.##}%",
-                    resolved,
-                    "Memory use is back below RigMD's high-use range.",
-                    "Memory use is still above RigMD's high-use range.")
-            });
-    }
-
-    private static ResolutionResultDto CheckWorkloadMemoryResolution(
-        HardwareProfileDto hardware)
+    private static ResolutionResultDto CheckMemoryPressureResolution(
+        HardwareProfileDto hardware, bool explicitMemoryScan = false)
     {
         var ramUsage = hardware.Ram.UsagePercent;
         var processes = hardware.ProcessInsights;
-        var browserMemoryMb = processes.BrowserMemoryMb;
-
-        var ramOk = ramUsage < ElevatedMemoryThreshold;
-        var browserOk =
-            !processes.BrowserHeavy ||
-            browserMemoryMb < BrowserMemoryPressureMb;
-
-        var resolved = ramOk && browserOk;
-
-        return CreateResult(
-            resolved,
-            resolved
-                ? "Fresh scan no longer shows high memory pressure from active apps. No active issue is detected for this saved check."
-                : "Fresh scan still shows memory pressure from active apps.",
-            new object[]
+        var state = MemoryPressureRules.Evaluate(ramUsage, processes?.BrowserMemoryMb,
+            processes?.MemoryLeakWarning, explicitMemoryScan, processes != null);
+        var validUsage = MemoryPressureRules.IsValidUsage(ramUsage);
+        var proof = new List<object>
+        {
+            new
             {
-                Proof(
-                    "Memory use",
-                    $"{ramUsage:0.##}%",
-                    ramOk,
-                    "Memory use is back below RigMD's high-use range.",
-                    "Memory use is still above RigMD's high-use range."),
-                Proof(
-                    "Browser workload",
-                    $"{browserMemoryMb:0.##} MB",
-                    browserOk,
-                    "Browser activity is no longer heavy enough to explain the saved memory-pressure problem.",
-                    "Browser activity is still high enough to contribute to memory pressure.")
+                label = "Memory use", value = validUsage ? $"{ramUsage:0.##}%" : "Unavailable",
+                status = !validUsage ? "unknown" : ramUsage >= MemoryPressureRules.HighUsagePercent ? "high" : "normal",
+                meaning = "RigMD flags RAM use at 82% for workload review in every check. This does not establish paging, a memory leak or a physical memory fault."
+            }
+        };
+        if (explicitMemoryScan)
+        {
+            var browserMb = processes?.BrowserMemoryMb;
+            var validBrowser = browserMb is >= 0 && double.IsFinite(browserMb.Value);
+            proof.Add(new
+            {
+                label = "Browser workload", value = validBrowser ? $"{browserMb:0.##} MB" : "Unavailable",
+                status = !validBrowser ? "unknown" : "info",
+                meaning = "Browser working memory is context only. Its size or process count alone does not establish RAM pressure or a memory leak."
             });
+        }
+        if (!string.IsNullOrWhiteSpace(processes?.MemoryLeakWarning))
+            proof.Add(new
+            {
+                label = "Application memory warning", value = processes.MemoryLeakWarning, status = "high",
+                meaning = "Unusual application memory behavior remains reported by the process inspection."
+            });
+
+        return new ResolutionResultDto
+        {
+            resolution_status = state == MemoryPressureState.Unknown ? "needs_recheck"
+                : state == MemoryPressureState.Active ? "still_active" : "resolved",
+            resolution_summary = state == MemoryPressureState.Unknown
+                ? "Fresh scan could not verify memory pressure because required RAM or process data is unavailable."
+                : state == MemoryPressureState.Active
+                    ? "Fresh scan still shows memory pressure or an application memory warning."
+                    : "Fresh scan no longer shows memory pressure from active apps. No active issue is detected for this saved check.",
+            resolution_proof = proof.ToArray()
+        };
     }
 
     private static ResolutionResultDto CheckStorageHealthResolution(

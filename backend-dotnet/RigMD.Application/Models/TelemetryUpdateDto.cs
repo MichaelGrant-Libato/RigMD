@@ -10,7 +10,10 @@ public class DiskTelemetryDto
 
 public class TelemetryUpdateDto
 {
-    public double CpuUsagePercent { get; set; }
+    public double? CpuUsagePercent { get; set; }
+    public string CpuUsageSource { get; set; } = "Unavailable";
+    public DateTimeOffset? CpuUsageCapturedAtUtc { get; set; }
+    public double? CpuUsageWindowSeconds { get; set; }
     public double CpuSpeedMhz { get; set; }
     public double? CpuTempCelsius { get; set; }
     public string CpuTemperatureSource { get; set; } = "Unavailable";
@@ -20,8 +23,9 @@ public class TelemetryUpdateDto
     public int CpuThreads { get; set; }
     public int CpuHandles { get; set; }
     
-    public double RamUsagePercent { get; set; }
-    public double RamUsedGb { get; set; }
+    public double? RamUsagePercent { get; set; }
+    public double? RamUsedGb { get; set; }
+    public double? RamTotalGb { get; set; }
     
     public double GpuUsagePercent { get; set; }
     public double GpuMemoryUsedGb { get; set; }

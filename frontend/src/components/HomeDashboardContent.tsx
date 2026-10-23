@@ -7,6 +7,8 @@ import StatusPill from './dashboard/StatusPill';
 import { CpuCard, MemoryCard, StorageCard, NetworkCard } from './dashboard/MetricCards';
 import RecentDiagnosticsTimeline from './dashboard/RecentDiagnosticsTimeline';
 import AlertsSummaryCard from './dashboard/AlertsSummaryCard';
+import { REVIEW_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
+import { storageReviewStatus } from '../lib/storageTelemetry';
 
 interface Props {
   stats: HardwareStats | null;
@@ -62,18 +64,19 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
     const pct = stats.ram.usage_percent;
     pills.push({
       label: 'Memory',
-      variant: pct >= 90 ? 'critical' : pct >= 75 ? 'warning' : 'ok',
+      variant: pct === null ? 'neutral' : pct >= REVIEW_THRESHOLDS.memory ? 'warning' : 'ok',
     });
   }
   if (stats?.disk) {
-    const pct = stats.disk.usage_percent;
+    const state = storageReviewStatus(stats);
     pills.push({
       label: 'Storage',
-      variant: pct >= 90 ? 'critical' : pct >= 75 ? 'warning' : 'ok',
+      variant: state === 'high' ? 'warning' : state === 'normal' ? 'ok' : 'neutral',
     });
   }
   if (stats?.network) {
-    pills.push({ label: 'Network', variant: 'ok' });
+    const state = networkReviewStatus(stats.network);
+    pills.push({ label: 'Network', variant: state === 'high' ? 'warning' : state === 'normal' ? 'ok' : 'neutral' });
   }
   if (dashboard.warning_signs_active_count > 0) {
     pills.push({ label: `${dashboard.warning_signs_active_count} Alert${dashboard.warning_signs_active_count !== 1 ? 's' : ''}`, variant: 'warning' });

@@ -1,3 +1,7 @@
+import DiagnosticReadings from '../components/DiagnosticReadings';
+import CheckReadings from '../components/CheckReadings';
+import { canCheckCurrentStatus, getCheckOverview, getCheckStatus, getLatestCheckSummary, getCheckAdvice, getAdditionalFindingStatus, crashMetric, getCheckEvidenceLabel, getCheckCoverageNotice, getCheckPanelClassName } from '../lib/checkPresentation';
+import { plainDiagnosticText } from '../lib/diagnosticLanguage';
 import {
   useEffect,
   useMemo,
@@ -39,6 +43,7 @@ import {
 
 import TopHeader from '../components/TopHeader';
 import AutonomyRemediationPanel from '../components/AutonomyRemediationPanel';
+import { getFindingChanges } from '../lib/findingChanges';
 
 import {
   buttonTap,
@@ -65,9 +70,12 @@ import type {
 } from '../services/autonomyService';
 
 import { getTelemetryDeltaSummary } from '../lib/pastChecksFormatting';
+import { explanationSourceLabel } from '../lib/diagnosticReadingVisuals';
 
 interface NewDiagnosisViewProps {
   onDiagnosisComplete: (sessionId: string) => void;
+  initialComponentIds?: string[];
+  onOpenMemoryCheck?: () => void;
 }
 
 type DiagnosisMode =
@@ -85,6 +93,10 @@ type DiagnosisStage =
   | 'failed';
 
 interface DiagnosticProof {
+  metric_id?: string;
+  captured_at?: string | null;
+  evidence_kind?: string;
+  rule_version?: string;
   label: string;
   value: string;
   status: string;
@@ -98,10 +110,15 @@ interface VerificationTarget {
 }
 
 interface DiagnosticReport {
+  diagnosis_mode?: string;
+  component_ids?: string | string[];
+  scenario_id?: string;
   diagnosed_category: string;
   action_category: string;
   confidence_label: string;
   ai_explanation: string;
+  explanation_source?: string;
+  explanation_model?: string;
   recommended_next_step: string;
 
   component_status?: 'Present' | 'NotPresent' | string;
@@ -199,7 +216,7 @@ const COMPONENT_GROUPS: {
     items: [
       {
         id: 'cpu',
-        title: 'Processor (CPU)',
+        title: 'Processor',
         description:
           'How busy your processor is and how it is performing.',
         icon: Microchip,
@@ -207,25 +224,25 @@ const COMPONENT_GROUPS: {
 
       {
         id: 'memory',
-        title: 'Memory (RAM)',
+        title: 'Working memory',
         description:
-          'How much memory is available and how much is being used.',
+          'Space used by running apps, separate from your saved files.',
         icon: MemoryStick,
       },
 
       {
         id: 'gpu',
-        title: 'GPU / Graphics',
+        title: 'Graphics and screens',
         description:
-          'Graphics adapter, driver, and display information.',
+          'The part that draws pictures on your screen and its Windows software.',
         icon: Monitor,
       },
 
       {
         id: 'storage',
-        title: 'Storage / SSD / HDD',
+        title: 'Storage drives',
         description:
-          'Drive capacity, utilization, and storage configuration.',
+          'Space for Windows and your saved files, and drive-health warnings.',
         icon: HardDrive,
       },
     ],
@@ -237,7 +254,7 @@ const COMPONENT_GROUPS: {
     items: [
       {
         id: 'os',
-        title: 'Operating System',
+        title: 'Windows',
         description:
           'Windows version and operating-system information.',
         icon: Activity,
@@ -255,9 +272,9 @@ const COMPONENT_GROUPS: {
 
       {
         id: 'drivers',
-        title: 'Drivers',
+        title: 'Device software',
         description:
-          'Installed device and driver-related evidence.',
+          'Warnings about connected devices and the software they need.',
         icon: AlertTriangle,
       },
 
@@ -451,10 +468,10 @@ function normalizeActionCategory(
 
 function friendlyActionLabel(action: string | undefined | null) {
   const labels: Record<string, string> = {
-    Monitor: 'Keep an eye on it',
-    Maintain: 'Review care steps',
-    Troubleshoot: 'Review suggested fixes',
-    Escalate: 'Ask a technician',
+    Monitor: 'Watch for changes',
+    Maintain: 'Review cleanup options',
+    Troubleshoot: 'Review possible actions',
+    Escalate: 'Get more help',
   };
   return labels[normalizeActionCategory(action)] ?? 'Review the result';
 }
@@ -539,198 +556,9 @@ function getActionTone(
   };
 }
 
-function getProofCardStyle(
-  action: string | undefined | null,
-  status?: string,
-) {
-  const statusValue =
-    (status ?? '').toLowerCase();
 
-  if (statusValue.includes('normal')) {
-    return 'border-emerald-500/35 bg-emerald-500/[0.07]';
-  }
 
-  if (
-    statusValue.includes('attention') ||
-    statusValue.includes('active') ||
-    statusValue.includes('still')
-  ) {
-    return 'border-red-500/35 bg-red-500/[0.07]';
-  }
 
-  if (
-    normalizeActionCategory(action) ===
-      'Escalate' ||
-    statusValue === 'critical'
-  ) {
-    return 'border-red-500/30 bg-red-500/5';
-  }
-
-  if (
-    normalizeActionCategory(action) ===
-      'Troubleshoot' ||
-    statusValue === 'high' ||
-    statusValue === 'elevated' ||
-    statusValue === 'detected'
-  ) {
-    return 'border-amber-500/30 bg-amber-500/5';
-  }
-
-  if (
-    normalizeActionCategory(action) ===
-    'Monitor'
-  ) {
-    return 'border-cyan-500/30 bg-cyan-500/5';
-  }
-
-  return 'border-emerald-500/25 bg-emerald-500/5';
-}
-
-function getResolutionView(
-  status?: string,
-  hasCompletedAction = false,
-  proof?: DiagnosticProof[],
-  diagnosedCategory?: string,
-) {
-  const value =
-    (status ?? '').toLowerCase();
-  const category =
-    diagnosedCategory?.toLowerCase() ?? '';
-  const noNewCrashes =
-    proofShowsNoNewCrashes(proof);
-  const memoryRisk =
-    proofShowsMemoryRisk(proof);
-
-  if (value === 'resolved') {
-    if (
-      !hasCompletedAction &&
-      (category.includes('crash') || category.includes('event')) &&
-      noNewCrashes
-    ) {
-      return {
-        label: 'No New Events',
-        className:
-          'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
-        fallback:
-          'Windows Event Logs confirm no new crash or stop events occurred after this diagnosis.',
-      };
-    }
-
-    return {
-      label: hasCompletedAction
-        ? 'Resolved After Action'
-        : 'Resolved',
-      className:
-        'border-emerald-500/30 bg-emerald-500/5 text-emerald-300',
-      fallback: hasCompletedAction
-        ? 'The issue is no longer detected after the completed action and latest live scan.'
-        : 'Fresh scan no longer detects this issue. RigMD did not run a repair action for this result.',
-    };
-  }
-
-  if (
-    value === 'still_active' ||
-    value === 'unresolved'
-  ) {
-    const label =
-      category.includes('crash') &&
-      noNewCrashes &&
-      memoryRisk
-        ? 'No New Crashes, Risk Still High'
-        : proofNeedsAttention(proof)
-          ? 'Risk Still Active'
-          : 'Still Active';
-
-    return {
-      label,
-      className:
-        'border-red-500/35 bg-red-500/[0.08] text-red-300',
-      fallback: label ===
-        'No New Crashes, Risk Still High'
-        ? 'No new crash events were found, but another live risk signal still needs attention.'
-        : 'The issue is still detected after checking the latest live scan.',
-    };
-  }
-
-  if (value === 'needs_recheck') {
-    return {
-      label: 'Needs Recheck',
-      className:
-        'border-cyan-500/30 bg-cyan-500/5 text-cyan-300',
-      fallback:
-        'A safe action was recorded. Recheck the current status to confirm whether the issue improved.',
-    };
-  }
-
-  return {
-    label: 'Not Checked',
-    className:
-      'border-slate-500/30 bg-slate-500/5 text-slate-300',
-    fallback:
-      'Check the current status to compare this diagnosis with fresh Windows readings.',
-  };
-}
-
-function proofNeedsAttention(
-  proof?: DiagnosticProof[],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const status =
-        item.status?.toLowerCase() ?? '';
-      return (
-        status.includes('attention') ||
-        status.includes('active') ||
-        status.includes('high') ||
-        status.includes('elevated') ||
-        status.includes('detected')
-      );
-    }),
-  );
-}
-
-function proofShowsNoNewCrashes(
-  proof?: DiagnosticProof[],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const label =
-        item.label?.toLowerCase() ?? '';
-      const value =
-        item.value?.toLowerCase() ?? '';
-      const status =
-        item.status?.toLowerCase() ?? '';
-
-      return (
-        label.includes('crash') &&
-        (value.includes('0') ||
-          value.includes('none') ||
-          status.includes('normal'))
-      );
-    }),
-  );
-}
-
-function proofShowsMemoryRisk(
-  proof?: DiagnosticProof[],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const label =
-        item.label?.toLowerCase() ?? '';
-      const status =
-        item.status?.toLowerCase() ?? '';
-
-      return (
-        label.includes('memory') &&
-        (status.includes('attention') ||
-          status.includes('active') ||
-          status.includes('high') ||
-          status.includes('elevated'))
-      );
-    }),
-  );
-}
 
 function getResolutionButtonText(
   status?: string,
@@ -897,20 +725,20 @@ function getActionPreview(
   );
 }
 
-export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisViewProps) {
+export default function NewDiagnosisView({onDiagnosisComplete, initialComponentIds, onOpenMemoryCheck}: NewDiagnosisViewProps) {
   const [
     diagnosisMode,
     setDiagnosisMode,
   ] =
     useState<DiagnosisMode>(
-      'full',
+      initialComponentIds?.length ? 'component' : 'full',
     );
 
   const [
     selectedComponents,
     setSelectedComponents,
   ] =
-    useState<string[]>([]);
+    useState<string[]>(initialComponentIds ?? []);
 
   const [
     selectedScenarioId,
@@ -1199,16 +1027,16 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
   const stageDescription =
     diagnosisStage ===
     'requesting'
-      ? 'Initializing local Windows hardware and OS telemetry scan...'
+      ? 'Preparing to check your computer...'
       : diagnosisStage ===
           'scanning'
-        ? 'Reading live WMI, sensor, and process telemetry. This may take a moment.'
+        ? 'Checking Windows, device sensors, and running apps. This may take a moment.'
         : diagnosisStage ===
             'loading-evidence'
           ? 'The scan is complete. Loading the readings.'
           : diagnosisStage ===
               'analyzing'
-            ? 'Analyzing telemetry and generating AI diagnostic insights.'
+            ? 'Reviewing the readings and preparing your results.'
             : '';
 
   const selectedScopeLabel =
@@ -1704,6 +1532,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   statusResponse
                     .data
                     ?.resolution_status,
+                resolution_checked_at: undefined,
+                resolution_proof: [],
 
                 last_action_status:
                   statusResponse
@@ -1717,6 +1547,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
               }
             : prev,
         );
+        await handleCheckResolution();
       } catch (err) {
         console.error(
           'Resolution status update error:',
@@ -1955,7 +1786,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         </h3>
 
                         <p className="mt-1 text-sm text-slate-400">
-                          Select one or more subsystems to focus the diagnosis. Absent hardware is automatically gated.
+                          Choose the parts to check. Parts that were not detected cannot be selected.
                         </p>
                       </div>
 
@@ -2118,7 +1949,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       </h3>
 
                       <p className="mt-1 text-sm text-slate-400">
-                        Select the closest problem. RigMD will still use fresh system evidence instead of relying only on the label.
+                        Choose the problem you are experiencing.
                       </p>
                     </div>
 
@@ -2201,7 +2032,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                     <p className="mt-1 text-sm font-semibold text-white">
                       {selectedScopeLabel ||
-                        'Select a diagnosis scope'}
+                        'Choose what to check'}
                     </p>
                   </div>
 
@@ -2247,8 +2078,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                     <p className="mt-2 text-right text-xs text-slate-400">
                       {diagnosisMode ===
                       'component'
-                        ? 'Select at least one component before running diagnosis.'
-                        : 'Select a scenario before running diagnosis.'}
+                        ? 'Choose at least one part to check.'
+                        : 'Choose a problem to check.'}
                     </p>
                   )}
               </div>
@@ -2516,20 +2347,23 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                       </div>
 
                       <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                        Result
+                        Original check
                       </p>
 
                       <h3 className="mt-1 text-2xl font-bold leading-tight text-white">
                         {
-                          report.diagnosed_category
+                          getCheckOverview(report).title
                         }
                       </h3>
 
-                      {report.primary_result && (
+                      {getCheckOverview(report).summary && (
                         <p className="mt-2 text-sm leading-relaxed text-slate-200">
-                          {report.primary_result}
+                          {getCheckOverview(report).summary}
                         </p>
                       )}
+
+                      <p className="mt-2 text-sm leading-relaxed text-slate-400">{getCheckOverview(report).meaning}</p>
+                    {getCheckCoverageNotice(report) && <p className="mt-2 text-sm leading-relaxed text-amber-200">{getCheckCoverageNotice(report)}</p>}
 
                       {report.confidence_label
                         ?.toLowerCase()
@@ -2561,12 +2395,11 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                         className={`rounded-lg border p-3 ${softTileStyle}`}
                       >
                         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                          Certainty
+                          Evidence availability
                         </p>
 
                         <p className="mt-1 text-sm font-bold text-white">
-                          {report.confidence_label ||
-                            'Not provided'}
+                          {getCheckEvidenceLabel(report)}
                         </p>
                       </div>
                     </div>
@@ -2576,66 +2409,19 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                 <section className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-200">What to do next</h4>
                   <p className="mt-1.5 text-sm leading-relaxed text-slate-200">
-                    {report.recommended_next_step || 'Review the result below before making changes.'}
+                    {getCheckAdvice(report)}
                   </p>
                 </section>
 
                 <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
-                  <summary className="cursor-pointer font-semibold text-slate-200">Why this result was suggested</summary>
+                  <summary className="cursor-pointer font-semibold text-slate-200">Technical result details</summary>
+                  <p className="mt-3 text-xs text-slate-400">Explanation source: {explanationSourceLabel(report.explanation_source, report.explanation_model)}</p>
                   <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
-                    {report.ai_explanation || 'An explanation is not available for this result.'}
+                    {report.diagnosed_category}: {report.primary_result}{'\n'}{report.ai_explanation || 'An explanation is not available for this result.'}
                   </p>
                 </details>
 
-                {report.proof &&
-                  report.proof.length > 0 && (
-                    <details className="rounded-xl border border-[var(--rigmd-border)] p-4">
-                      <summary className="mb-3 cursor-pointer font-semibold text-slate-200">View scan details</summary>
-
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        {report.proof.map(
-                          (item) => (
-                            <motion.div
-                              key={
-                                item.label
-                              }
-                              variants={
-                                cardFadeUp
-                              }
-                              whileHover={
-                                hoverLift
-                              }
-                              transition={
-                                cardTransition
-                              }
-                              className={`rounded-xl border p-3.5 ${getProofCardStyle(
-                                report.action_category,
-                                item.status,
-                              )}`}
-                            >
-                              <p className="text-xs font-bold uppercase tracking-wider text-gray-400">
-                                {
-                                  item.label
-                                }
-                              </p>
-
-                              <p className="mt-1 text-sm font-bold text-white">
-                                {
-                                  item.value
-                                }
-                              </p>
-
-                              <p className="mt-1.5 text-xs leading-relaxed text-gray-400">
-                                {
-                                  item.meaning
-                                }
-                              </p>
-                            </motion.div>
-                          ),
-                        )}
-                      </div>
-                    </details>
-                  )}
+                <CheckReadings check={report} />
 
                 {!isNoActiveIssue(
                   report,
@@ -2788,6 +2574,12 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   report,
                 ) && report.session_id && (
                     <AutonomyRemediationPanel
+                      check={report}
+                      originalReadings={report.proof}
+                      onOpenMemoryCheck={onOpenMemoryCheck}
+                      readings={report.resolution_proof?.length ? report.resolution_proof : report.proof}
+                      followUpSummary={getFindingChanges(report.proof, report.resolution_proof)?.summary}
+                      followUpCheckedAt={report.resolution_checked_at}
                       sessionId={
                         report.session_id
                       }
@@ -2813,22 +2605,11 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                   </div>
                 )}
 
-                {!isNoActiveIssue(
-                  report,
-                ) &&
-                  report.session_id && (
-                    <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4">
+                {canCheckCurrentStatus(report) && (
+                    <div className={`rounded-xl border p-4 ${getCheckPanelClassName(report)}`}>
                       {(() => {
                         const resolutionView =
-                          getResolutionView(
-                            report.resolution_status,
-                            Boolean(
-                              report.last_action_status ||
-                                report.last_action_summary,
-                            ),
-                            report.resolution_proof,
-                            report.diagnosed_category,
-                          );
+                          getCheckStatus(report);
 
                         return (
                           <>
@@ -2836,7 +2617,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                               <div>
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
                                   <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-                                    Resolution Status
+                                    Latest status
                                   </h4>
 
                                   <span
@@ -2849,15 +2630,15 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                                 </div>
 
                                 <p className="text-xs leading-relaxed text-gray-400">
-                                  {report.resolution_summary ||
-                                    report.last_action_summary ||
-                                    resolutionView.fallback}
+                                  {getLatestCheckSummary(report)}
                                 </p>
+                                {report.resolution_checked_at && <p className="mt-1 text-xs text-slate-500">Checked {new Date(report.resolution_checked_at).toLocaleString()}</p>}
+                                {crashMetric(report) && getAdditionalFindingStatus(report.resolution_proof) && <p className="mt-2 text-xs text-cyan-200">Additional finding: {getAdditionalFindingStatus(report.resolution_proof)}</p>}
 
                                 {getTelemetryDeltaSummary(report.proof, report.resolution_proof) && (
                                   <div className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-2.5 text-xs text-cyan-200">
-                                    <span className="font-bold text-cyan-300">What changed since last check: </span>
-                                    {getTelemetryDeltaSummary(report.proof, report.resolution_proof)}
+                                    <span className="font-bold text-cyan-300">Compared with the original check: </span>
+                                    {plainDiagnosticText(getTelemetryDeltaSummary(report.proof, report.resolution_proof))}
                                   </div>
                                 )}
                               </div>
@@ -2882,47 +2663,8 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                               </motion.button>
                             </div>
 
-                            {report.resolution_proof &&
-                              report
-                                .resolution_proof
-                                .length >
-                                0 && (
-                                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                                  {report.resolution_proof.map(
-                                    (
-                                      item,
-                                    ) => (
-                                      <div
-                                        key={
-                                          item.label
-                                        }
-                                        className={`rounded-lg border p-3 ${getProofCardStyle(
-                                          report.action_category,
-                                          item.status,
-                                        )}`}
-                                      >
-                                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                          {
-                                            item.label
-                                          }
-                                        </p>
-
-                                        <p className="mt-1 text-xs font-semibold text-white">
-                                          {
-                                            item.value
-                                          }
-                                        </p>
-
-                                        <p className="mt-1 text-xs text-slate-400">
-                                          {
-                                            item.meaning
-                                          }
-                                        </p>
-                                      </div>
-                                    ),
-                                  )}
-                                </div>
-                              )}
+                            {getFindingChanges(report.proof, report.resolution_proof) && <p className="mt-3 text-sm font-semibold text-cyan-200">{plainDiagnosticText(getFindingChanges(report.proof, report.resolution_proof)!.summary)}</p>}
+                            <DiagnosticReadings readings={report.resolution_proof} title="Latest readings" />
                           </>
                         );
                       })()}
@@ -3086,7 +2828,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
                           ? 'Scanning Device'
                           : diagnosisStage ===
                               'loading-evidence'
-                            ? 'Loading evidence'
+                            ? 'Loading readings'
                             : diagnosisStage ===
                                 'analyzing'
                               ? 'Analyzing'
@@ -3160,7 +2902,7 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                   <p className="mt-2 text-sm font-bold leading-relaxed text-white">
                     {
-                      report.diagnosed_category
+                      getCheckOverview(report).title
                     }
                   </p>
 
@@ -3181,12 +2923,12 @@ export default function NewDiagnosisView({onDiagnosisComplete,}: NewDiagnosisVie
 
                     <div className="rounded-md border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-2">
                       <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        Confidence
+                        Evidence availability
                       </p>
 
                       <p className="mt-1 text-xs font-bold text-white">
                         {
-                          report.confidence_label
+                          getCheckEvidenceLabel(report)
                         }
                       </p>
                     </div>

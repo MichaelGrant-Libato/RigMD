@@ -28,12 +28,12 @@ public class CpuLoadConsistencyTests
         var recheck = new ResolutionService().CheckResolution("Elevated CPU Utilization", hardware,
             componentIds: mode == "component" ? "[\"cpu\"]" : null);
 
-        Assert.Equal(active ? "Elevated CPU Utilization" : "No Active Issue Detected", diagnosis.DiagnosedCategory);
+        Assert.Equal(active, diagnosis.Proof.Any(p => p.MetricId == "cpu_usage" && p.Status == "high"));
         Assert.Equal(active ? "still_active" : "resolved", recheck.resolution_status);
     }
 
     [Theory]
-    [InlineData(85d, "resolved")]
+    [InlineData(85d, "still_active")]
     [InlineData(90d, "still_active")]
     public void CpuLoadConsistencyChange_PreservesTheSeparateBatteryDrainCheck(double load, string status)
     {
@@ -48,8 +48,8 @@ public class CpuLoadConsistencyTests
     {
         foreach (var (scenario, threshold) in new[]
         {
-            ("slow-system", 65d), ("stuttering-freezing", 65d), ("slow-boot", 70d),
-            ("app-crashes", 80d), ("blue-screen-crash", 85d)
+            ("slow-system", 80d), ("stuttering-freezing", 80d), ("slow-boot", 80d),
+            ("app-crashes", 80d), ("blue-screen-crash", 80d)
         })
         {
             yield return new object[] { scenario, threshold - 0.1, false };
@@ -70,20 +70,21 @@ public class CpuLoadConsistencyTests
         var recheck = new ResolutionService().CheckResolution(diagnosis.DiagnosedCategory, hardware,
             scenarioId: scenario);
 
-        Assert.Equal(active, diagnosis.DiagnosedCategory != "No Active Issue Detected");
-        Assert.Equal(active ? "still_active" : "resolved", recheck.resolution_status);
+        Assert.Equal(active, diagnosis.Proof.Any(p => p.Status is "high" or "elevated"));
+        Assert.Equal(active ? "still_active" : scenario == "slow-boot" ? "needs_recheck" : "resolved", recheck.resolution_status);
     }
 
     private static HardwareProfileDto Hardware(double load) => new()
     {
+        DeviceErrorsAvailable = true,
         Cpu = new() { Name = "Test CPU", UsagePercent = load, TemperatureCelsius = 45,
             TemperatureSource = "test CPU sensor" },
         Gpu = new() { Name = "Test GPU", HasGpu = true, TemperatureCelsius = 40 },
         Ram = new() { TotalGb = 16, UsedGb = 4, UsagePercent = 25 },
         StorageDrives = new() { new() { Model = "Test SSD", SizeGb = 256, UsedGb = 64, UsagePercent = 25 } },
         AllDisks = new() { new() { Drive = "C:\\", TotalGb = 256, UsedGb = 64, UsagePercent = 25 } },
-        Network = new() { HasActiveAdapter = true, HasIpv4Address = true, HasDefaultGateway = true,
+        Network = new() { QuerySucceeded = true, HasActiveAdapter = true, HasIpv4Address = true, HasDefaultGateway = true,
             HasDnsServers = true, DnsResolutionSucceeded = true, PingLatencyMs = 20, PacketLossPercent = 0 },
-        StabilityEvents = new()
+        StabilityEvents = new() { QuerySucceeded = true }
     };
 }

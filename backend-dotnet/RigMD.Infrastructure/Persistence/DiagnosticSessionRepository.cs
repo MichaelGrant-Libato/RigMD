@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using RigMD.Application.Contracts.Common;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Models;
+using RigMD.Application.Services;
 using RigMD.Domain.Entities;
 using RigMD.Domain.Rules;
 using System.Text.Json;
@@ -128,7 +129,9 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     string clientId = "",
     string? primaryResult = null,
     string? incidentalWarning = null,
-    string? componentStatus = null)
+    string? componentStatus = null,
+    IReadOnlyList<AutomaticDiagnosisProof>? proof = null,
+    string? recommendedNextStep = null)
     {
         if (string.IsNullOrWhiteSpace(clientId))
         {
@@ -279,6 +282,24 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                 {
                     DiagnosticSessionId = session.Id,
                     Session = session,
+                    QuestionKey = "proof",
+                    AnswerValue = JsonSerializer.Serialize((proof ?? Array.Empty<AutomaticDiagnosisProof>())
+                        .Select(p => new { metric_id = p.MetricId, captured_at = p.CapturedAt,
+                            evidence_kind = p.EvidenceKind, rule_version = p.RuleVersion,
+                            window_kind = p.WindowKind, window_start = p.WindowStart, window_end = p.WindowEnd,
+                            label = p.Label, value = p.Value, status = p.Status, meaning = p.Meaning }))
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
+                    QuestionKey = "recommended_next_step",
+                    AnswerValue = recommendedNextStep ?? string.Empty
+                },
+                new()
+                {
+                    DiagnosticSessionId = session.Id,
+                    Session = session,
                     QuestionKey = "component_status",
                     AnswerValue = componentStatus ?? nameof(ComponentStatus.Present)
                 }
@@ -341,7 +362,14 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         }
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
-        return sessions.Select(MapToDto).ToList().AsReadOnly();
+        var repeatedIds = new RecurringPatternService().BuildPatterns(sessions.Select(MapRecurringSession).ToArray())
+            .patterns.SelectMany(p => p.occurrences).Select(o => o.id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return sessions.Select(s =>
+        {
+            var dto = MapToDto(s);
+            dto.IsRecurring = repeatedIds.Contains(dto.SessionId);
+            return dto;
+        }).ToList().AsReadOnly();
     }
 
     public async Task<DiagnosticSessionDto?> GetSessionAsync(Guid sessionId)
@@ -361,7 +389,11 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         }
 
         var session = await query.FirstOrDefaultAsync();
-        return session == null ? null : MapToDto(session);
+        if (session == null) return null;
+        var dto = MapToDto(session);
+        dto.IsRecurring = new RecurringPatternService().BuildPatterns(await GetRecurringSessionsAsync()).patterns
+            .Any(p => p.occurrences.Any(o => o.id == dto.SessionId));
+        return dto;
     }
 
     public async Task<bool> DeleteSessionAsync(Guid sessionId)
@@ -511,6 +543,19 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return true;
     }
 
+    public async Task SaveExplanationSourceAsync(Guid sessionId, string source, string? model)
+    {
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions.Include(s => s.Answers).Include(s => s.Profile).Where(s => s.Id == sessionId);
+        if (!string.IsNullOrEmpty(clientId))
+            query = query.Where(s => s.Profile.ClientId == clientId || s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        var session = await query.FirstOrDefaultAsync();
+        if (session == null) return;
+        SetOrAddAnswer(session, "explanation_source", source is "gemini" or "local" ? source : "unknown");
+        SetOrAddAnswer(session, "explanation_model", source == "gemini" ? model ?? "" : "");
+        await _db.SaveChangesAsync();
+    }
+
     public async Task<bool> MarkNeedsRecheckAsync(Guid sessionId)
     {
         var clientId = GetCurrentClientId();
@@ -530,9 +575,19 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         if (session == null) return false;
 
         SetOrAddAnswer(session, "resolution_status", "needs_recheck");
+        var previousProof = ReadSavedProof(session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_proof")?.AnswerValue ?? "");
+        if (previousProof.Length > 0)
+            SetOrAddAnswer(session, "pre_action_readings", JsonSerializer.Serialize(new
+            {
+                checked_at = session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_checked_at")?.AnswerValue,
+                proof = previousProof
+            }));
+        SetOrAddAnswer(session, "resolution_proof", "[]");
+        SetOrAddAnswer(session, "resolution_checked_at", "");
+        SetOrAddAnswer(session, "resolution_summary", "The approved action finished. Its effect still needs checking.");
         SetOrAddAnswer(session, "last_action_status", "completed");
         SetOrAddAnswer(session, "last_action_summary",
-            "A safe action was performed. Run a follow-up check to see if the issue improved.");
+            "The approved action finished. Its effect still needs checking.");
 
         await _db.SaveChangesAsync();
         return true;
@@ -567,9 +622,10 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         var lastSavedSession = sessions.FirstOrDefault();
         var lastSavedSessionDto = lastSavedSession != null ? MapToDto(lastSavedSession) : null;
 
-        var recurringIssuesCount = sessions.Where(s => s.Output != null && !string.IsNullOrWhiteSpace(s.Output.DiagnosedCategory))
-                                           .GroupBy(s => s.Output!.DiagnosedCategory)
-                                           .Count(g => g.Count() > 1);
+        var recurring = new RecurringPatternService().BuildPatterns(sessions.Select(MapRecurringSession).ToArray());
+        var recurringIssuesCount = recurring.metrics.recurring_issues;
+        if (lastSavedSessionDto != null) lastSavedSessionDto.IsRecurring = recurring.patterns
+            .Any(p => p.occurrences.Any(o => o.id == lastSavedSessionDto.SessionId));
 
         var warningSignsSessions = sessions.Where(s => s.Answers.Any(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue) && !a.AnswerValue.Equals("None", StringComparison.OrdinalIgnoreCase))).ToList();
 
@@ -633,24 +689,20 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
 
-        var grouped = sessions
-            .Where(s => s.Output != null)
-            .GroupBy(s => s.Output!.DiagnosedCategory)
-            .Select(g => new
+        var grouped = new RecurringPatternService().BuildPatterns(sessions.Select(MapRecurringSession).ToArray())
+            .patterns.Select(pattern => new
             {
-                category = g.Key,
-                count = g.Count(),
-                is_recurring = g.Count() > 1,
-                sessions = g.Select(s => new
+                category = pattern.probable_cause,
+                count = pattern.occurrence_count,
+                is_recurring = true,
+                risk_level = pattern.risk_level,
+                current_condition = pattern.current_condition,
+                sessions = pattern.occurrences.Select(o => new
                 {
-                    session_id = s.Id.ToString(),
-                    created_at = s.CreatedAt.ToString("o"),
-                    resolution_status = s.Answers
-                        .Where(a => a.QuestionKey == "resolution_status")
-                        .Select(a => a.AnswerValue).FirstOrDefault() ?? "open"
+                    session_id = o.id,
+                    created_at = sessions.First(s => s.Id.ToString() == o.id).CreatedAt.ToString("o")
                 }).ToList()
             })
-            .OrderByDescending(g => g.count)
             .ToList();
 
         return new { patterns = grouped };
@@ -816,9 +868,13 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             ActionCategory = s.Output?.ActionCategory ?? string.Empty,
             ConfidenceLabel = s.Output?.ConfidenceLabel ?? string.Empty,
             AiExplanation = s.Output?.AiExplanation ?? string.Empty,
+            ExplanationSource = Answer("explanation_source"),
+            ExplanationModel = Answer("explanation_model"),
             IsRecurring = s.Answers.Any(a => a.QuestionKey == "is_recurring" && a.AnswerValue == "true"),
             ResolutionStatus = Answer("resolution_status"),
             ResolutionSummary = Answer("resolution_summary"),
+            ResolutionProof = ReadSavedProof(Answer("resolution_proof")),
+            Proof = ReadSavedProof(Answer("proof")),
             ResolutionCheckedAt = Answer("resolution_checked_at"),
             LastActionStatus = Answer("last_action_status"),
             LastActionSummary = Answer("last_action_summary"),
@@ -837,8 +893,30 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             DaysAgo = daysAgo,
             DisplayDate = localTime.ToString("MMM dd, yyyy"),
             DisplayTime = localTime.ToString("hh:mm tt"),
-            RecommendedNextStep = nextStep
+            RecommendedNextStep = string.IsNullOrWhiteSpace(Answer("recommended_next_step"))
+                ? nextStep : Answer("recommended_next_step")
         };
+    }
+
+    private static object[] ReadSavedProof(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<object>();
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array) return Array.Empty<object>();
+            return document.RootElement.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.Object &&
+                    item.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String &&
+                    item.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String &&
+                    (!item.TryGetProperty("status", out var status) || status.ValueKind is JsonValueKind.String or JsonValueKind.Null) &&
+                    (!item.TryGetProperty("meaning", out var meaning) || meaning.ValueKind is JsonValueKind.String or JsonValueKind.Null))
+                .Select(item => (object)item.Clone()).ToArray();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<object>();
+        }
     }
 
     private void SetOrAddAnswer(DiagnosticSession session, string key, string value)
@@ -881,7 +959,10 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-        return sessions.Select(s => new RecurringSessionDto
+        return sessions.Select(MapRecurringSession).ToList().AsReadOnly();
+    }
+
+    private static RecurringSessionDto MapRecurringSession(DiagnosticSession s) => new()
         {
             Id = s.Id,
             SymptomType = s.Answers.FirstOrDefault(a => a.QuestionKey == "symptom_type")?.AnswerValue ?? string.Empty,
@@ -892,9 +973,12 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             Frequency = s.Answers.FirstOrDefault(a => a.QuestionKey == "frequency")?.AnswerValue ?? string.Empty,
             Duration = s.Answers.FirstOrDefault(a => a.QuestionKey == "duration")?.AnswerValue ?? "N/A",
             WarningSigns = s.Answers.FirstOrDefault(a => a.QuestionKey == "warning_signs")?.AnswerValue ?? string.Empty,
+            Proof = ReadSavedProof(s.Answers.FirstOrDefault(a => a.QuestionKey == "proof")?.AnswerValue ?? ""),
+            ResolutionProof = ReadSavedProof(s.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_proof")?.AnswerValue ?? ""),
+            ResolutionCheckedAt = s.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_checked_at")?.AnswerValue ?? "",
+            ResolutionStatus = s.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_status")?.AnswerValue ?? "",
             CreatedAt = s.CreatedAt.UtcDateTime
-        }).ToList().AsReadOnly();
-    }
+        };
 
     public async Task<IEnumerable<string>> GetObservedWarningTextsAsync()
     {
@@ -956,19 +1040,43 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             Status = r.Status,
             CreatedAt = r.CreatedAt.ToString("o"),
             CompletedAt = r.CompletedAt?.ToString("o"),
-            Attempts = r.ActionAttempts.Select(a => new ActionAttemptDto
+            Attempts = r.ActionAttempts.Select(a =>
             {
-                ActionCode = a.ActionCode,
-                VerificationStatus = a.Verification == null
-                    ? null
-                    : a.Verification.IsSuccessful
-                        ? "Resolved"
-                        : !string.IsNullOrEmpty(a.Verification.FailureReason)
-                            ? a.Verification.FailureReason
-                            : "Unresolved",
-                CreatedAt = a.CreatedAt.ToString("o")
+                var evidence = ReadExecutionEvidence(a.Verification?.ObservedState);
+                return new ActionAttemptDto
+                {
+                    ExecutionSummary = evidence.Summary,
+                    Proof = evidence.Proof,
+                    ActionCode = a.ActionCode,
+                    VerificationStatus = a.Verification == null
+                        ? null
+                        : a.Verification.IsSuccessful
+                            ? "Resolved"
+                            : !string.IsNullOrEmpty(a.Verification.FailureReason)
+                                ? a.Verification.FailureReason
+                                : "Unresolved",
+                    CreatedAt = a.CreatedAt.ToString("o")
+                };
             }).ToList()
         }).ToList().AsReadOnly();
+    }
+
+    private static (string? Summary, List<ExecutionProof> Proof) ReadExecutionEvidence(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return (null, new());
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return (null, new());
+            var summary = root.TryGetProperty("executionSummary", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() : null;
+            var proof = root.TryGetProperty("proof", out var rows) && rows.ValueKind == JsonValueKind.Array
+                ? JsonSerializer.Deserialize<List<ExecutionProof>>(rows.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                : null;
+            return (summary, (proof ?? new()).Where(item => item != null && !string.IsNullOrWhiteSpace(item.Label)).ToList());
+        }
+        catch (JsonException) { return (null, new()); }
     }
 }
 

@@ -14,6 +14,7 @@ public sealed class AutomaticDiagnosisInput
     public string? ScenarioId { get; init; }
 
     public DateTimeOffset CapturedAt { get; init; }
+    public DateTimeOffset? EventsSince { get; init; }
 
     public HardwareProfileDto Hardware { get; init; } = null!;
 }
@@ -47,6 +48,24 @@ public sealed class AutomaticDiagnosisResult
 
 public sealed class AutomaticDiagnosisProof
 {
+    [System.Text.Json.Serialization.JsonPropertyName("window_kind")]
+    public string? WindowKind { get; init; }
+    [System.Text.Json.Serialization.JsonPropertyName("window_start")]
+    public DateTimeOffset? WindowStart { get; init; }
+    [System.Text.Json.Serialization.JsonPropertyName("window_end")]
+    public DateTimeOffset? WindowEnd { get; init; }
+    [System.Text.Json.Serialization.JsonPropertyName("evidence_kind")]
+    public string EvidenceKind { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("rule_version")]
+    public string RuleVersion { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("metric_id")]
+    public string MetricId { get; init; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("captured_at")]
+    public DateTimeOffset? CapturedAt { get; set; }
+
     public string Label { get; init; } = string.Empty;
 
     public string Value { get; init; } = string.Empty;

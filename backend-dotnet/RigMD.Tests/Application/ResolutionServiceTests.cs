@@ -115,7 +115,7 @@ public class ResolutionServiceTests
         // and out-of-scope RAM pressure does NOT hijack or clutter the scoped component scan.
         Assert.Equal("No Active Issue Detected", storageOnlyResult.DiagnosedCategory);
         Assert.Equal(ComponentStatus.Present, storageOnlyResult.ComponentStatus);
-        Assert.Contains("Storage / SSD / HDD is operating normally", storageOnlyResult.PrimaryResult);
+        Assert.Contains("No warning was found", storageOnlyResult.PrimaryResult);
         Assert.Null(storageOnlyResult.IncidentalWarning);
         Assert.NotEmpty(storageOnlyResult.Proof);
         Assert.Contains(storageOnlyResult.Proof, p => p.Label.Contains("Storage"));
@@ -143,7 +143,7 @@ public class ResolutionServiceTests
             browserHeavy: false,
             browserMemoryMb: 600);
         hardware.DeviceType = "Desktop";
-        hardware.Battery = null;
+        hardware.Battery = new() { HasBattery = false, QuerySucceeded = true };
 
         var batteryResult = autoService.Diagnose(new AutomaticDiagnosisInput
         {
@@ -154,7 +154,7 @@ public class ResolutionServiceTests
 
         Assert.Equal(ComponentStatus.NotPresent, batteryResult.ComponentStatus);
         Assert.Equal("No battery detected on this device", batteryResult.PrimaryResult);
-        Assert.Contains(batteryResult.Proof, p => p.Value == "Not Present (Desktop PC)" && p.Meaning.Contains("No battery detected on this device"));
+        Assert.Contains(batteryResult.Proof, p => p.Value == "No battery reported" && p.Status == "info");
     }
 
     [Fact]
@@ -177,7 +177,8 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        Assert.Equal("No Active Issue Detected", overheatingResult.DiagnosedCategory);
+        Assert.Equal("Scanner evidence unavailable", overheatingResult.DiagnosedCategory);
+        Assert.DoesNotContain(overheatingResult.Proof, p => p.Status == "high");
         Assert.DoesNotContain("[", overheatingResult.RecommendedNextStep);
 
         var appCrashResult = autoService.Diagnose(new AutomaticDiagnosisInput
@@ -207,7 +208,8 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        Assert.Equal("No Active Issue Detected", fullNormalBrowserResult.DiagnosedCategory);
+        Assert.Equal("Scanner evidence unavailable", fullNormalBrowserResult.DiagnosedCategory);
+        Assert.DoesNotContain(fullNormalBrowserResult.Proof, p => p.Status == "high");
     }
 
     [Fact]
@@ -232,8 +234,8 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        Assert.Equal("No Active Issue Detected", thermalResult.DiagnosedCategory);
-        Assert.Contains("No active overheating detected", thermalResult.PrimaryResult);
+        Assert.Equal("Scanner evidence unavailable", thermalResult.DiagnosedCategory);
+        Assert.Contains(thermalResult.Proof, p => p.MetricId == "fan_operation" && p.Status == "unknown");
         Assert.DoesNotContain(thermalResult.Proof, p => p.Label.Contains("Memory"));
 
         var networkResult = autoService.Diagnose(new AutomaticDiagnosisInput
@@ -244,7 +246,7 @@ public class ResolutionServiceTests
         });
 
         Assert.Equal("No Active Issue Detected", networkResult.DiagnosedCategory);
-        Assert.Contains("No active network issue detected", networkResult.PrimaryResult);
+        Assert.Contains("No warning was found", networkResult.PrimaryResult);
         Assert.DoesNotContain(networkResult.Proof, p => p.Label.Contains("Memory"));
 
         var storageResult = autoService.Diagnose(new AutomaticDiagnosisInput
@@ -255,7 +257,7 @@ public class ResolutionServiceTests
         });
 
         Assert.Equal("No Active Issue Detected", storageResult.DiagnosedCategory);
-        Assert.Contains("No active storage issue detected", storageResult.PrimaryResult);
+        Assert.Contains("No warning was found", storageResult.PrimaryResult);
         Assert.DoesNotContain(storageResult.Proof, p => p.Label.Contains("Memory"));
     }
 
@@ -279,7 +281,7 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        Assert.Equal("No Active Issue Detected", thermalResult.DiagnosedCategory);
+        Assert.Equal("Scanner evidence unavailable", thermalResult.DiagnosedCategory);
         Assert.Contains(thermalResult.Proof, p => p.Label == "Graphics Thermal Context");
         Assert.DoesNotContain(thermalResult.Proof, p => p.Value.Contains("PnP Device Error"));
 
@@ -290,7 +292,7 @@ public class ResolutionServiceTests
             Hardware = hardware
         });
 
-        Assert.Contains(driverResult.Proof, p => p.Label == "Graphics & Drivers" && p.Value.Contains("PnP Device Error"));
+        Assert.Contains(driverResult.Proof, p => p.MetricId.StartsWith("device_error_") && p.Status == "high");
     }
 
     [Fact]
@@ -313,8 +315,8 @@ public class ResolutionServiceTests
 
         Assert.Equal("No Active Issue Detected", driverResult.DiagnosedCategory);
         Assert.Equal("Monitor", driverResult.ActionCategory);
-        Assert.Contains("0 active device error", driverResult.PrimaryResult);
-        Assert.Contains(driverResult.Proof, p => p.Label == "Graphics & Drivers" && p.Status == "normal");
+        Assert.Contains("No warning was found", driverResult.PrimaryResult);
+        Assert.Contains(driverResult.Proof, p => p.Label == "Graphics & Drivers" && p.Value.StartsWith("0 device error") && p.Status == "info");
     }
 
     [Fact]
@@ -336,8 +338,8 @@ public class ResolutionServiceTests
         });
 
         Assert.Equal("Application stability risk needs review", appCrashResult.DiagnosedCategory);
-        Assert.Contains("No recent application crash event", appCrashResult.PrimaryResult);
-        Assert.Contains(appCrashResult.Proof, p => p.Label == "Physical Memory (RAM)" && p.Status == "elevated");
+        Assert.DoesNotContain(appCrashResult.Proof, p => p.MetricId == "application_crash_history" && p.Status == "high");
+        Assert.Contains(appCrashResult.Proof, p => p.MetricId == "memory_usage" && p.Status == "high");
         Assert.Contains(appCrashResult.Proof, p => p.Label.StartsWith("Application crash") && p.Status == "normal");
     }
 
@@ -359,15 +361,15 @@ public class ResolutionServiceTests
             "Elevated Memory Pressure From Active Workloads",
             hardware,
             scenarioId: "overheating-loud-fan");
-        Assert.Equal("resolved", thermalCheck.resolution_status);
-        Assert.Contains("processor temperature", thermalCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("needs_recheck", thermalCheck.resolution_status);
+        Assert.Contains(thermalCheck.resolution_proof, p => p.ToString()!.Contains("cpu_temperature"));
 
         var driverCheck = _service.CheckResolution(
             "Elevated Memory Pressure From Active Workloads",
             hardware,
             scenarioId: "driver-error");
         Assert.Equal("resolved", driverCheck.resolution_status);
-        Assert.Contains("device error codes", driverCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(driverCheck.resolution_proof, p => p.ToString()!.Contains("graphics_devices"));
 
         var networkComponentCheck = _service.CheckResolution(
             "Elevated Memory Pressure From Active Workloads",
@@ -375,7 +377,7 @@ public class ResolutionServiceTests
             scenarioId: null,
             componentIds: "[\"network\"]");
         Assert.Equal("resolved", networkComponentCheck.resolution_status);
-        Assert.Contains("internet name check", networkComponentCheck.resolution_summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(networkComponentCheck.resolution_proof, p => p.ToString()!.Contains("network_dns"));
     }
 
     [Fact]
@@ -407,8 +409,8 @@ public class ResolutionServiceTests
             hardware,
             scenarioId: "network-problem");
         var networkProof = Assert.IsAssignableFrom<object[]>(networkCheck.resolution_proof);
-        Assert.Contains(networkProof, p => p.ToString()!.Contains("Latency"));
-        Assert.Contains(networkProof, p => p.ToString()!.Contains("Packet loss"));
+        Assert.Contains(networkProof, p => p.ToString()!.Contains("network_latency"));
+        Assert.Contains(networkProof, p => p.ToString()!.Contains("network_loss"));
         Assert.DoesNotContain(networkProof, p => p.ToString()!.Contains("Memory use"));
 
         var storageCheck = _service.CheckResolution(
@@ -416,8 +418,8 @@ public class ResolutionServiceTests
             hardware,
             scenarioId: "storage-problem");
         var storageProof = Assert.IsAssignableFrom<object[]>(storageCheck.resolution_proof);
-        Assert.Contains(storageProof, p => p.ToString()!.Contains("Main storage use"));
-        Assert.Contains(storageProof, p => p.ToString()!.Contains("Storage health"));
+        Assert.Contains(storageProof, p => p.ToString()!.Contains("storage_usage"));
+        Assert.Contains(storageProof, p => p.ToString()!.Contains("storage_health"));
         Assert.DoesNotContain(storageProof, p => p.ToString()!.Contains("Device Manager"));
     }
 
@@ -441,8 +443,7 @@ public class ResolutionServiceTests
 
         var proof = Assert.IsAssignableFrom<object[]>(result.resolution_proof);
         Assert.Equal("still_active", result.resolution_status);
-        Assert.Contains("new application crash event", result.resolution_summary);
-        Assert.Contains(proof, p => p.ToString()!.Contains("Application crash events since diagnosis"));
+        Assert.Contains(proof, p => p.ToString()!.Contains("Application crash records since diagnosis") && p.ToString()!.Contains("1 found"));
         Assert.DoesNotContain(proof, p => p.ToString()!.Contains("Main storage"));
     }
 
@@ -462,9 +463,9 @@ public class ResolutionServiceTests
             scenarioId: "app-crashes",
             sessionCreatedAt: DateTimeOffset.UtcNow.AddMinutes(-30));
 
-        Assert.Equal("still_active", result.resolution_status);
-        Assert.Contains("could not confirm Windows Event Log evidence", result.resolution_summary);
-        Assert.Contains(result.resolution_proof, p => p.ToString()!.Contains("Event log unavailable"));
+        Assert.Equal("needs_recheck", result.resolution_status);
+        Assert.Contains("Could not verify", result.resolution_summary);
+        Assert.Contains(result.resolution_proof, p => p.ToString()!.Contains("unknown"));
     }
 
     [Fact]
@@ -485,11 +486,9 @@ public class ResolutionServiceTests
 
         var proof = Assert.IsAssignableFrom<object[]>(result.resolution_proof);
         Assert.Equal("still_active", result.resolution_status);
-        Assert.Contains("no new application crash events", result.resolution_summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("supporting risk signals", result.resolution_summary);
-        Assert.Contains(proof, p => p.ToString()!.Contains("Application crash events since diagnosis"));
-        Assert.Contains(proof, p => p.ToString()!.Contains("Memory pressure"));
-        Assert.Contains(proof, p => p.ToString()!.Contains("Device driver warnings"));
+        Assert.Contains(proof, p => p.ToString()!.Contains("Application crash records since diagnosis") && p.ToString()!.Contains("0 found"));
+        Assert.Contains(proof, p => p.ToString()!.Contains("memory_usage") && p.ToString()!.Contains("high"));
+        Assert.DoesNotContain(proof, p => p.ToString()!.Contains("device_error_"));
     }
 
     private static HardwareProfileDto CreateHardware(
@@ -497,7 +496,7 @@ public class ResolutionServiceTests
         bool browserHeavy,
         double browserMemoryMb,
         double cpuUsage = 15,
-        double? cpuTemp = null,
+        double? cpuTemp = 45,
         double storageUsage = 45,
         bool dnsResolutionSucceeded = true,
         long? pingLatencyMs = 20,
@@ -510,6 +509,9 @@ public class ResolutionServiceTests
     {
         return new HardwareProfileDto
         {
+            DeviceErrorsAvailable = true,
+            Battery = new() { QuerySucceeded = true, HasBattery = false },
+            StorageDrives = [new() { Model = "Test SSD", UsagePercent = storageUsage }],
             Cpu = new()
             {
                 UsagePercent = cpuUsage,
@@ -521,7 +523,8 @@ public class ResolutionServiceTests
             {
                 HasGpu = true,
                 Name = "Intel Iris Xe Graphics",
-                Driver = "31.0.101.4255"
+                Driver = "31.0.101.4255",
+                TemperatureCelsius = 40
             },
 
             ConnectedDisplays = 1,
@@ -545,6 +548,7 @@ public class ResolutionServiceTests
 
             Network = new()
             {
+                QuerySucceeded = true,
                 HasActiveAdapter = true,
                 HasIpv4Address = true,
                 HasDefaultGateway = true,
@@ -578,6 +582,7 @@ public class ResolutionServiceTests
 
             StabilityEvents = new()
             {
+                QuerySucceeded = string.IsNullOrWhiteSpace(eventQueryWarning),
                 QueryWarning = eventQueryWarning,
                 ApplicationCrashEvents = Enumerable.Range(0, appCrashEventsAfter)
                     .Select(i => CreateEvent(

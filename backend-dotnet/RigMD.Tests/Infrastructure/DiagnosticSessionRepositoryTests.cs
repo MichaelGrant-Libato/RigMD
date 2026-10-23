@@ -12,6 +12,25 @@ public class DiagnosticSessionRepositoryTests
     private const string TestClientId =
         "test-client-123";
 
+    [Theory]
+    [InlineData("gemini", "gemini-test", "gemini-test")]
+    [InlineData("local", "ignored-model", "")]
+    public async Task ExplanationProvenanceSurvivesReload_AndLegacyRecordsStayUnknown(string source, string model, string savedModel)
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var id = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), new HardwareProfileDto(),
+            "High Memory Pressure", "Troubleshoot", "High", "Explanation", TestClientId);
+        Assert.Empty((await repo.GetSessionAsync(id))!.ExplanationSource);
+        await CreateRepository(db, "other-client").SaveExplanationSourceAsync(id, "gemini", "must-not-be-saved");
+        Assert.Empty((await repo.GetSessionAsync(id))!.ExplanationSource);
+        await repo.SaveExplanationSourceAsync(id, source, model);
+        db.ChangeTracker.Clear();
+        var saved = await repo.GetSessionAsync(id);
+        Assert.Equal(source, saved!.ExplanationSource);
+        Assert.Equal(savedModel, saved.ExplanationModel);
+    }
+
     private RigMdDbContext GetMemoryContext()
     {
         var options =
@@ -39,6 +58,87 @@ public class DiagnosticSessionRepositoryTests
         return new DiagnosticSessionRepository(
             db,
             clientProvider);
+    }
+
+    [Fact]
+    public async Task AutomaticReadingsAndNextStep_SurviveReload_SeparatelyFromFollowUp()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var proof = new[] { new AutomaticDiagnosisProof
+        {
+            MetricId = "cpu_temperature", CapturedAt = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero),
+            EvidenceKind = "unavailable", RuleVersion = "windows-review-v2",
+            Label = "CPU temperature", Value = "Unavailable", Status = "unknown",
+            Meaning = "The required sensor could not be read."
+        } };
+        var id = await repo.SaveAutomaticDiagnosisAsync(new HardwareProfileDto(), "component", new[] { "cpu" },
+            null, Guid.Empty, "local", "Thermal telemetry unavailable", "Monitor", "Low", "No measured temperature.",
+            TestClientId, proof: proof, recommendedNextStep: "Check again when a temperature reading is available.");
+        await repo.UpdateResolutionAsync(id, "unknown", DateTimeOffset.UtcNow.ToString("O"), "Follow-up unavailable",
+            new object[] { new { label = "CPU temperature", value = "Still unavailable", status = "unknown" } });
+        db.ChangeTracker.Clear();
+        var loaded = await repo.GetSessionAsync(id);
+        Assert.NotNull(loaded);
+        var original = Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(loaded.Proof));
+        Assert.Equal("Unavailable", original.GetProperty("value").GetString());
+        Assert.Equal("cpu_temperature", original.GetProperty("metric_id").GetString());
+        Assert.Equal(proof[0].CapturedAt, original.GetProperty("captured_at").GetDateTimeOffset());
+        Assert.Equal("unavailable", original.GetProperty("evidence_kind").GetString());
+        Assert.Equal("windows-review-v2", original.GetProperty("rule_version").GetString());
+        Assert.Equal("unknown", original.GetProperty("status").GetString());
+        Assert.Equal("The required sensor could not be read.", original.GetProperty("meaning").GetString());
+        var followUp = Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(loaded.ResolutionProof));
+        Assert.Equal("Still unavailable", followUp.GetProperty("value").GetString());
+        Assert.Equal("Check again when a temperature reading is available.", loaded.RecommendedNextStep);
+        Assert.Single((await repo.GetSessionsAsync()).Single().Proof);
+    }
+
+    [Fact]
+    public async Task EventWindowsSurviveReload_WithoutReplacingHistoricalEvidence()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var start = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero);
+        var original = new AutomaticDiagnosisProof
+        {
+            MetricId = "application_crash_history", EvidenceKind = "event_log", RuleVersion = "windows-review-v2",
+            Label = "Application crash records (last 7 days)", Value = "2 found", Status = "high",
+            WindowKind = "rolling_history", WindowStart = start.AddDays(-7), WindowEnd = start
+        };
+        var id = await repo.SaveAutomaticDiagnosisAsync(new HardwareProfileDto(), "scenario", Array.Empty<string>(),
+            "app-crashes", Guid.Empty, "local", "Application crash history requires review", "Troubleshoot", "Partial", "Review records.",
+            TestClientId, proof: new[] { original });
+        await repo.UpdateResolutionAsync(id, "resolved", start.AddMinutes(1).ToString("O"), "No new matching records; not proof of repair.",
+            new object[] { new { metric_id = original.MetricId, label = "Application crash records since diagnosis", value = "0 found",
+                status = "normal", window_kind = "since_diagnosis", window_start = start, window_end = start.AddMinutes(1) } });
+        db.ChangeTracker.Clear();
+        var loaded = (await repo.GetSessionAsync(id))!;
+        foreach (var session in new[] { loaded, (await repo.GetSessionsAsync()).Single() })
+        {
+            var historical = Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(session.Proof));
+            Assert.Equal("rolling_history", historical.GetProperty("window_kind").GetString());
+            Assert.Equal(start.AddDays(-7), historical.GetProperty("window_start").GetDateTimeOffset());
+            Assert.Equal(start, historical.GetProperty("window_end").GetDateTimeOffset());
+            Assert.Equal("2 found", historical.GetProperty("value").GetString());
+            var followUp = Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(session.ResolutionProof));
+            Assert.Equal("since_diagnosis", followUp.GetProperty("window_kind").GetString());
+            Assert.Equal(start, followUp.GetProperty("window_start").GetDateTimeOffset());
+            Assert.Equal("0 found", followUp.GetProperty("value").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task LegacyCheck_DoesNotInventOriginalReadings()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var id = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), new HardwareProfileDto(),
+            "No Active Issue Detected", "Monitor", "High", "Saved legacy summary", TestClientId);
+        var loaded = await repo.GetSessionAsync(id);
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded.Proof);
+        Assert.False(string.IsNullOrWhiteSpace(loaded.RecommendedNextStep));
     }
 
     [Fact]
@@ -252,7 +352,7 @@ public class DiagnosticSessionRepositoryTests
     }
 
     [Fact]
-    public async Task GetRecurringPatternsAsync_WhenMultipleSessionsWithSameCategory_FlagsAsRecurring()
+    public async Task GetRecurringPatternsAsync_CategoryRepetitionAloneDoesNotProveRepeatedWarnings()
     {
         await using var db =
             GetMemoryContext();
@@ -322,13 +422,7 @@ public class DiagnosticSessionRepositoryTests
             System.Text.Json.JsonSerializer.Serialize(
                 patterns);
 
-        Assert.Contains(
-            "\"category\":\"Thermal condition\",\"count\":2,\"is_recurring\":true",
-            json);
-
-        Assert.Contains(
-            "\"category\":\"Boot and startup failure\",\"count\":1,\"is_recurring\":false",
-            json);
+        Assert.Equal("{\"patterns\":[]}", json);
     }
 
     [Fact]
@@ -678,6 +772,82 @@ public class DiagnosticSessionRepositoryTests
         Assert.Single(history[0].Attempts);
         Assert.Equal("clear_user_temp_files", history[0].Attempts[0].ActionCode);
         Assert.Equal("Resolved", history[0].Attempts[0].VerificationStatus);
+    }
+
+    [Fact]
+    public async Task ActionPendingRecheck_DoesNotReusePreActionReadingsAsItsResult()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var id = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), new HardwareProfileDto(),
+            "High Memory Pressure", "Troubleshoot", "High", "Saved check", TestClientId);
+        await repo.UpdateResolutionAsync(id, "still_active", "2026-10-20T10:00:00Z", "Previous check",
+            [new { metric_id = "memory_usage", label = "Memory", value = "91%", status = "high" }]);
+        await repo.MarkNeedsRecheckAsync(id);
+        db.ChangeTracker.Clear();
+        var detail = await repo.GetSessionAsync(id);
+        Assert.NotNull(detail);
+        Assert.Equal("needs_recheck", detail.ResolutionStatus);
+        Assert.Empty(detail.ResolutionProof);
+        Assert.Equal("", detail.ResolutionCheckedAt);
+        Assert.Contains("still needs checking", detail.ResolutionSummary);
+        Assert.Contains(await db.SessionAnswers.Where(a => a.DiagnosticSessionId == id).ToListAsync(),
+            a => a.QuestionKey == "pre_action_readings" && a.AnswerValue.Contains("91%"));
+    }
+
+    [Fact]
+    public async Task RecurringCountsAndHistoryBadgesUseTheSameMeasuredWarnings()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        foreach (var day in new[] { 1, 2 })
+        {
+            var id = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), new HardwareProfileDto(),
+                "High Memory Pressure", "Troubleshoot", "High", "Saved check", TestClientId);
+            db.SessionAnswers.Add(new RigMD.Domain.Entities.SessionAnswer { DiagnosticSessionId = id,
+                QuestionKey = "proof", AnswerValue = "[{\"metric_id\":\"memory_usage\",\"label\":\"Memory\",\"value\":\"91%\",\"status\":\"high\"}]" });
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+        }
+        var saved = await repo.GetSessionsAsync();
+        Assert.All(saved, s => Assert.True(s.IsRecurring));
+        var patterns = new RigMD.Application.Services.RecurringPatternService().BuildPatterns(await repo.GetRecurringSessionsAsync());
+        Assert.Single(patterns.patterns);
+        Assert.Equal(2, patterns.metrics.total_occurrences);
+        Assert.Contains("\"recurring_issues_count\":1", System.Text.Json.JsonSerializer.Serialize(await repo.GetDashboardSummaryAsync()));
+        Assert.Contains("\"count\":2,\"is_recurring\":true", System.Text.Json.JsonSerializer.Serialize(await repo.GetRecurringPatternsAsync()));
+    }
+
+    [Theory]
+    [InlineData("[{\"label\":\"Memory use\",\"value\":\"89%\",\"status\":\"high\",\"meaning\":\"Saved reading\"}]", 1)]
+    [InlineData("", 0)]
+    [InlineData("null", 0)]
+    [InlineData("{}", 0)]
+    [InlineData("invalid json", 0)]
+    [InlineData("[null,42,{}]", 0)]
+    public async Task SavedFollowUpReadings_SurviveReopeningWithoutInventingMissingData(string proof, int expectedCount)
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var id = await repo.SaveDiagnosisAsync(new DiagnosticSymptomPayload(), new HardwareProfileDto(),
+            "High Memory Pressure", "Troubleshoot", "High", "Saved check", TestClientId);
+        db.SessionAnswers.Add(new RigMD.Domain.Entities.SessionAnswer
+        {
+            DiagnosticSessionId = id, QuestionKey = "resolution_proof", AnswerValue = proof
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var detail = await repo.GetSessionAsync(id);
+        var list = await repo.GetSessionsAsync();
+        Assert.NotNull(detail);
+        Assert.Equal(expectedCount, detail.ResolutionProof.Length);
+        Assert.Equal(expectedCount, Assert.Single(list).ResolutionProof.Length);
+        if (expectedCount > 0)
+        {
+            var item = Assert.IsType<System.Text.Json.JsonElement>(detail.ResolutionProof[0]);
+            Assert.Equal("89%", item.GetProperty("value").GetString());
+            Assert.Equal("high", item.GetProperty("status").GetString());
+        }
     }
 
     private sealed class TestCurrentClientProvider

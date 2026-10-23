@@ -17,9 +17,9 @@ public class ThermalDiagnosisTests
             Mode = "scenario", ScenarioId = "overheating-loud-fan", Hardware = hardware
         });
         Assert.Equal("Thermal telemetry unavailable", diagnosis.DiagnosedCategory);
-        Assert.Equal("Low", diagnosis.ConfidenceLabel);
-        Assert.Contains("could not be verified", diagnosis.PrimaryResult);
-        Assert.Contains(diagnosis.Proof, p => p.Value.Contains("CPU temperature unavailable"));
+        Assert.Equal("Partial", diagnosis.ConfidenceLabel);
+        Assert.Contains("Not verified", diagnosis.PrimaryResult);
+        Assert.Contains(diagnosis.Proof, p => p.MetricId == "cpu_temperature" && p.Status == "unknown" && p.Value == "Unavailable");
     }
 
     [Fact]
@@ -30,7 +30,8 @@ public class ThermalDiagnosisTests
             Mode = "component", ComponentIds = new[] { "thermal" }, Hardware = Hardware(null)
         });
         Assert.Equal("Thermal telemetry unavailable", diagnosis.DiagnosedCategory);
-        Assert.Contains(diagnosis.Proof, p => p.Label == "Processor (CPU)" && p.Status == "unknown");
+        Assert.Contains(diagnosis.Proof, p => p.MetricId == "cpu_temperature" && p.Status == "unknown");
+        Assert.Contains(diagnosis.Proof, p => p.MetricId == "cpu_usage" && p.Status == "info");
         var recheck = new ResolutionService().CheckResolution(diagnosis.DiagnosedCategory, Hardware(null), componentIds: "[\"thermal\"]");
         Assert.Equal("needs_recheck", recheck.resolution_status);
         Assert.Contains("unknown", JsonSerializer.Serialize(recheck.resolution_proof));
@@ -41,7 +42,7 @@ public class ThermalDiagnosisTests
     {
         var result = new ResolutionService().CheckResolution("Thermal condition", Hardware(null), scenarioId: "overheating-loud-fan");
         Assert.Equal("needs_recheck", result.resolution_status);
-        Assert.Contains("unavailable", result.resolution_summary);
+        Assert.Contains("Could not verify", result.resolution_summary);
         Assert.DoesNotContain("Nominal", JsonSerializer.Serialize(result.resolution_proof));
     }
 
@@ -59,7 +60,7 @@ public class ThermalDiagnosisTests
     }
 
     [Theory]
-    [InlineData(84.9, "No Active Issue Detected", "resolved")]
+    [InlineData(84.9, "Scanner evidence unavailable", "needs_recheck")]
     [InlineData(85d, "Thermal condition", "still_active")]
     [InlineData(110d, "Thermal condition", "still_active")]
     public void MeasuredTemperatureBoundary_AgreesBetweenScenarioAndRecheck(double temperature, string category, string status)
@@ -81,16 +82,19 @@ public class ThermalDiagnosisTests
         {
             Mode = "scenario", ScenarioId = "overheating-loud-fan", Hardware = hardware
         });
-        Assert.Equal("No Active Issue Detected", result.DiagnosedCategory);
-        Assert.Equal("resolved", new ResolutionService().CheckResolution("Thermal condition", hardware, scenarioId: "overheating-loud-fan").resolution_status);
+        Assert.Equal("Scanner evidence unavailable", result.DiagnosedCategory);
+        Assert.DoesNotContain(result.Proof, p => p.Status == "high");
+        Assert.Contains(result.Proof, p => p.MetricId == "fan_operation" && p.Status == "unknown");
+        Assert.Equal("needs_recheck", new ResolutionService().CheckResolution("Thermal condition", hardware, scenarioId: "overheating-loud-fan").resolution_status);
     }
 
     [Fact]
-    public void CpuLoadOnlyRecheck_DoesNotRequireAnUnrelatedTemperatureSensor()
+    public void CpuRecheck_DistinguishesNormalWorkloadFromUnverifiedTemperature()
     {
         var result = new ResolutionService().CheckResolution("Elevated CPU Utilization", Hardware(null), componentIds: "[\"cpu\"]");
-        Assert.Equal("resolved", result.resolution_status);
-        Assert.DoesNotContain("temperature", result.resolution_summary);
+        Assert.Equal("needs_recheck", result.resolution_status);
+        Assert.Contains("Processor temperature", result.resolution_summary);
+        Assert.Contains("normal", JsonSerializer.Serialize(result.resolution_proof));
     }
 
     [Theory]
@@ -106,7 +110,7 @@ public class ThermalDiagnosisTests
         });
         Assert.Equal("Thermal condition", result.DiagnosedCategory);
         Assert.Contains("90", result.PrimaryResult);
-        Assert.Contains("unavailable", result.PrimaryResult);
+        Assert.Contains("Not verified", result.PrimaryResult);
         Assert.Equal("still_active", new ResolutionService().CheckResolution("Thermal condition", hardware).resolution_status);
     }
 

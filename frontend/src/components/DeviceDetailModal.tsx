@@ -27,13 +27,13 @@ interface DiskTelemetryPoint {
 
 interface TelemetryPoint {
   time: string;
-  CpuUsagePercent: number;
-  RamUsagePercent: number;
+  CpuUsagePercent: number | null;
+  RamUsagePercent: number | null;
   GpuUsagePercent: number;
   NetworkSendKbps: number | null;
   NetworkReceiveKbps: number | null;
   CpuSpeedMhz: number;
-  RamUsedGb: number;
+  RamUsedGb: number | null;
   GpuMemoryUsedGb: number;
   CpuTempCelsius?: number | null;
   CpuTemperatureSource?: string;
@@ -46,13 +46,13 @@ interface TelemetryPoint {
 }
 
 interface RawTelemetryPayload {
-  cpuUsagePercent?: number;
-  ramUsagePercent?: number;
+  cpuUsagePercent?: number | null;
+  ramUsagePercent?: number | null;
   gpuUsagePercent?: number;
   networkSendKbps?: number;
   networkReceiveKbps?: number;
   cpuSpeedMhz?: number;
-  ramUsedGb?: number;
+  ramUsedGb?: number | null;
   gpuMemoryUsedGb?: number;
   cpuTempCelsius?: number | null;
   cpuTemperatureSource?: string;
@@ -112,13 +112,13 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           const newData = [...prevData.slice(-59)];
           newData.push({
             time: new Date().toLocaleTimeString(),
-            CpuUsagePercent: telemetry.cpuUsagePercent || 0,
-            RamUsagePercent: telemetry.ramUsagePercent || 0,
+            CpuUsagePercent: telemetry.cpuUsagePercent ?? null,
+            RamUsagePercent: telemetry.ramUsagePercent ?? null,
             GpuUsagePercent: telemetry.gpuUsagePercent || 0,
             NetworkSendKbps: typeof telemetry.networkSendKbps === 'number' ? telemetry.networkSendKbps : null,
             NetworkReceiveKbps: typeof telemetry.networkReceiveKbps === 'number' ? telemetry.networkReceiveKbps : null,
             CpuSpeedMhz: telemetry.cpuSpeedMhz || 0,
-            RamUsedGb: telemetry.ramUsedGb || 0,
+            RamUsedGb: telemetry.ramUsedGb ?? null,
             GpuMemoryUsedGb: telemetry.gpuMemoryUsedGb || 0,
             CpuTempCelsius: telemetry.cpuTempCelsius,
             CpuTemperatureSource: telemetry.cpuTemperatureSource,
@@ -391,7 +391,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             <div className="grid grid-cols-2 gap-x-8 gap-y-6 md:grid-cols-4">
               {hardwareType === 'CPU' && (
                 <>
-                  <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.CpuUsagePercent || 0}%</p></div>
+                  <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{formatTelemetryValue(latestData ? latestData.CpuUsagePercent : stats.cpu.usage_percent, '%')}</p></div>
                   <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{((latestData?.CpuSpeedMhz || stats.cpu.frequency_mhz) / 1000).toFixed(2)} GHz</p></div>
                   <div><p className="text-xs text-slate-400">Processes</p><p className="text-xl text-white">{latestData?.CpuProcesses || stats.cpu.processes || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Threads</p><p className="text-xl text-white">{latestData?.CpuThreads || stats.cpu.threads || 0}</p></div>
@@ -410,8 +410,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
               {hardwareType === 'Memory' && (
                 <>
-                  <div><p className="text-xs text-slate-400">In use</p><p className="text-xl text-white">{latestData?.RamUsedGb?.toFixed(1) || stats.ram.used_gb} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Available</p><p className="text-xl text-white">{(stats.ram.total_gb - (latestData?.RamUsedGb || stats.ram.used_gb)).toFixed(1)} GB</p></div>
+                  <div><p className="text-xs text-slate-400">In use</p><p className="text-xl text-white">{formatTelemetryValue(latestData ? latestData.RamUsedGb : stats.ram.used_gb, 'GB')}</p></div>
+                  <div><p className="text-xs text-slate-400">Available</p><p className="text-xl text-white">{formatTelemetryValue((latestData ? latestData.RamUsedGb : stats.ram.used_gb) == null ? null : stats.ram.total_gb - (latestData ? latestData.RamUsedGb! : stats.ram.used_gb!), 'GB')}</p></div>
                   <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{stats.ram.speed_mtps || 0} MT/s</p></div>
                   <div><p className="text-xs text-slate-400">Slots used</p><p className="text-xl text-white">{stats.ram.slots_used || 0} of {stats.ram.slots_total || 4}</p></div>
                   <div><p className="text-xs text-slate-400">Form factor</p><p className="text-xl text-white">{stats.ram.form_factor || 'DIMM'}</p></div>

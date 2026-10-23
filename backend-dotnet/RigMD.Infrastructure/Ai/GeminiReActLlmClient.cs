@@ -170,11 +170,11 @@ public class GeminiReActLlmClient : IReActLlmClient
             }
         });
 
-        var targetScopeText = context.TargetScope.Count > 0
-            ? $"[{string.Join(", ", context.TargetScope)}]"
+        var targetScopeText = context.TargetScope?.Count > 0
+            ? $"[{string.Join(", ", context.TargetScope ?? new List<string>())}]"
             : "[Full System]";
 
-        var scopedSystemRule = context.TargetScope.Count > 0
+        var scopedSystemRule = context.TargetScope?.Count > 0
             ? $" The user has explicitly asked to diagnose: {targetScopeText}. Your PRIMARY verdict must evaluate only these requested components. Do not replace the primary verdict with an unselected component."
             : string.Empty;
 
@@ -446,7 +446,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                         ArgumentsJson = toolName.Equals("inspect_memory_and_processes", StringComparison.OrdinalIgnoreCase)
                             ? "{\"topN\":10,\"sortBy\":\"memory\"}"
                             : "{}",
-                        Thought = $"Scoped component check for [{string.Join(", ", context.TargetScope)}]: running '{toolName}'."
+                        Thought = $"Scoped component check for [{string.Join(", ", context.TargetScope ?? new List<string>())}]: running '{toolName}'."
                     })
                     .ToList();
 
@@ -455,7 +455,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                     return new ReActModelTurnDecision
                     {
                         EngineName = "RigMD Local Tool-Calling ReAct Engine",
-                        Thought = $"The user explicitly requested to diagnose [{string.Join(", ", context.TargetScope)}]. Running only the mapped component tool(s): {string.Join(", ", scopedCalls.Select(c => $"'{c.ToolName}'"))}.",
+                        Thought = $"The user explicitly requested to diagnose [{string.Join(", ", context.TargetScope ?? new List<string>())}]. Running only the mapped component tool(s): {string.Join(", ", scopedCalls.Select(c => $"'{c.ToolName}'"))}.",
                         ToolCalls = scopedCalls
                     };
                 }
@@ -649,6 +649,24 @@ public class GeminiReActLlmClient : IReActLlmClient
         double ramUsagePercent = ExtractNestedDouble(memObs?.ObservationJson, "memory", "usagePercent");
         double browserMemMb = ExtractNestedDouble(memObs?.ObservationJson, "browserSummary", "browserMemoryMb");
 
+        if (context.DiagnosedCategory.Contains("memory", StringComparison.OrdinalIgnoreCase) ||
+            System.Text.RegularExpressions.Regex.IsMatch(context.DiagnosedCategory, @"\bram\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return new ReActModelTurnDecision
+            {
+                EngineName = "RigMD Local Tool-Calling ReAct Engine",
+                Thought = "Memory readings require review; storage cleanup is not a memory remedy.",
+                FinalProposal = new ReActFinalProposal
+                {
+                    RootCauseAnalysis = memObs?.ObservationSummary ?? "Current memory readings could not be verified.",
+                    ConfidenceLevel = memObs == null ? "Low" : "Medium",
+                    RecommendedToolName = null,
+                    RemediationRationale = "Save work and review specific unused apps before choosing which to close.",
+                    EvidenceCitations = evidence
+                }
+            };
+        }
+
         // 1. Network scenario or network component scope
         if (netObs != null && (normalizedScenario == "network-problem" || combinedText.Contains("network") || combinedText.Contains("dns") || combinedText.Contains("internet") || combinedText.Contains("ping")))
         {
@@ -659,7 +677,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = $"Live network inspection reported: {netObs.ObservationSummary}",
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = "flush_dns_cache",
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = "Flushing the Windows DNS Client resolver cache purges stale or cached domain mappings without dropping active connections.",
@@ -689,7 +707,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = thermalSummary,
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = toolName,
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = toolName == "terminate_processes"
@@ -734,7 +752,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = driverSummary,
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = toolName,
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = toolName == "rescan_plug_and_play_devices"
@@ -775,7 +793,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = crashSummary,
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = toolName,
                     RecommendedToolArgumentsJson = toolName == "clear_temp_files" ? "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}" : "{}",
                     RemediationRationale = toolName == "run_system_file_checker"
@@ -808,7 +826,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = bootSummary,
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = "clear_temp_files",
                     RecommendedToolArgumentsJson = "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}",
                     RemediationRationale = $"Purging unlocked temporary files in %TEMP% (~{userTempMb:F1} MB measured) reduces boot-time directory scanning overhead.",
@@ -835,7 +853,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = batterySummary,
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = "terminate_processes",
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = "Closing heavy background processes lowers CPU wake residency and extends battery runtime.",
@@ -853,7 +871,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = $"Live storage and process inspection found {browserCacheMb:F1} MB of accumulated browser disk caches alongside {browserMemMb:F0} MB of active browser RAM usage.",
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = "clear_browser_cache",
                     RecommendedToolArgumentsJson = "{\"browsers\":[\"chrome\",\"edge\",\"firefox\"]}",
                     RemediationRationale = "Clearing browser disk caches reclaims storage and removes stale cached web assets while preserving passwords, cookies, and history.",
@@ -871,7 +889,7 @@ public class GeminiReActLlmClient : IReActLlmClient
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = $"Live storage inspection measured {wuCacheMb:F1} MB in the Windows Update Download cache.",
-                    ConfidenceLevel = "High",
+                    ConfidenceLevel = "NotRated",
                     RecommendedToolName = "clear_windows_update_cache",
                     RecommendedToolArgumentsJson = "{}",
                     RemediationRationale = "Stopping wuauserv and purging SoftwareDistribution\\Download clears stale update packages and reclaims disk space.",
@@ -921,7 +939,7 @@ public class GeminiReActLlmClient : IReActLlmClient
             FinalProposal = new ReActFinalProposal
             {
                 RootCauseAnalysis = rootCause,
-                ConfidenceLevel = "High",
+                ConfidenceLevel = "NotRated",
                 RecommendedToolName = "clear_temp_files",
                 RecommendedToolArgumentsJson = "{\"includeWindowsTemp\":false,\"minAgeMinutes\":0}",
                 RemediationRationale = $"Purging unlocked temporary files in %TEMP% (~{userTempMb:F1} MB measured) safely reclaims disk space and removes stale application temp artifacts without disrupting running work.",

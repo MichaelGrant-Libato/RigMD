@@ -58,6 +58,7 @@ public class QueryStartupAppsTool : IRigMdAgentTool
 
         var startupItems = new List<object>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var warnings = new List<string>();
 
         try
         {
@@ -79,23 +80,26 @@ public class QueryStartupAppsTool : IRigMdAgentTool
                 });
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore WMI query errors and fall back to registry inspection
+            warnings.Add($"WMI startup entries could not be read: {ex.Message}");
         }
 
-        ReadRunKey(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Run", "HKCU\\Run", seenNames, startupItems);
-        ReadRunKey(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\Run", "HKLM\\Run", seenNames, startupItems);
+        ReadRunKey(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Run", "HKCU\\Run", seenNames, startupItems, warnings);
+        ReadRunKey(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\Run", "HKLM\\Run", seenNames, startupItems, warnings);
 
         var payload = new
         {
             startupAppCount = startupItems.Count,
-            highImpactBootContention = startupItems.Count >= 8,
+            capturedAtUtc = DateTimeOffset.UtcNow,
+            highImpactBootContention = (bool?)null,
+            impactMeasured = false,
+            warnings,
             startupItems
         };
 
         var summary =
-            $"Detected {startupItems.Count} Windows startup application(s) configured to launch at sign-in{(startupItems.Count >= 8 ? " (elevated startup contention)" : "")}.";
+            $"Observed {startupItems.Count} startup entry/entries. Startup impact and boot duration were not measured. {(warnings.Count > 0 ? "Some sources could not be read; the list may be incomplete." : "This is an entry list, not a boot-performance test.")}";
 
         return Task.FromResult(new AgentToolExecutionResult
         {
@@ -112,7 +116,8 @@ public class QueryStartupAppsTool : IRigMdAgentTool
         string subKeyPath,
         string locationLabel,
         HashSet<string> seenNames,
-        List<object> items)
+        List<object> items,
+        List<string> warnings)
     {
         try
         {
@@ -139,9 +144,9 @@ public class QueryStartupAppsTool : IRigMdAgentTool
                 });
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore registry permission errors
+            warnings.Add($"{locationLabel} could not be read: {ex.Message}");
         }
     }
 }

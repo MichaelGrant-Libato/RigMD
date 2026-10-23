@@ -2,6 +2,10 @@ namespace RigMD.Application.Models;
 
 public class CpuStatsDto
 {
+    public bool? UsageAvailable { get; set; }
+    public string UsageSource { get; set; } = "Unavailable";
+    public DateTimeOffset? UsageCapturedAtUtc { get; set; }
+    public double? UsageWindowSeconds { get; set; }
     public string Name { get; set; } = string.Empty;
     public double UsagePercent { get; set; }
     public int Cores { get; set; }
@@ -74,6 +78,7 @@ public class GpuStatsDto
 
 public class MemoryStatsDto
 {
+    public bool? UsageAvailable { get; set; }
     public double TotalGb { get; set; }
     public double UsedGb { get; set; }
     public double UsagePercent { get; set; }
@@ -139,6 +144,7 @@ public class ProcessAppDto
 
 public class NetworkStatsDto
 {
+    public bool? QuerySucceeded { get; set; }
     public bool HasActiveAdapter { get; set; }
     public string AdapterName { get; set; } = string.Empty;
     public bool HasIpv4Address { get; set; }
@@ -157,6 +163,8 @@ public class NetworkStatsDto
 
 public class BatteryStatsDto
 {
+    public bool? QuerySucceeded { get; set; }
+    public bool? ChargeAvailable { get; set; }
     public bool HasBattery { get; set; }
     public int EstimatedChargeRemaining { get; set; }
     public int BatteryStatus { get; set; }
@@ -166,7 +174,7 @@ public class BatteryStatsDto
     // Laptop UI Properties
     public bool IsCharging { get; set; }
     public int ChargePercent { get; set; }
-    public string HealthStatus { get; set; } = "Good";
+    public string HealthStatus { get; set; } = "Not measured";
 }
 
 public class DisplayStatsDto
@@ -197,6 +205,7 @@ public class WindowsEventSummaryDto
 
 public class StabilityEventSnapshotDto
 {
+    public bool? QuerySucceeded { get; set; }
     public string WindowDescription { get; set; } = "Last 7 days";
     public string? QueryWarning { get; set; }
     public List<WindowsEventSummaryDto> ApplicationCrashEvents { get; set; } = new();
@@ -205,6 +214,7 @@ public class StabilityEventSnapshotDto
 
 public class HardwareProfileDto
 {
+    public bool? DeviceErrorsAvailable { get; set; }
     public string DeviceName { get; set; } = string.Empty;
     public string DeviceType { get; set; } = "Unknown";
     public string OsVersion { get; set; } = string.Empty;

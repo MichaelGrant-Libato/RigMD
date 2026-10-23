@@ -105,8 +105,9 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var deviceType = _deviceTypeProvider.GetDeviceType();
         var battery = _batteryProvider.GetBatteryStats();
         var presence = BuildPresenceProbe(deviceType, battery, gpuStats);
+        var deviceErrors = GetDeviceErrors(out var deviceErrorsAvailable);
 
-        return new HardwareProfileDto
+        var profile = new HardwareProfileDto
         {
             DeviceName = _osProvider.GetDeviceName(),
             DeviceType = deviceType,
@@ -117,13 +118,13 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             ActivePowerPlan = _powerProvider.GetActivePowerPlan(),
             ConnectedDisplays = _displayProvider.GetConnectedDisplays(),
             Displays = _displayProvider.GetDisplays(),
-            DeviceErrors = GetDeviceErrors(),
+            DeviceErrors = deviceErrors,
+            DeviceErrorsAvailable = deviceErrorsAvailable,
             
             Battery = battery,
             
             Cpu = cpuStats,
             Gpu = gpuStats,
-            Ram = _memoryProvider.GetMemoryStats(),
             Network = _networkProvider.GetNetworkStats(),
             
             StorageDrives = storageDrives,
@@ -131,8 +132,12 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             
             ProcessInsights = _processProvider.GetProcessInsights(),
             StabilityEvents = GetStabilityEvents(),
+            Ram = _memoryProvider.GetMemoryStats(),
             Presence = presence
         };
+        // Long inventory/network queries must not publish an earlier activity reading as current.
+        _cpuProvider.RefreshActivity(cpuStats);
+        return profile;
     }
 
     public HardwarePresenceProbeDto GetHardwarePresenceProbe()
@@ -189,17 +194,18 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         probe.Components["battery"] = new ComponentPresenceInfoDto
         {
             ComponentId = "battery",
-            Status = hasBattery ? nameof(ComponentStatus.Present) : nameof(ComponentStatus.NotPresent),
-            IsSelectable = hasBattery,
-            Badge = hasBattery ? "Battery Present" : "Not Present (Desktop PC)",
-            Reason = hasBattery ? null : "No battery detected on this device"
+            Status = battery?.QuerySucceeded != true ? "Unknown" : hasBattery ? nameof(ComponentStatus.Present) : nameof(ComponentStatus.NotPresent),
+            IsSelectable = battery?.QuerySucceeded != true || hasBattery,
+            Badge = battery?.QuerySucceeded != true ? "Detection unavailable" : hasBattery ? "Battery Present" : "Not Present",
+            Reason = battery?.QuerySucceeded != true ? "Battery detection could not be completed." : hasBattery ? null : "Windows reported no battery."
         };
 
         return probe;
     }
 
-    private List<DeviceErrorDto> GetDeviceErrors()
+    private List<DeviceErrorDto> GetDeviceErrors(out bool available)
     {
+        available = false;
         var errors = new List<DeviceErrorDto>();
         try
         {
@@ -221,6 +227,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
                     Description = $"Device reported error code {errorCode}. Status: {status}"
                 });
             }
+            available = true;
         }
         catch
         {
@@ -242,9 +249,9 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var timeDiffMs = (long)TimeSpan.FromHours(hoursBack).TotalMilliseconds;
 
         var applicationQuery =
-            $"*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1026 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+            $"*[System[((EventID=1000 and Provider[@Name='Application Error']) or (EventID=1001 and Provider[@Name='Windows Error Reporting']) or (EventID=1002 and Provider[@Name='Application Hang']) or (EventID=1026 and Provider[@Name='.NET Runtime'])) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
         var systemQuery =
-            $"*[System[(EventID=41 or EventID=1001 or EventID=6008 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+            $"*[System[((EventID=41 and Provider[@Name='Microsoft-Windows-Kernel-Power']) or (EventID=1001 and (Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] or Provider[@Name='BugCheck'])) or (EventID=6008 and Provider[@Name='EventLog'])) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
 
         var warnings = new List<string>();
 
@@ -262,6 +269,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         {
             snapshot.QueryWarning = string.Join(" | ", warnings.Distinct());
         }
+        snapshot.QuerySucceeded = warnings.Count == 0;
 
         return snapshot;
     }
@@ -306,6 +314,9 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
 
             var stdout = stdoutTask.GetAwaiter().GetResult();
             var stderr = stderrTask.GetAwaiter().GetResult();
+
+            if (process.ExitCode != 0)
+                warnings.Add($"{logName}: event query failed (exit code {process.ExitCode}).");
 
             if (!string.IsNullOrWhiteSpace(stderr) &&
                 !stderr.Contains("No events were found", StringComparison.OrdinalIgnoreCase))

@@ -6,6 +6,66 @@ namespace RigMD.Tests.Infrastructure;
 public class GeminiExplanationReaderTests
 {
     [Theory]
+    [InlineData("Available")]
+    [InlineData("Partial")]
+    [InlineData("Unavailable")]
+    [InlineData("High")]
+    public async Task LocalExplanationDoesNotMisrepresentCoverageAsDiagnosticCertainty(string coverage)
+    {
+        var answer = await new OfflineAiExplainer().GenerateExplanationWithSourceAsync(
+            new RigMD.Domain.Rules.DiagnosticResult
+            {
+                DiagnosedCategory = "High Memory Pressure", ConfidenceLabel = coverage,
+                AllLiveProof = [new() { Label = "Physical Memory (RAM)", Value = "25%", Status = "normal" },
+                    new() { Label = "Application memory warning", Value = "Reported warning", Status = "high" }]
+            }, new RigMD.Domain.Rules.DiagnosticSymptomPayload());
+        Assert.DoesNotContain("certainty:", answer.Text);
+        Assert.DoesNotContain("consuming a high share", answer.Text);
+        Assert.Contains("separately from the total RAM", answer.Text);
+    }
+
+    [Fact]
+    public void AcceptedGeminiResponseCarriesExplicitSourceAndReturnedModelVersion()
+    {
+        using var json = JsonDocument.Parse("""{"modelVersion":"gemini-test-001","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"Measured memory use is high."}]}}]}""");
+        var answer = GeminiAiExplainer.ReadExplanationResponse(json.RootElement, "requested-model");
+        Assert.NotNull(answer);
+        Assert.Equal("gemini", answer.Source);
+        Assert.Equal("gemini-test-001", answer.Model);
+        Assert.Equal("Measured memory use is high.", answer.Text);
+    }
+
+    [Fact]
+    public void MissingModelVersionDoesNotTurnTheRequestedModelIntoAClaimAboutTheReturnedModel()
+    {
+        using var json = JsonDocument.Parse("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"Measured memory use is high."}]}}]}""");
+        var answer = GeminiAiExplainer.ReadExplanationResponse(json.RootElement, "requested-model");
+        Assert.NotNull(answer);
+        Assert.Equal("gemini", answer.Source);
+        Assert.Null(answer.Model);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"candidates\":null}")]
+    [InlineData("{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}]}")]
+    public void RejectedResponseDoesNotReceiveGeminiAttribution(string value)
+    {
+        using var json = JsonDocument.Parse(value);
+        Assert.Null(GeminiAiExplainer.ReadExplanationResponse(json.RootElement, "test-model"));
+    }
+
+    [Fact]
+    public async Task BuiltInGuidanceIsExplicitlyLocal_NotGemini()
+    {
+        var answer = await new OfflineAiExplainer().GenerateExplanationWithSourceAsync(
+            new RigMD.Domain.Rules.DiagnosticResult { DiagnosedCategory = "High Memory Pressure", ActionCategory = "Troubleshoot", ConfidenceLabel = "High" },
+            new RigMD.Domain.Rules.DiagnosticSymptomPayload());
+        Assert.Equal("local", answer.Source);
+        Assert.Null(answer.Model);
+    }
+
+    [Theory]
     [InlineData("Close unused apps")]
     [InlineData("Close **unused apps**")]
     [InlineData("- Close unused apps\n- Check memory")]

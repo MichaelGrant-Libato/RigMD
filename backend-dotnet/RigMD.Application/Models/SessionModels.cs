@@ -48,6 +48,12 @@ public class DiagnosticSessionDto
     [JsonPropertyName("ai_explanation")]
     public string AiExplanation { get; set; } = string.Empty;
 
+    [JsonPropertyName("explanation_source")]
+    public string ExplanationSource { get; set; } = string.Empty;
+
+    [JsonPropertyName("explanation_model")]
+    public string ExplanationModel { get; set; } = string.Empty;
+
     [JsonPropertyName("is_recurring")]
     public bool IsRecurring { get; set; }
 
@@ -80,6 +86,9 @@ public class DiagnosticSessionDto
 
     [JsonPropertyName("resolution_proof")]
     public object[] ResolutionProof { get; set; } = Array.Empty<object>();
+
+    [JsonPropertyName("proof")]
+    public object[] Proof { get; set; } = Array.Empty<object>();
 
     [JsonPropertyName("last_action_status")]
     public string LastActionStatus { get; set; } = string.Empty;
@@ -145,6 +154,12 @@ public class RemediationRunDto
 /// </summary>
 public class ActionAttemptDto
 {
+    [JsonPropertyName("execution_summary")]
+    public string? ExecutionSummary { get; set; }
+
+    [JsonPropertyName("proof")]
+    public List<ExecutionProof> Proof { get; set; } = new();
+
     [JsonPropertyName("action_code")]
     public string ActionCode { get; set; } = string.Empty;
 

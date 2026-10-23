@@ -1,3 +1,4 @@
+import { plainDiagnosticText, friendlyActionCategory } from '../lib/diagnosticLanguage';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -365,17 +366,17 @@ function CategoryBadge({ category }: { category: string }) {
     <span
       className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getCategoryStyle()}`}
     >
-      {category}
+      {plainDiagnosticText(category)}
     </span>
   );
 }
 
 function friendlyAction(action: string) {
   const value = action.toLowerCase();
-  if (value.includes('escalate')) return 'Get help';
-  if (value.includes('troubleshoot')) return 'Try a fix';
-  if (value.includes('maintain')) return 'Care tips';
-  if (value.includes('monitor')) return 'Watch for now';
+  if (value.includes('escalate')) return friendlyActionCategory('Escalate');
+  if (value.includes('troubleshoot')) return friendlyActionCategory('Troubleshoot');
+  if (value.includes('maintain')) return friendlyActionCategory('Maintain');
+  if (value.includes('monitor')) return friendlyActionCategory('Monitor');
   return action;
 }
 
@@ -395,10 +396,10 @@ function WarningSignCard({ row }: { row: WarningSignRow }) {
     >
       <span className="flex min-h-[184px] w-full flex-col p-5">
         <span className="flex min-h-8 items-start justify-between gap-3">
-          <span className="min-w-0 text-base font-bold text-white">{row.warning_sign}</span>
+          <span className="min-w-0 text-base font-bold text-white">{plainDiagnosticText(row.warning_sign)}</span>
           <ActionBadge action={row.action} />
         </span>
-        <span className="mt-3 text-sm leading-relaxed text-slate-400">{row.meaning}</span>
+        <span className="mt-3 text-sm leading-relaxed text-slate-400">{plainDiagnosticText(row.meaning)}</span>
         {row.observed && (
           <span className={`mt-2 text-xs font-semibold ${getObservedLabelClass(row.action)}`}>
             Found in saved checks{row.observed_count > 1 ? ` (${row.observed_count} times)` : ''}
@@ -424,7 +425,7 @@ function WarningSignCard({ row }: { row: WarningSignRow }) {
             <span className="grid gap-4 border-t border-[var(--rigmd-border)] px-5 py-4 text-sm leading-relaxed">
               <span className="grid gap-1">
                 <span className="font-semibold text-slate-200">What to look for</span>
-                <span className="text-slate-400">{row.threshold}</span>
+                <span className="text-slate-400">{plainDiagnosticText(row.threshold)}</span>
               </span>
               <span className="grid gap-1">
                 <span className="font-semibold text-slate-200">Next step</span>

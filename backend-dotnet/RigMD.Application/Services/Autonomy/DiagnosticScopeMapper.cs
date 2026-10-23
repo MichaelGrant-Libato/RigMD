@@ -98,8 +98,6 @@ public static class DiagnosticScopeMapper
                 case "memory":
                     tier0.Add("inspect_memory_and_processes");
                     remediation.Add("terminate_processes");
-                    remediation.Add("clear_browser_cache");
-                    remediation.Add("clear_temp_files");
                     break;
 
                 case "storage":
@@ -118,6 +116,7 @@ public static class DiagnosticScopeMapper
 
                 case "gpu":
                 case "display":
+                    tier0.Add("inspect_full_device_profile");
                     tier0.Add("inspect_gpu_and_displays");
                     tier0.Add("inspect_gpu_status");
                     remediation.Add("restart_windows_explorer");
@@ -126,6 +125,7 @@ public static class DiagnosticScopeMapper
                 case "drivers":
                 case "peripherals":
                 case "audio":
+                    tier0.Add("inspect_full_device_profile");
                     tier0.Add("inspect_gpu_and_displays");
                     tier0.Add("query_windows_event_logs");
                     remediation.Add("rescan_plug_and_play_devices");
@@ -164,26 +164,31 @@ public static class DiagnosticScopeMapper
         string? scenarioId,
         string? diagnosedCategory)
     {
+        if (IsMemoryFinding(diagnosedCategory)) return AllowsMemoryAction(diagnosisMode, componentIds, scenarioId, diagnosedCategory)
+            ? new[] { "terminate_processes" } : Array.Empty<string>();
         if (string.Equals(diagnosisMode, "component", StringComparison.OrdinalIgnoreCase))
         {
             var (_, remediation) = GetAllowedToolsForComponents(componentIds);
-            if (remediation.Count > 0)
-            {
-                return remediation.ToList();
-            }
+            return remediation.ToList();
         }
 
         if (string.Equals(diagnosisMode, "scenario", StringComparison.OrdinalIgnoreCase))
         {
-            var scenarioTools = GetAllowedRemediationToolsForScenario(scenarioId);
-            if (scenarioTools.Count > 0)
-            {
-                return scenarioTools;
-            }
+            return GetAllowedRemediationToolsForScenario(scenarioId);
         }
-
-        return GetAllowedRemediationToolsForCategory(diagnosedCategory);
+        return string.IsNullOrWhiteSpace(diagnosisMode) || string.Equals(diagnosisMode, "full", StringComparison.OrdinalIgnoreCase)
+            ? GetAllowedRemediationToolsForCategory(diagnosedCategory) : Array.Empty<string>();
     }
+
+    public static bool AllowsMemoryAction(string? diagnosisMode, IEnumerable<string> componentIds, string? scenarioId, string? diagnosedCategory)
+        => diagnosisMode?.Trim().ToLowerInvariant() switch
+        {
+            "full" => true,
+            "component" => componentIds.Any(id => NormalizeComponentId(id) == "memory"),
+            "scenario" => NormalizeScenarioId(scenarioId) is "slow-system" or "stuttering-freezing",
+            null or "" => IsMemoryFinding(diagnosedCategory),
+            _ => false
+        };
 
     public static IReadOnlyList<string> GetAllowedRemediationToolsForScenario(string? scenarioId)
     {
@@ -206,13 +211,14 @@ public static class DiagnosticScopeMapper
     public static IReadOnlyList<string> GetAllowedRemediationToolsForCategory(string? diagnosedCategory)
     {
         var category = (diagnosedCategory ?? string.Empty).ToLowerInvariant();
+        if (IsMemoryFinding(category)) return new[] { "terminate_processes" };
 
         if (category.Contains("network") || category.Contains("dns") || category.Contains("internet"))
         {
             return new[] { "flush_dns_cache" };
         }
 
-        if (category.Contains("driver") || category.Contains("display") || category.Contains("pnp") || category.Contains("usb") || category.Contains("device manager"))
+        if (category.Contains("device status warning") || category.Contains("driver") || category.Contains("display") || category.Contains("pnp") || category.Contains("usb") || category.Contains("device manager"))
         {
             return category.Contains("display")
                 ? new[] { "restart_windows_explorer", "rescan_plug_and_play_devices", "run_system_file_checker" }
@@ -251,6 +257,10 @@ public static class DiagnosticScopeMapper
 
         return Array.Empty<string>();
     }
+
+    private static bool IsMemoryFinding(string? category) =>
+        (category ?? "").Contains("memory", StringComparison.OrdinalIgnoreCase) ||
+        System.Text.RegularExpressions.Regex.IsMatch(category ?? "", @"\bram\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Explicit Scenario-to-Tool Mapping Table for "Check a Problem" workflows.
@@ -308,6 +318,7 @@ public static class DiagnosticScopeMapper
 
             "app-crashes" => new List<ReActToolCallRequest>
             {
+                new() { ToolName = "inspect_memory_and_processes", ArgumentsJson = "{}", Thought = "Inspect current memory pressure separately from historical crash records." },
                 new()
                 {
                     ToolName = "query_windows_event_logs",
@@ -404,6 +415,7 @@ public static class DiagnosticScopeMapper
 
             "driver-error" or "no-display" => new List<ReActToolCallRequest>
             {
+                new() { ToolName = "inspect_full_device_profile", ArgumentsJson = "{}", Thought = "Read reported Device Manager codes; graphics metadata alone does not query device errors." },
                 new()
                 {
                     ToolName = "inspect_gpu_and_displays",
