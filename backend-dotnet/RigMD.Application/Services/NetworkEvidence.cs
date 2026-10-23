@@ -18,11 +18,20 @@ internal static class NetworkEvidence
         }
         void Flag(string id, string label, bool good, string detail) =>
             Add(id, label, good ? "Reported" : "Not reported", good ? "normal" : "high", detail);
-        Flag("network_adapter", "Active IPv4 adapter", net.HasActiveAdapter, "This check is limited to an active IPv4 route; it does not certify all IPv6, VPN or local-only connections.");
+        var adapterSource = string.IsNullOrWhiteSpace(net.AdapterName)
+            ? "The selected adapter name was not reported."
+            : $"Selected adapter: {net.AdapterName}.";
+        var routeContext = net.HasDefaultGateway
+            ? "A default IPv4 gateway is configured on this adapter; that alone does not verify internet access."
+            : "No default IPv4 gateway was reported on this adapter; it may provide only a local or virtual-network connection.";
+        Flag("network_adapter", "Active IPv4 adapter", net.HasActiveAdapter,
+            net.HasActiveAdapter
+                ? $"{adapterSource} Windows reported an operationally up adapter with an IPv4 address. {routeContext} This check does not certify all IPv6, VPN or local-only connections."
+                : "No operationally up adapter with an IPv4 address was reported. This does not certify IPv6, VPN or local-only connectivity.");
         if (!net.HasActiveAdapter) return proof;
-        Flag("network_address", "IPv4 address", net.HasIpv4Address, "An address is configuration evidence, not an internet-access test.");
+        Flag("network_address", "IPv4 address", net.HasIpv4Address, $"{adapterSource} An address is configuration evidence, not an internet-access test.");
         Flag("network_gateway", "Default IPv4 gateway", net.HasDefaultGateway, "A missing default route may prevent access outside the local network.");
-        Flag("network_dns_config", "DNS server configuration", net.HasDnsServers, "Configured address-lookup servers are checked separately from a live lookup.");
+        Flag("network_dns_config", "DNS server configuration", net.HasDnsServers, $"{adapterSource} Configured address-lookup servers are checked separately from a live lookup; their presence does not establish that they are reachable.");
         Flag("network_dns", "Website address lookup", net.DnsResolutionSucceeded, $"Target: {net.DnsTestHost}. {net.DnsResolutionMessage}");
         Add("network_latency", "Connection test latency", net.PingLatencyMs is >= 0 ? $"{net.PingLatencyMs} ms" : "Unavailable",
             net.PingLatencyMs is null or < 0 ? "unknown" : net.PingLatencyMs >= LatencyWarningMs ? "high" : "normal",

@@ -16,6 +16,24 @@ const stats = { device_name: 'Test Laptop', os_version: 'Windows 11', ram: { tot
 const dashboard = { server_time: time, totals: { total_sessions: 100, this_month_count: 95, escalated_count: 0 }, recurring_issues_count: 6, warning_signs_active_count: 0 };
 const report = (overrides = {}) => buildReportText({ stats, dashboard, hardwareUpdatedAt: new Date('2026-10-23T12:36:00Z'), sessions: [original], historyUnavailable: false, generatedAt: new Date(time), ...overrides });
 
+test('new network warnings use the same evidence-based label in the selected check and history', () => {
+  const network = { ...original, session_id: 'network-id', session_code: 'S-104', diagnosis_mode: 'component', component_ids: '["network"]',
+    diagnosed_category: 'No active issue detected', action_category: 'Monitor', resolution_status: 'still_active', resolution_checked_at: time,
+    resolution_summary: 'Still active.', proof: [
+      { metric_id: 'network_gateway', label: 'Default IPv4 gateway', value: 'Reported', status: 'normal' },
+      { metric_id: 'network_latency', label: 'Connection response time', value: '15 ms', status: 'normal' }],
+    resolution_proof: [
+      { metric_id: 'network_gateway', label: 'Default IPv4 gateway', value: 'Not reported', status: 'high', meaning: 'Selected adapter: vEthernet (WSL). No default IPv4 gateway was reported.' },
+      { metric_id: 'network_latency', label: 'Connection response time', value: 'Unavailable', status: 'unknown' }] };
+  const text = report({ sessions: [network], selectedSession: network });
+  assert.match(text, /Latest follow-up\s+: New warnings detected/);
+  assert.match(text, /Follow-up\s+: New warnings detected/);
+  assert.match(text, /vEthernet \(WSL\)/);
+  assert.match(text, /Could not verify: Connection response time/);
+  assert.doesNotMatch(text, /Still active/i);
+  assert.ok(text.includes('15 ms'));
+});
+
 test('full-system scope is distinct from its highest finding', () => {
   const text = report();
   assert.match(text, /Selected check\s+: Full device check/);

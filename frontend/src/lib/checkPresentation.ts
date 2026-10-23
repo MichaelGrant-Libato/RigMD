@@ -62,6 +62,21 @@ export function getCheckStatus(check: CheckPresentationInput) {
   if (!metric) {
     const changes = getFindingChanges(check.proof, check.resolution_proof);
     if (changes?.label) return { ...base, label: changes.label, fallbackText: changes.summary };
+    const latestWarnings = (check.resolution_proof ?? []).filter(warning);
+    if (latestWarnings.length && !(check.proof ?? []).some(warning)) {
+      const newlyDetected = latestWarnings.every(row => {
+        const before = (check.proof ?? []).filter(previous => row.metric_id && previous.metric_id === row.metric_id);
+        return before.length > 0 && before.every(previous => normal(previous) && Boolean(previous.value?.trim()) &&
+          !/unavailable|not verified|not available|could not/i.test(previous.value ?? ''));
+      });
+      const names = (rows: DiagnosticReading[]) => [...new Set(rows.map(row => plainDiagnosticText(row.label || row.metric_id || 'Unnamed reading')))].join(', ');
+      const unavailable = (check.resolution_proof ?? []).filter(row => /unknown|unavailable/i.test(getReadingPresentation(row).status ?? ''));
+      return { ...base, category: 'still_active' as const, label: newlyDetected ? 'New warnings detected' : 'Warnings detected',
+        className: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+        fallbackText: `${newlyDetected ? 'New warnings detected compared with the original check' : 'Warnings detected in the latest saved readings'}: ${names(latestWarnings)}.` +
+          (unavailable.length ? ` Could not verify: ${names(unavailable)}.` : '') +
+          ' This is a current-readings check, not confirmation of a repair or overall device health.' };
+    }
     if (base.category === 'resolved_after_action') {
       const latestWarnings = check.resolution_proof?.some(warning);
       const missingLatest = check.resolution_proof?.some(row => /unknown|unavailable/i.test(getReadingPresentation(row).status ?? ''));
@@ -107,7 +122,7 @@ export function getAdditionalFindingStatus(readings: DiagnosticReading[] = []) {
 export function getLatestCheckSummary(check: CheckPresentationInput) {
   if (!crashMetric(check)) {
     const latest = getCheckStatus(check);
-    return ['Latest result not verified', 'Original warning still detected', 'Other warnings detected'].includes(latest.label)
+    return ['Latest result not verified', 'Original warning still detected', 'Other warnings detected', 'New warnings detected', 'Warnings detected'].includes(latest.label)
       ? latest.fallbackText : check.resolution_summary || latest.fallbackText;
   }
   const parts = [getCheckStatus(check).fallbackText];

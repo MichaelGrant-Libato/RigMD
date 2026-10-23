@@ -21,9 +21,46 @@ test('a processor Monitor check stays partial when its temperature cannot be ver
   const latest = { ...cpu, resolution_status: 'needs_recheck', resolution_proof: cpu.proof };
   assert.equal(getCheckStatus(latest).label, 'Partially checked');
   assert.equal(getCheckStatus({ ...latest, resolution_status: 'resolved' }).label, 'Latest result not verified');
-  assert.equal(getCheckStatus({ ...latest, resolution_status: 'resolved', resolution_proof: [{ metric_id: 'cpu_usage', value: '92%', status: 'high' }] }).label, 'Other warnings detected');
+  assert.equal(getCheckStatus({ ...latest, resolution_status: 'resolved', resolution_proof: [{ metric_id: 'cpu_usage', value: '92%', status: 'high' }] }).label, 'New warnings detected');
   assert.doesNotMatch(getLatestCheckSummary({ ...latest, resolution_status: 'resolved', resolution_summary: 'Everything is normal.',
     resolution_proof: [{ metric_id: 'cpu_usage', value: '92%', status: 'high' }] }), /Everything is normal/);
+});
+
+test('a clear network baseline followed by disconnection is a new warning, not a continuing fault', () => {
+  const row = (metric_id, label, value, status) => ({ metric_id, label, value, status });
+  const baseline = [row('network_gateway', 'Default IPv4 gateway', 'Reported', 'normal'),
+    row('network_dns', 'Website address lookup', 'Reported', 'normal'),
+    row('network_latency', 'Connection response time', '15 ms', 'normal'),
+    row('network_loss', 'Connection test replies lost', '0%', 'normal')];
+  const disconnected = [row('network_gateway', 'Default IPv4 gateway', 'Not reported', 'high'),
+    row('network_dns', 'Website address lookup', 'Not reported', 'high'),
+    row('network_latency', 'Connection response time', 'Unavailable', 'unknown'),
+    row('network_loss', 'Connection test replies lost', 'Unavailable', 'unknown')];
+  for (const resolution_status of ['still_active', 'StillActive', 'resolved', 'needs_recheck']) {
+    const saved = { diagnosis_mode: 'component', component_ids: '["network"]', diagnosed_category: 'No active issue detected',
+      action_category: 'Monitor', proof: baseline, resolution_status, resolution_summary: 'Everything is normal.', resolution_proof: disconnected };
+    assert.equal(getCheckStatus(saved).label, 'New warnings detected');
+    assert.equal(getCheckStatus(saved).category, 'still_active');
+    assert.match(getLatestCheckSummary(saved), /Default IPv4 gateway, Website address lookup/);
+    assert.match(getLatestCheckSummary(saved), /Could not verify: Connection response time, Connection test replies lost/);
+    assert.doesNotMatch(getLatestCheckSummary(saved), /Everything is normal|still active/i);
+    assert.equal(getCheckStatus({ ...saved, resolution_status: 'resolved', resolution_proof: baseline }).label, 'Warning not detected');
+  }
+  assert.equal(baseline[0].value, 'Reported');
+  assert.equal(baseline[2].value, '15 ms');
+});
+
+test('unknown, absent or contradictory baselines do not establish that a warning is new', () => {
+  const current = { metric_id: 'network_gateway', label: 'Default IPv4 gateway', value: 'Not reported', status: 'high' };
+  for (const proof of [undefined, [], [{ ...current, value: 'Unavailable', status: 'unknown' }],
+    [{ ...current, value: 'Unavailable', status: 'normal' }],
+    [{ ...current, value: 'Reported', status: 'normal' }, { ...current, value: 'Unavailable', status: 'unknown' }]]) {
+    const saved = { proof, resolution_status: 'still_active', resolution_proof: [current] };
+    assert.equal(getCheckStatus(saved).label, 'Warnings detected');
+    assert.doesNotMatch(getLatestCheckSummary(saved), /New warnings/);
+  }
+  const persistent = { proof: [current], resolution_status: 'still_active', resolution_proof: [current] };
+  assert.notEqual(getCheckStatus(persistent).label, 'New warnings detected');
 });
 
 test('selected crash check stays primary while memory remains a separate finding', () => {
