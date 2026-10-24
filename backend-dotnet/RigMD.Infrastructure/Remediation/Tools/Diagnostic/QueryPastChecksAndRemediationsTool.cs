@@ -81,6 +81,7 @@ public class QueryPastChecksAndRemediationsTool : IRigMdAgentTool
 
         var sessionEntries = new List<object>();
         int totalRemediationRuns = 0;
+        var warnings = new List<string>();
 
         foreach (var session in recentSessions)
         {
@@ -95,7 +96,7 @@ public class QueryPastChecksAndRemediationsTool : IRigMdAgentTool
             }
             catch
             {
-                // Ignore if no remediation history exists for this session
+                warnings.Add("A saved check's action history could not be read. Missing history is not evidence that no action occurred.");
             }
 
             sessionEntries.Add(new
@@ -133,6 +134,7 @@ public class QueryPastChecksAndRemediationsTool : IRigMdAgentTool
 
         var payload = new
         {
+            warnings,
             totalSavedSessions = allSessions.Count,
             inspectedSessionCount = recentSessions.Count,
             totalRemediationRunsInspected = totalRemediationRuns,
@@ -145,9 +147,10 @@ public class QueryPastChecksAndRemediationsTool : IRigMdAgentTool
             ? string.Join(", ", topHistoricalCategories.Select(c => $"{c.category} ({c.count}x)"))
             : "None";
 
-        var summary = allSessions.Count == 0
+        var summary = (allSessions.Count == 0
             ? "No prior diagnostic checks found in SQLite history (this is the first recorded check on this PC)."
-            : $"Found {allSessions.Count} historical check(s) in SQLite (inspected latest {recentSessions.Count}, with {totalRemediationRuns} remediation run(s)). Top historical categories: {topCatText}.";
+            : $"Found {allSessions.Count} historical check(s) in SQLite (inspected latest {recentSessions.Count}, with {totalRemediationRuns} remediation run(s)). Top historical categories: {topCatText}.") +
+            " Saved history does not establish the current device condition." + (warnings.Count > 0 ? " Some action history could not be read." : "");
 
         return new AgentToolExecutionResult
         {

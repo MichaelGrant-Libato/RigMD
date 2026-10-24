@@ -15,7 +15,7 @@ public class WmiBatteryProvider : IBatteryProvider
 
             if (batteries.Count == 0)
             {
-                return new BatteryStatsDto { HasBattery = false };
+                return new BatteryStatsDto { HasBattery = false, QuerySucceeded = true };
             }
 
             foreach (var obj in batteries)
@@ -39,7 +39,7 @@ public class WmiBatteryProvider : IBatteryProvider
                 var chargeStr = obj["EstimatedChargeRemaining"]?.ToString();
                 var runTimeStr = obj["EstimatedRunTime"]?.ToString();
 
-                int.TryParse(chargeStr, out int charge);
+                var chargeAvailable = int.TryParse(chargeStr, out int charge) && charge is >= 0 and <= 100;
                 int.TryParse(runTimeStr, out int runTime);
 
                 string description = status switch
@@ -63,13 +63,15 @@ public class WmiBatteryProvider : IBatteryProvider
                 return new BatteryStatsDto
                 {
                     HasBattery = true,
+                    QuerySucceeded = true,
+                    ChargeAvailable = chargeAvailable,
                     EstimatedChargeRemaining = charge,
                     BatteryStatus = status,
                     StatusDescription = description,
                     EstimatedRunTime = runTime == 71582788 ? 0 : runTime, // 71582788 usually means calculating
                     IsCharging = isCharging,
                     ChargePercent = charge,
-                    HealthStatus = "Good"
+                    HealthStatus = "Not measured"
                 };
             }
         }
@@ -78,6 +80,6 @@ public class WmiBatteryProvider : IBatteryProvider
             // Ignore
         }
 
-        return new BatteryStatsDto { HasBattery = false };
+        return new BatteryStatsDto { HasBattery = false, QuerySucceeded = false, ChargeAvailable = false };
     }
 }

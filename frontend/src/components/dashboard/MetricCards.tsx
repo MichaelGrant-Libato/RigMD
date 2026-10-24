@@ -3,6 +3,7 @@ import type { HardwareStats } from '../../types/rigmd';
 import { Cpu, MemoryStick, HardDrive, Wifi, Cable, Network, Thermometer } from 'lucide-react';
 import { formatStorageCapacity, storageCapacitySummary, storageUsagePercent, validReading } from '../../lib/storageTelemetry';
 import { validTemperature } from '../../lib/temperatureTelemetry';
+import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../../lib/reviewThresholds';
 
 /* ─── CPU Card ─── */
 export function CpuCard({ stats }: { stats: HardwareStats | null }) {
@@ -12,8 +13,7 @@ export function CpuCard({ stats }: { stats: HardwareStats | null }) {
   const shortName = name.replace(/\(R\)|\(TM\)|CPU|@.*$/gi, '').trim();
 
   const usageColor = usage === null ? 'text-slate-400'
-    : usage >= 90 ? 'text-red-300'
-    : usage >= 70 ? 'text-amber-300'
+    : usage >= REVIEW_THRESHOLDS.cpu ? 'text-amber-300'
     : 'text-emerald-300';
 
   return (
@@ -38,18 +38,19 @@ export function CpuCard({ stats }: { stats: HardwareStats | null }) {
       </div>
       <div className="mt-4">
         <div className="flex items-baseline gap-1.5">
-          <span className={`text-3xl font-bold tabular-nums ${usageColor}`}>
+          <span data-testid="cpu-usage" className={`text-3xl font-bold tabular-nums ${usageColor}`}>
             {usage !== null ? `${Math.round(usage)}%` : '—'}
           </span>
-          <span className="text-xs text-slate-500">usage</span>
+          <span title={`${stats?.cpu?.usage_source || 'Measurement source not recorded'}${stats?.cpu?.usage_window_seconds ? `; average over ${stats.cpu.usage_window_seconds.toFixed(1)} seconds` : ''}`} className="text-xs text-slate-500">activity</span>
         </div>
         <p className="mt-1.5 truncate text-xs text-slate-400">{shortName}</p>
+        {stats?.cpu?.usage_source?.includes('fallback') && <p className="mt-1 text-[11px] text-slate-400">Windows busy-time measurement</p>}
       </div>
       {/* Mini usage bar */}
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.04]">
         <motion.div
           className="h-full rounded-full"
-          style={{ backgroundColor: usage === null ? '#64748b' : usage >= 90 ? '#fb7185' : usage >= 70 ? '#fbbf24' : '#34d399' }}
+          style={{ backgroundColor: usage === null ? '#64748b' : usage >= REVIEW_THRESHOLDS.cpu ? '#fbbf24' : '#34d399' }}
           initial={{ width: 0 }}
           animate={{ width: `${usage ?? 0}%` }}
           transition={{ duration: 0.8, ease: 'easeOut' }}
@@ -71,8 +72,8 @@ export function MemoryCard({ stats }: { stats: HardwareStats | null }) {
   const circ = 2 * Math.PI * r;
   const offset = usage !== null ? circ - (usage / 100) * circ : circ;
 
-  const color = usage === null ? '#64748b' : usage >= 90 ? '#fb7185' : usage >= 75 ? '#fbbf24' : '#34d399';
-  const colorClass = usage === null ? 'text-slate-400' : usage >= 90 ? 'text-red-300' : usage >= 75 ? 'text-amber-300' : 'text-emerald-300';
+  const color = usage === null ? '#64748b' : usage >= REVIEW_THRESHOLDS.memory ? '#fbbf24' : '#34d399';
+  const colorClass = usage === null ? 'text-slate-400' : usage >= REVIEW_THRESHOLDS.memory ? 'text-amber-300' : 'text-emerald-300';
 
   return (
     <motion.div
@@ -102,11 +103,11 @@ export function MemoryCard({ stats }: { stats: HardwareStats | null }) {
           <MemoryStick size={14} className="text-cyan-300" />
           <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Memory</span>
         </div>
-        <p className="mt-2 text-lg font-semibold text-white">
-          {used !== null && total !== null ? `${used.toFixed(1)} / ${total.toFixed(0)} GB` : 'Not available'}
+        <p data-testid="memory-capacity" className="mt-2 text-lg font-semibold text-white">
+          {used !== null && total !== null ? `${used.toFixed(1)} / ${total.toFixed(1)} GB` : 'Not available'}
         </p>
         <p className="mt-0.5 text-xs text-slate-400">
-          {usage === null ? 'Needs a refresh' : usage >= 90 ? 'Needs attention' : usage >= 75 ? 'Keep an eye on it' : 'Working normally'}
+          {usage === null ? 'Needs a refresh' : usage >= REVIEW_THRESHOLDS.memory ? 'Needs attention' : 'Below the review threshold'}
         </p>
       </div>
     </motion.div>
@@ -120,8 +121,7 @@ export function StorageCard({ stats }: { stats: HardwareStats | null }) {
   const capacity = storageCapacitySummary(drives, stats?.disk);
 
   function barColor(percent: number) {
-    if (percent >= 90) return '#fb7185';
-    if (percent >= 75) return '#fbbf24';
+    if (percent >= REVIEW_THRESHOLDS.storage) return '#fbbf24';
     return '#34d399';
   }
 
@@ -194,10 +194,13 @@ export function StorageCard({ stats }: { stats: HardwareStats | null }) {
 export function NetworkCard({ stats }: { stats: HardwareStats | null }) {
   const net = stats?.network ?? null;
   const isWifi = net?.is_wifi ?? false;
-  const latency = net?.ping_latency_ms ?? null;
-  const signal = net?.wifi_signal_strength ?? null;
-  const packetLoss = net?.packet_loss_percent ?? null;
+  const latency = validReading(net?.ping_latency_ms);
+  const rawSignal = validReading(net?.wifi_signal_strength);
+  const signal = rawSignal !== null && rawSignal > 0 && rawSignal <= 100 ? rawSignal : null;
+  const rawLoss = validReading(net?.packet_loss_percent);
+  const packetLoss = rawLoss !== null && rawLoss <= 100 ? rawLoss : null;
   const ip = net?.ip_address ?? null;
+  const state = networkReviewStatus(net);
 
   return (
     <motion.div
@@ -222,27 +225,26 @@ export function NetworkCard({ stats }: { stats: HardwareStats | null }) {
         </div>
 
         {net ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${state === 'high' ? 'border-amber-400/20 bg-amber-500/10 text-amber-300' : state === 'normal' ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-slate-500/20 text-slate-400'}`}>
             {isWifi ? 'Wireless' : 'Wired'}
           </span>
         ) : (
           <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] font-medium text-slate-400">
-            No Link
+            Unavailable
           </span>
         )}
       </div>
 
       <div className="mt-4">
         <p className="text-lg font-semibold text-white">
-          {net ? (isWifi ? 'Wi-Fi' : 'Ethernet') : 'Not available'}
+          {net?.query_succeeded === false ? 'Check unavailable' : net?.has_active_adapter === false ? 'No active IPv4 adapter' : net ? (isWifi ? 'Wi-Fi' : 'Ethernet') : 'Not available'}
         </p>
 
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
           {latency !== null && (
             <span className="flex items-center gap-1 text-xs">
               <span className="text-slate-400">Latency</span>
-              <span className="font-semibold tabular-nums text-cyan-300">{Math.round(latency)}ms</span>
+              <span className={`font-semibold tabular-nums ${latency >= NETWORK_THRESHOLDS.latencyMs ? 'text-amber-300' : 'text-cyan-300'}`}>{Math.round(latency)}ms</span>
             </span>
           )}
           {isWifi && signal !== null && (
@@ -254,7 +256,7 @@ export function NetworkCard({ stats }: { stats: HardwareStats | null }) {
           {packetLoss !== null && (
             <span className="flex items-center gap-1 text-xs">
               <span className="text-slate-400">Packet Loss</span>
-              <span className={`font-semibold tabular-nums ${packetLoss > 2 ? 'text-amber-300' : 'text-emerald-300'}`}>
+              <span className={`font-semibold tabular-nums ${packetLoss >= NETWORK_THRESHOLDS.lossPercent ? 'text-amber-300' : 'text-emerald-300'}`}>
                 {Math.round(packetLoss)}%
               </span>
             </span>
@@ -273,7 +275,7 @@ export function NetworkCard({ stats }: { stats: HardwareStats | null }) {
             /* Wi-Fi Signal indicator bars */
             <div className="mt-3 flex items-end gap-[3px]">
               {[25, 45, 65, 85].map((threshold, i) => {
-                const strength = signal ?? 50;
+                const strength = signal ?? 0;
                 const active = strength >= threshold;
                 return (
                   <motion.div

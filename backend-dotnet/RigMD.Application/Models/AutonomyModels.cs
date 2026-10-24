@@ -84,6 +84,7 @@ public class OrchestrationResult
     public bool Escalated { get; set; }
 
     public string Trace { get; set; } = string.Empty;
+    public string? PersistenceWarning { get; set; }
 }
 
 public enum RemediationAttemptState

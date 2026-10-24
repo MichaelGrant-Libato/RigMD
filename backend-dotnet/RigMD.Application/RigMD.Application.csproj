@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="RigMD.Tests" />
     <ProjectReference Include="..\RigMD.Domain\RigMD.Domain.csproj" />
   </ItemGroup>
 

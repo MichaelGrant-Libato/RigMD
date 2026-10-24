@@ -5,6 +5,7 @@ namespace RigMD.Application.Contracts.Providers;
 public interface ICpuProvider
 {
     CpuStatsDto GetCpuStats();
+    void RefreshActivity(CpuStatsDto cpu) { }
 }
 
 public interface IGpuProvider
@@ -39,6 +40,7 @@ public interface IMotherboardProvider
 public interface IProcessProvider
 {
     ProcessInsightsDto GetProcessInsights();
+    AppProcessObservationDto ObserveApp(string processName) => new(null, null);
 }
 
 public interface INetworkProvider

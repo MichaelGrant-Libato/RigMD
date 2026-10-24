@@ -57,7 +57,11 @@ public class HardwareController : ControllerBase
                 cpu = new
                 {
                     name = profile.Cpu.Name,
-                    usage_percent = profile.Cpu.UsagePercent,
+                    usage_source = profile.Cpu.UsageSource,
+                    usage_captured_at_utc = profile.Cpu.UsageCapturedAtUtc,
+                    usage_window_seconds = profile.Cpu.UsageWindowSeconds,
+                    usage_percent = profile.Cpu.UsageAvailable != false && double.IsFinite(profile.Cpu.UsagePercent) && profile.Cpu.UsagePercent is >= 0 and <= 100
+                        ? (double?)profile.Cpu.UsagePercent : null,
                     cores = profile.Cpu.Cores,
                     threads = profile.Cpu.Threads,
                     frequency_mhz = profile.Cpu.FrequencyMhz,
@@ -77,8 +81,9 @@ public class HardwareController : ControllerBase
                 ram = new
                 {
                     total_gb = profile.Ram.TotalGb,
-                    used_gb = profile.Ram.UsedGb,
-                    usage_percent = profile.Ram.UsagePercent
+                    used_gb = profile.Ram.UsageAvailable == false ? (double?)null : profile.Ram.UsedGb,
+                    usage_percent = profile.Ram.UsageAvailable != false && double.IsFinite(profile.Ram.UsagePercent) && profile.Ram.UsagePercent is >= 0 and <= 100
+                        ? (double?)profile.Ram.UsagePercent : null
                 },
                 device_type = profile.DeviceType,
                 active_power_plan = profile.ActivePowerPlan,
@@ -89,8 +94,14 @@ public class HardwareController : ControllerBase
                     charge_percent = profile.Battery.ChargePercent,
                     health_status = profile.Battery.HealthStatus
                 } : null,
-                network = profile.Network != null && profile.Network.HasActiveAdapter ? new
+                network = profile.Network != null ? new
                 {
+                    query_succeeded = profile.Network.QuerySucceeded,
+                    has_active_adapter = profile.Network.HasActiveAdapter,
+                    has_ipv4_address = profile.Network.HasIpv4Address,
+                    has_default_gateway = profile.Network.HasDefaultGateway,
+                    has_dns_servers = profile.Network.HasDnsServers,
+                    dns_resolution_succeeded = profile.Network.DnsResolutionSucceeded,
                     is_wifi = profile.Network.IsWifi,
                     wifi_signal_strength = profile.Network.WifiSignalStrength,
                     mac_address = profile.Network.MacAddress,

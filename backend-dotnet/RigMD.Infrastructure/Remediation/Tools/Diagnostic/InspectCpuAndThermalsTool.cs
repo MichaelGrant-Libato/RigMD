@@ -87,7 +87,9 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
         var payload = new
         {
             model = cpu.Name,
-            usagePercent = cpu.UsagePercent,
+            capturedAtUtc = DateTimeOffset.UtcNow,
+            usagePercent = cpu.UsageAvailable != false && double.IsFinite(cpu.UsagePercent) && cpu.UsagePercent is >= 0 and <= 100
+                ? (double?)cpu.UsagePercent : null,
             sensorLoadPercent = lhmCpuLoad.HasValue ? Math.Round(lhmCpuLoad.Value, 1) : (double?)null,
             temperatureCelsius = cpu.TemperatureCelsius,
             temperatureSource = cpu.TemperatureSource,
@@ -107,8 +109,10 @@ public class InspectCpuAndThermalsTool : IRigMdAgentTool
             ? $"{cpu.TemperatureCelsius.Value:F1}°C"
             : "CPU sensor unavailable; temperature is not estimated";
 
+        var loadSummary = cpu.UsageAvailable != false && double.IsFinite(cpu.UsagePercent) && cpu.UsagePercent is >= 0 and <= 100
+            ? $"{cpu.UsagePercent:F1}% load" : "activity unavailable";
         var summary =
-            $"CPU '{cpu.Name}' at {cpu.UsagePercent:F1}% load ({cpu.FrequencyMhz:F0}/{cpu.MaxFrequencyMhz:F0} MHz), Temp: {tempSummary}, Source: {cpu.TemperatureSource}, Thermal throttling reported: {cpu.IsThermallyThrottling}.";
+            $"CPU '{cpu.Name}' at {loadSummary} ({cpu.FrequencyMhz:F0}/{cpu.MaxFrequencyMhz:F0} MHz), Temp: {tempSummary}, Source: {cpu.TemperatureSource}, Thermal throttling reported: {cpu.IsThermallyThrottling}.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

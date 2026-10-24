@@ -93,6 +93,7 @@ public class AutonomyController : ControllerBase
     private readonly RigMD.Api.Services.LocalRemediationExecutionGate _executionGate;
     private readonly RemediationApprovalStore _approvals;
     private readonly ICloudAiSession? _cloudSession;
+    private readonly IProcessProvider? _processProvider;
 
     public AutonomyController(
         IAutonomousOrchestrator orchestrator,
@@ -105,7 +106,8 @@ public class AutonomyController : ControllerBase
         IConfiguration? configuration = null,
         RigMD.Api.Services.LocalRemediationExecutionGate? executionGate = null,
         RemediationApprovalStore? approvals = null,
-        ICloudAiSession? cloudSession = null)
+        ICloudAiSession? cloudSession = null,
+        IProcessProvider? processProvider = null)
     {
         _orchestrator = orchestrator;
         _profileService = profileService;
@@ -118,6 +120,7 @@ public class AutonomyController : ControllerBase
         _executionGate = executionGate ?? new();
         _approvals = approvals ?? new(TimeProvider.System);
         _cloudSession = cloudSession;
+        _processProvider = processProvider;
     }
 
     public class PreviewRequest
@@ -148,6 +151,10 @@ public class AutonomyController : ControllerBase
             });
         }
 
+        if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
+            return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
+        if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
+            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         var hardware = _profileService.GetLiveSystemProfile();
 
         var result =
@@ -172,6 +179,8 @@ public class AutonomyController : ControllerBase
         var proposed = result.ProposedTool;
         var action = result.Plan?.PlannedActions.FirstOrDefault();
         var toolName = proposed?.ToolName ?? action?.Id;
+        if (!string.IsNullOrWhiteSpace(toolName) && RepairSupportPolicy.ScopeBlockReason(diagnostic, toolName) is { } scopeReason)
+            return Conflict(new { message = scopeReason });
         if (preview?.CanExecute == true && result.Safety?.IsApproved == true &&
             !string.IsNullOrWhiteSpace(toolName) && _toolRegistry?.GetTool(toolName) != null)
         {
@@ -243,12 +252,17 @@ public class AutonomyController : ControllerBase
     {
         if (!Guid.TryParse(request.SessionId, out var sessionId))
             return BadRequest(new { message = "A valid diagnostic session ID is required." });
-        if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+        var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
+        if (diagnostic == null)
             return NotFound(new { message = "Diagnostic session was not found." });
+        if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
+            return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         var names = SelectedProcessNames(request);
         if (names.Count is < 1 or > 5 || names.Any(name => !IsEligibleUserApp(name)))
             return BadRequest(new { message = "Choose between one and five eligible apps." });
         var hardware = _profileService.GetLiveSystemProfile();
+        if (RepairSupportPolicy.SelectedAppBlockReason(diagnostic, hardware) is { } reviewReason)
+            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         if (names.Any(name => !hardware.ProcessInsights.TopMemoryApps.Any(app =>
             app.MemoryMb >= 100 && app.Name.Equals(name, StringComparison.OrdinalIgnoreCase))))
             return BadRequest(new { message = "A selected app is no longer memory-heavy. Refresh and choose again." });
@@ -257,8 +271,9 @@ public class AutonomyController : ControllerBase
             ToolName = "close_selected_app", DisplayName = "Close selected apps", CanExecute = true,
             SafetyTier = ToolSafetyTier.Tier2_DestructiveOrAdmin, RequiresUserConfirmation = true,
             AffectedTargets = names, AffectedItemsCount = names.Count,
-            WhatWillHappen = $"Close {string.Join(", ", names.Select(ToDisplayName))}.",
-            Warnings = new() { "Save your work first. Selected apps may lose unsaved work, tabs, meetings, or downloads." }
+            WhatWillHappen = $"Ask {string.Join(", ", names.Select(ToDisplayName))} to close normally. This may reduce memory use; it does not confirm or repair an app crash.",
+            Warnings = new() { "Save your work first. Selected apps may lose unsaved work, tabs, meetings, or downloads.",
+                "RigMD requests a normal close only. An app that stays open will not be force-closed; respond to any save prompt yourself." }
         };
         AttachApproval(preview, CloseAppScope(sessionId, names));
         return Ok(preview);
@@ -290,9 +305,15 @@ public class AutonomyController : ControllerBase
 
         if (!Guid.TryParse(request.SessionId, out var sessionId))
             return BadRequest(new { message = "A valid diagnostic session ID is required." });
-        if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+        var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
+        if (diagnostic == null)
             return NotFound(new { message = "Diagnostic session was not found." });
+        if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
+            return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         var selectedProcessNames = SelectedProcessNames(request);
+        var beforeHardware = _profileService.GetLiveSystemProfile();
+        if (RepairSupportPolicy.SelectedAppBlockReason(diagnostic, beforeHardware) is { } reviewReason)
+            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         if (selectedProcessNames.Count > 5 ||
             !_approvals.TryConsume(request.ApprovalToken, CloseAppScope(sessionId, selectedProcessNames)))
             return Conflict(new { message = "This approval expired, changed, or was already used. Review the selected apps again." });
@@ -316,9 +337,6 @@ public class AutonomyController : ControllerBase
                 message = $"RigMD will not close {ToDisplayName(blockedProcess)} because it is a protected Windows, background, or RigMD process."
             });
         }
-
-        var beforeHardware =
-            _profileService.GetLiveSystemProfile();
 
         var selectedApps =
             beforeHardware.ProcessInsights.TopMemoryApps
@@ -352,105 +370,81 @@ public class AutonomyController : ControllerBase
 
         Thread.Sleep(TimeSpan.FromSeconds(2));
 
-        var afterHardware =
-            _profileService.GetLiveSystemProfile();
-
         foreach (var outcome in outcomes)
         {
-            var afterApp =
-                afterHardware.ProcessInsights.TopMemoryApps.FirstOrDefault(
-                    app =>
-                        app.Name.Equals(
-                            outcome.ProcessName,
-                            StringComparison.OrdinalIgnoreCase));
-
-            outcome.AfterMemoryMb =
-                afterApp?.MemoryMb ?? 0;
+            var observed = _processProvider?.ObserveApp(outcome.ProcessName) ?? new AppProcessObservationDto(null, null);
+            outcome.AfterMemoryMb = observed.MemoryMb;
+            outcome.AfterProcessCount = observed.ProcessCount;
         }
 
-        var success =
-            outcomes.Any(outcome => outcome.Success);
-
-        var displayNames =
-            outcomes
-                .Select(outcome => outcome.DisplayName)
-                .ToList();
-
-        var proof =
-            outcomes
-                .Select(outcome => new
-                {
-                    label = outcome.DisplayName,
-                    status = outcome.Success ? "Closed or reduced" : "Could not confirm",
-                    meaning = $"RigMD tried to close {outcome.DisplayName}. {GetCloseWarning(outcome.ProcessName)}",
-                    before = $"{outcome.BeforeMemoryMb:0.##} MB across {outcome.BeforeProcessCount} process(es)",
-                    after = $"{outcome.AfterMemoryMb:0.##} MB; {outcome.ClosedWindows} normal close request(s), {outcome.ForceClosedProcesses} force close(s), {outcome.FailedProcesses} blocked attempt(s)"
-                })
-                .ToArray();
-
-        return Ok(new
+        var result = BuildSelectedAppResult(sessionId, outcomes);
+        try
         {
-            plan = new
+            var run = BuildRemediationRun(diagnostic.Id, result, beforeHardware);
+            await _remediationRepository.SaveRunAsync(run);
+            result.Trace += $"\n[PERSISTENCE] Remediation run saved: {run.Id}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Selected-app close requests completed but their history could not be persisted.");
+            result.PersistenceWarning = "The close requests already ran, but their results could not be saved. Do not repeat the action just to save its history.";
+        }
+        return Ok(result);
+    }
+
+    private static OrchestrationResult BuildSelectedAppResult(Guid sessionId, List<CloseAppOutcome> outcomes)
+    {
+        var names = string.Join(", ", outcomes.Select(outcome => outcome.DisplayName));
+        var execution = new ExecutionResult
+        {
+            Success = outcomes.Any(outcome => outcome.Success),
+            Summary = $"RigMD tried normal close requests for {names}. Review each app's result below. Apps may keep running in the background; memory improvement needs a separate follow-up check.",
+            Proof = outcomes.Select(outcome => new ExecutionProof
             {
-                plannedActions = new[]
+                Label = outcome.DisplayName,
+                Status = outcome.AfterProcessCount == 0 ? "App closed"
+                    : outcome.AfterProcessCount > 0 ? "App still running in background" : "App state not verified",
+                Meaning = outcome.AfterProcessCount == 0
+                    ? "No matching app processes were observed at the follow-up. This does not establish exactly how much system memory was freed."
+                    : outcome.AfterProcessCount > 0
+                        ? "The app has not fully exited. RigMD did not force it to close. You can leave it running or quit it from the app itself after saving your work."
+                        : "RigMD could not verify whether this app exited. It did not force the app to close.",
+                Before = $"{outcome.BeforeMemoryMb:0.##} MB across {outcome.BeforeProcessCount} process(es)",
+                After = $"{(outcome.AfterMemoryMb.HasValue ? $"{outcome.AfterMemoryMb:0.##} MB" : "App memory unavailable")}; {(outcome.AfterProcessCount.HasValue ? $"{outcome.AfterProcessCount} matching process(es)" : "Process count unavailable")}; {outcome.ClosedWindows} normal close request(s); no force close; {outcome.FailedProcesses} blocked attempt(s)."
+            }).ToList()
+        };
+        var action = new RemediationActionDef
+        {
+            Id = "close_selected_app",
+            Name = outcomes.Count == 1 ? $"Close {outcomes[0].DisplayName}" : $"Close {outcomes.Count} selected apps",
+            Description = "Try normal close requests only for apps selected by the user.",
+            RiskLevel = "User-confirmed",
+            IsReversible = false,
+            RequiresUserConfirmation = true
+        };
+        return new OrchestrationResult
+        {
+            EngineMode = "Local",
+            Plan = new RemediationPlan { SessionId = sessionId.ToString(), PlannedActions = new() { action } },
+            Safety = new SafetyEvaluation
+            {
+                IsApproved = true, RequiresUserConfirmation = true,
+                Warnings = new() { "Selected apps may close open windows, tabs, downloads, meetings, terminals, or unsaved work." }
+            },
+            Execution = execution,
+            Verification = VerificationStatus.Unknown,
+            Attempts = new()
+            {
+                new RemediationAttempt
                 {
-                    new
-                    {
-                        id = "close_selected_app",
-                        name = displayNames.Count == 1
-                            ? $"Close {displayNames[0]}"
-                            : $"Close {displayNames.Count} selected apps",
-                        description = "Close only the apps selected by the user.",
-                        category = "Troubleshoot",
-                        riskLevel = "User-confirmed",
-                        isReversible = false,
-                        requiresUserConfirmation = true
-                    }
+                    Action = action, Execution = execution,
+                    State = execution.Success ? RemediationAttemptState.Completed : RemediationAttemptState.ExecutionFailed,
+                    Verification = VerificationStatus.Unknown,
+                    Notes = execution.Summary
                 }
             },
-
-            safety = new
-            {
-                isApproved = true,
-                requiresUserConfirmation = true,
-                warnings = new[]
-                {
-                    "Selected apps may close open windows, tabs, downloads, meetings, terminals, or unsaved work."
-                }
-            },
-
-            execution = new
-            {
-                success,
-                summary = success
-                    ? $"RigMD closed or reduced {string.Join(", ", displayNames)}. It will now recheck whether memory pressure improved."
-                    : $"RigMD tried to close {string.Join(", ", displayNames)}, but Windows did not confirm that they closed.",
-                proof
-            },
-
-            attempts = new[]
-            {
-                new
-                {
-                    action = new
-                    {
-                        id = "close_selected_app",
-                        name = displayNames.Count == 1
-                            ? $"Close {displayNames[0]}"
-                            : $"Close {displayNames.Count} selected apps",
-                        riskLevel = "User-confirmed",
-                        isReversible = false,
-                        requiresUserConfirmation = true
-                    },
-                    state = success ? "Completed" : "Failed",
-                    notes = success
-                        ? "Closed or reduced the user-selected apps."
-                        : "Could not confirm that the selected apps closed."
-                }
-            },
-
-            trace = $"[LOCAL] close_selected_app requested for {string.Join(", ", selectedProcessNames)}."
-        });
+            Trace = $"[LOCAL] close_selected_app requested for {names}."
+        };
     }
 
     public class ExecuteRequest
@@ -496,8 +490,16 @@ public class AutonomyController : ControllerBase
             });
         }
 
+        if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
+            return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
+        if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
+            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         if (string.IsNullOrWhiteSpace(request.ToolName))
             return BadRequest(new { message = "Select the action shown in the preview." });
+        if (RepairSupportPolicy.ScopeBlockReason(diagnostic, request.ToolName) is { } scopeReason)
+            return Conflict(new { message = scopeReason });
+        if (RepairSupportPolicy.ToolMismatchReason(diagnostic.DiagnosedCategory, request.ToolName) is { } mismatchReason)
+            return Conflict(new { message = mismatchReason });
         RemediationApprovalStore.Scope approvalScope;
         try
         {
@@ -572,6 +574,7 @@ public class AutonomyController : ControllerBase
                 _logger.LogError(
                     ex,
                     "Remediation completed but its history could not be persisted.");
+                result.PersistenceWarning = "The action already ran, but its results could not be saved. Do not repeat the action just to save its history.";
 
                 result.Trace +=
                     "\n[PERSISTENCE] WARNING: The remediation executed, " +
@@ -788,28 +791,7 @@ public class AutonomyController : ControllerBase
             {
                 outcome.FailedProcesses++;
             }
-        }
-
-        Thread.Sleep(TimeSpan.FromSeconds(2));
-
-        foreach (var process in processes)
-        {
-            try
-            {
-                process.Refresh();
-
-                if (process.HasExited)
-                {
-                    continue;
-                }
-
-                process.Kill(entireProcessTree: true);
-                outcome.ForceClosedProcesses++;
-            }
-            catch
-            {
-                outcome.FailedProcesses++;
-            }
+            finally { process.Dispose(); }
         }
 
         return outcome;
@@ -1122,8 +1104,17 @@ public class AutonomyController : ControllerBase
         {
             if (!Guid.TryParse(request.SessionId, out var sessionId))
                 return BadRequest(new { message = "A valid diagnostic session ID is required." });
-            if (await _sessionRepository.GetDiagnosticOutputAsync(sessionId) == null)
+            var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
+            if (diagnostic == null)
                 return NotFound(new { message = "Diagnostic session was not found." });
+            if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
+                return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
+            if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
+                return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
+            if (RepairSupportPolicy.ToolMismatchReason(diagnostic.DiagnosedCategory, tool.Name) is { } mismatchReason)
+                return Conflict(new { message = mismatchReason });
+            if (RepairSupportPolicy.ScopeBlockReason(diagnostic, tool.Name) is { } scopeReason)
+                return Conflict(new { message = scopeReason });
             AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", sessionId,
                 tool.Name, request.Arguments.GetRawText()));
         }
@@ -1235,7 +1226,8 @@ public class AutonomyController : ControllerBase
         public string ProcessName { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
         public double BeforeMemoryMb { get; set; }
-        public double AfterMemoryMb { get; set; }
+        public double? AfterMemoryMb { get; set; }
+        public int? AfterProcessCount { get; set; }
         public int BeforeProcessCount { get; set; }
         public int ClosedWindows { get; set; }
         public int ForceClosedProcesses { get; set; }
@@ -1244,6 +1236,6 @@ public class AutonomyController : ControllerBase
         public bool Success =>
             ClosedWindows > 0 ||
             ForceClosedProcesses > 0 ||
-            AfterMemoryMb < BeforeMemoryMb;
+            AfterProcessCount == 0 && BeforeProcessCount > 0;
     }
 }

@@ -21,7 +21,10 @@ import {
   cardTransition,
   pageFade,
 } from '../lib/motion';
-import { apiGet } from '../lib/api';
+import { API_BASE_URL, apiGet } from '../lib/api';
+import * as signalR from '@microsoft/signalr';
+import { getLocalApiToken } from '../lib/localApiSession';
+import { mergeLiveUsage, type LiveUsageSample } from '../lib/liveReadings';
 import type {
   AgentSnapshotResponse,
   AgentStatus,
@@ -115,7 +118,8 @@ function agentSnapshotToHardwareStats(
 
     cpu: {
       name: hardware.cpu.name,
-      usage_percent: hardware.cpu.usagePercent,
+      usage_percent: hardware.cpu.usageAvailable === false ? null : hardware.cpu.usagePercent,
+      usage_source: hardware.cpu.usageSource,
       cores: hardware.cpu.cores,
       threads: hardware.cpu.threads,
       frequency_mhz: hardware.cpu.frequencyMhz,
@@ -148,8 +152,8 @@ function agentSnapshotToHardwareStats(
 
     ram: {
       total_gb: hardware.ram.totalGb,
-      used_gb: hardware.ram.usedGb,
-      usage_percent: hardware.ram.usagePercent,
+      used_gb: hardware.ram.usageAvailable === false ? null : hardware.ram.usedGb,
+      usage_percent: hardware.ram.usageAvailable === false ? null : hardware.ram.usagePercent,
       speed_mtps: hardware.ram.speedMtps,
       slots_used: hardware.ram.slotsUsed,
       slots_total: hardware.ram.slotsTotal,
@@ -533,6 +537,7 @@ export default function HardwareDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [diagnosisPreset, setDiagnosisPreset] = useState<'memory' | null>(null);
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
   const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -570,6 +575,30 @@ export default function HardwareDashboard() {
   const deviceName = stats?.device_name?.trim() || 'Detecting Device';
   const isFetchingHardwareRef = useRef(false);
   const isFetchingDashboardRef = useRef(false);
+  const latestUsageRef = useRef<{ sample: LiveUsageSample; receivedAt: number } | null>(null);
+  const usageUpdatedAtRef = useRef(0);
+
+  useEffect(() => {
+    let disposed = false;
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(`${API_BASE_URL}/hubs/telemetry`, { accessTokenFactory: getLocalApiToken })
+      .withAutomaticReconnect().build();
+    connection.on('ReceiveTelemetry', (sample: LiveUsageSample) => {
+      if (disposed) return;
+      usageUpdatedAtRef.current = Date.now();
+      latestUsageRef.current = { sample, receivedAt: Date.now() };
+      setStats(previous => previous ? mergeLiveUsage(previous, sample) : previous);
+      setHardwareUpdatedAt(new Date());
+    });
+    void connection.start().then(() => { if (disposed) void connection.stop(); }).catch(() => {});
+    const staleTimer = window.setInterval(() => {
+      if (usageUpdatedAtRef.current && Date.now() - usageUpdatedAtRef.current > 5000) {
+        latestUsageRef.current = null;
+        setStats(previous => previous ? mergeLiveUsage(previous, {}) : previous);
+      }
+    }, 1000);
+    return () => { disposed = true; window.clearInterval(staleTimer); void connection.stop(); };
+  }, []);
 
   const fetchHardware = useCallback(async () => {
     if (isFetchingHardwareRef.current) {
@@ -579,7 +608,9 @@ export default function HardwareDashboard() {
     isFetchingHardwareRef.current = true;
     try {
       const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
-      setStats(liveResponse.data);
+      const fresh = latestUsageRef.current;
+      setStats(fresh && Date.now() - fresh.receivedAt <= 5000 ? mergeLiveUsage(liveResponse.data, fresh.sample) : liveResponse.data);
+      usageUpdatedAtRef.current = fresh?.receivedAt ?? Date.now();
       setHardwareUpdatedAt(new Date());
       setError(null);
     } catch {
@@ -660,12 +691,18 @@ export default function HardwareDashboard() {
   }, [activePage]);
 
   const handleSetActivePage = (page: PageKey) => {
+  if (page === 'newDiagnosis') setDiagnosisPreset(null);
   if (page === 'diagnosticHistory') {
     setSelectedSessionId(null);
   }
 
   setActivePage(page);
 };
+
+  const openMemoryCheck = () => {
+    setDiagnosisPreset('memory');
+    setActivePage('newDiagnosis');
+  };
 
   const renderPage = () => {
     switch (activePage) {
@@ -698,12 +735,13 @@ export default function HardwareDashboard() {
         <DiagnosticSessionDetailView
           sessionId={selectedSessionId}
           onBack={() => setSelectedSessionId(null)}
+          onOpenMemoryCheck={openMemoryCheck}
         />
       ) : (
         <DiagnosticHistoryView
           onViewSession={(sessionId) => setSelectedSessionId(sessionId)}
           selectedSessionId={selectedSessionId}
-          onStartNewDiagnosis={() => setActivePage('newDiagnosis')}
+          onStartNewDiagnosis={() => handleSetActivePage('newDiagnosis')}
         />
       );
 
@@ -715,6 +753,9 @@ export default function HardwareDashboard() {
       case 'newDiagnosis':
         return (
           <NewDiagnosisView
+            key={diagnosisPreset ?? 'default'}
+            initialComponentIds={diagnosisPreset === 'memory' ? ['memory'] : undefined}
+            onOpenMemoryCheck={openMemoryCheck}
             onDiagnosisComplete={(sessionId) => {
               setSelectedSessionId(sessionId);
               setActivePage('diagnosticHistory');
@@ -726,9 +767,8 @@ export default function HardwareDashboard() {
         return (
           <ShareReportView
             stats={stats}
-            dashboard={dashboard}
             hardwareUpdatedAt={hardwareUpdatedAt}
-            onStartNewDiagnosis={() => setActivePage('newDiagnosis')}
+            onStartNewDiagnosis={() => handleSetActivePage('newDiagnosis')}
           />
         );
 

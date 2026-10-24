@@ -34,7 +34,9 @@ public interface IDiagnosticSessionRepository
         string clientId = "",
         string? primaryResult = null,
         string? incidentalWarning = null,
-        string? componentStatus = null);
+        string? componentStatus = null,
+        IReadOnlyList<AutomaticDiagnosisProof>? proof = null,
+        string? recommendedNextStep = null);
 
     /// <summary>Returns all sessions for the current client, newest first.</summary>
     Task<IReadOnlyList<DiagnosticSessionDto>> GetSessionsAsync();
@@ -61,6 +63,7 @@ public interface IDiagnosticSessionRepository
 
     /// <summary>Marks a session as needing a follow-up resolution check.</summary>
     Task<bool> MarkNeedsRecheckAsync(Guid sessionId);
+    Task SaveExplanationSourceAsync(Guid sessionId, string source, string? model) => Task.CompletedTask;
 
     /// <summary>Returns aggregate counts for the dashboard summary card.</summary>
     Task<object> GetDashboardSummaryAsync();

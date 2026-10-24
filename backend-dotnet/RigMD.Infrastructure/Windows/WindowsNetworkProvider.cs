@@ -60,6 +60,7 @@ public class WindowsNetworkProvider :
                         gateway.Address.AddressFamily == AddressFamily.InterNetwork &&
                         !IPAddress.Any.Equals(gateway.Address)))
                 ?? candidates.FirstOrDefault();
+            result.QuerySucceeded = true;
 
             if (activeAdapter == null)
             {
@@ -226,6 +227,7 @@ public class WindowsNetworkProvider :
         }
         catch (Exception ex)
         {
+            result.QuerySucceeded = false;
             result.DnsResolutionMessage =
                 $"Network telemetry collection failed: {ex.Message}";
 

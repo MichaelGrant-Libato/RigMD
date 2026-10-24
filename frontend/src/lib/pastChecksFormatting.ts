@@ -1,13 +1,17 @@
+import { isEventReading } from './eventEvidence.ts';
+import { memoryWarningLabel } from './repairSupport.ts';
+import type { DiagnosticReading } from './diagnosticLanguage';
+
 export const COMPONENT_LABELS: Record<string, string> = {
   cpu: 'Processor',
   processor: 'Processor',
   memory: 'Memory',
   ram: 'Memory',
-  gpu: 'GPU / Graphics',
-  graphics: 'GPU / Graphics',
+  gpu: 'Graphics',
+  graphics: 'Graphics',
   storage: 'Storage',
   disk: 'Storage',
-  os: 'Operating System',
+  os: 'Windows',
   drivers: 'Drivers',
   driver: 'Drivers',
   battery: 'Battery / Power',
@@ -123,6 +127,7 @@ export type ResolutionCategoryType =
   | 'still_active'
   | 'needs_recheck'
   | 'monitor_only'
+  | 'not_applicable'
   | 'open';
 
 export interface ResolutionCategoryInfo {
@@ -138,10 +143,17 @@ export function getResolutionCategory(
   diagnosedCategory?: string | null,
   hasAction = false,
   noNewCrashes = false,
+  proof?: DiagnosticReading[],
 ): ResolutionCategoryInfo {
   const normStatus = (status ?? '').toLowerCase().trim();
   const normAction = (actionCategory ?? '').toLowerCase().trim();
   const normCategory = (diagnosedCategory ?? '').toLowerCase().trim();
+
+  if (normStatus === 'not_applicable') return {
+    category: 'not_applicable', label: 'Not applicable',
+    className: 'border-slate-500/40 bg-slate-500/10 text-slate-300',
+    fallbackText: 'Windows reported that the selected component is not present. No repair is indicated by this check.',
+  };
 
   if (normStatus === 'resolved') {
     if (normCategory.includes('crash') || normCategory.includes('stop error') || noNewCrashes) {
@@ -149,24 +161,24 @@ export function getResolutionCategory(
         category: 'no_new_events',
         label: 'No New Events',
         className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-        fallbackText: 'Windows Event Logs confirm no new crash or stop events occurred after this diagnosis.',
+        fallbackText: 'No new matching crash records were found during this follow-up period. This does not prove that the recurring problem is fixed.',
       };
     }
 
     return {
       category: 'resolved_after_action',
-      label: hasAction ? 'Resolved After Action' : 'Resolved',
+      label: hasAction ? 'Not detected after action' : 'Not detected in this check',
       className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
       fallbackText: hasAction
-        ? 'The issue is no longer detected after the completed action and latest live scan.'
-        : 'The latest live check no longer detects this issue.',
+        ? 'The checked warning is not detected after the action. This does not establish overall hardware health or prove the action caused the change.'
+        : 'The checked warning is not detected in these readings. No repair is implied; workload can change on its own. This is not a complete hardware-health assessment.',
     };
   }
 
   if (normStatus === 'still_active' || normStatus === 'unresolved') {
     return {
       category: 'still_active',
-      label: 'Still Active',
+      label: memoryWarningLabel(proof) || 'Still Active',
       className: 'border-red-500/40 bg-red-500/10 text-red-300',
       fallbackText: 'The issue is still detected after checking the latest live scan.',
     };
@@ -175,9 +187,19 @@ export function getResolutionCategory(
   if (normStatus === 'needs_recheck') {
     return {
       category: 'needs_recheck',
-      label: 'Needs Recheck',
+      label: proof?.length ? 'Partially checked' : 'Awaiting follow-up',
       className: 'border-orange-500/40 bg-orange-500/10 text-orange-300',
-      fallbackText: 'A safe action was recorded. Recheck the current status to confirm whether the issue improved.',
+      fallbackText: proof?.length
+        ? 'Review the unavailable measurements separately. Repeating a scan cannot supply an unsupported sensor or test.'
+        : 'A follow-up reading has not been recorded yet. The effect of the action is not confirmed.',
+    };
+  }
+
+  if (normStatus === 'unknown' || normStatus === 'unavailable' || normCategory.includes('unavailable') || normCategory.includes('could not verify')) {
+    return {
+      category: 'needs_recheck', label: 'Could not verify',
+      className: 'border-slate-500/40 bg-slate-500/10 text-slate-300',
+      fallbackText: 'The follow-up check could not verify the result. Missing readings do not mean the issue is resolved.',
     };
   }
 
@@ -248,34 +270,45 @@ export function matchesCheckType(
 }
 
 export function getTelemetryDeltaSummary(
-  originalProof?: Array<{ label: string; value: string }>,
-  resolutionProof?: Array<{ label: string; value: string }>,
+  originalProof?: Array<{ metric_id?: string; label: string; value: string }>,
+  resolutionProof?: Array<{ metric_id?: string; label: string; value: string }>,
 ): string | null {
   if (!originalProof || !resolutionProof || resolutionProof.length === 0) {
     return null;
   }
 
   const deltas: string[] = [];
+  let comparisons = 0;
 
   for (const res of resolutionProof) {
+    if (isEventReading(res)) continue;
     const orig = originalProof.find(
-      (p) => p.label?.toLowerCase() === res.label?.toLowerCase(),
+      (p) => p.metric_id && res.metric_id ? p.metric_id === res.metric_id
+        : p.label?.toLowerCase() === res.label?.toLowerCase(),
     );
     if (!orig) continue;
 
-    const numOrig = parseFloat(orig.value?.replace(/[^0-9.]/g, '') || '');
-    const numRes = parseFloat(res.value?.replace(/[^0-9.]/g, '') || '');
+    const parseMetric = (value: string) => {
+      const match = /^\s*(-?\d+(?:\.\d+)?)\s*(%|GB|MB|ms|\u00b0C)?\s*$/i.exec(value ?? '');
+      return match ? { number: Number(match[1]), unit: (match[2] ?? '').toLowerCase() } : null;
+    };
+    const before = parseMetric(orig.value);
+    const after = parseMetric(res.value);
+    const comparable = before && after && before.unit === after.unit;
+    const numOrig = comparable ? before.number : Number.NaN;
+    const numRes = comparable ? after.number : Number.NaN;
 
     if (!Number.isNaN(numOrig) && !Number.isNaN(numRes)) {
+      comparisons++;
       const diff = numRes - numOrig;
       if (Math.abs(diff) >= 0.05) {
         const unit = orig.value.includes('%')
-          ? '%'
+          ? ' percentage points'
           : orig.value.includes('GB')
             ? ' GB'
             : orig.value.includes('MB')
               ? ' MB'
-              : '';
+              : before?.unit === 'ms' ? ' ms' : before?.unit === '\u00b0c' ? ' \u00b0C' : '';
         const direction =
           diff < 0
             ? `decreased by ${Math.abs(diff).toFixed(1)}${unit}`
@@ -290,7 +323,7 @@ export function getTelemetryDeltaSummary(
   }
 
   if (deltas.length === 0) {
-    return 'Readings remained stable between initial scan and latest check.';
+    return comparisons > 0 ? 'No measurable change was detected in the comparable saved readings.' : null;
   }
 
   return deltas.join('; ');

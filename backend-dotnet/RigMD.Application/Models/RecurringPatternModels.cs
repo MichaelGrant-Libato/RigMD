@@ -29,6 +29,10 @@ public class RecurringSessionDto
         string.Empty;
 
     public DateTime? CreatedAt { get; set; }
+    public object[] Proof { get; set; } = Array.Empty<object>();
+    public object[] ResolutionProof { get; set; } = Array.Empty<object>();
+    public string ResolutionCheckedAt { get; set; } = string.Empty;
+    public string ResolutionStatus { get; set; } = string.Empty;
 }
 
 public class RecurringMetricsDto
@@ -101,6 +105,11 @@ public class PatternTimelineDotDto
 
 public class RecurringPatternDto
 {
+    public string risk_level { get; set; } = "Review";
+    public int priority_rank { get; set; }
+    public string risk_reason { get; set; } = string.Empty;
+    public string evidence_summary { get; set; } = string.Empty;
+    public string current_condition { get; set; } = "Not rechecked";
     public string id { get; set; } =
         string.Empty;
 

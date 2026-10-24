@@ -31,7 +31,7 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
     public string DisplayName => "Inspect GPU, VRAM & Displays";
 
     public string Description =>
-        "Reads GPU model, driver version and date, dedicated/shared VRAM, live GPU core load and temperature, connected display resolutions/refresh rates, and PnP display adapter error codes.";
+        "Reads GPU model, driver metadata, available GPU sensors and detected displays. This tool does not query PnP error codes, test the picture or stress-test graphics hardware.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -95,6 +95,7 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
 
         var payload = new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
             gpu = new
             {
                 name = gpu.Name,

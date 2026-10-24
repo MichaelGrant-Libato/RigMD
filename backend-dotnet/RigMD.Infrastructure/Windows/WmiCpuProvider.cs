@@ -1,4 +1,6 @@
 using System.Management;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 
@@ -6,19 +8,77 @@ namespace RigMD.Infrastructure.Windows;
 
 public class WmiCpuProvider : ICpuProvider
 {
+    private static PerformanceCounter? _usageCounter;
+    private static bool _utilityUnavailable;
+    private static DateTimeOffset _retryUtilityAt;
+    private static (ulong Idle, ulong Kernel, ulong User)? _previousTimes;
+    private static readonly CpuUsageSampler NativeSampler = new(() =>
+    {
+        if (Environment.ProcessorCount > 64 || !GetSystemTimes(out var idle, out var kernel, out var user))
+            throw new InvalidOperationException("System CPU times unavailable.");
+        var current = (Idle: idle.Value, Kernel: kernel.Value, User: user.Value);
+        var previous = _previousTimes;
+        _previousTimes = current;
+        return previous.HasValue ? CpuUsageSampler.BusyPercent(previous.Value.Idle, previous.Value.Kernel,
+            previous.Value.User, current.Idle, current.Kernel, current.User) ?? double.NaN : double.NaN;
+    });
+    private static readonly CpuUsageSampler UsageSampler = new(() =>
+    {
+        try
+        {
+            // Busy time is workload, unlike frequency-normalized Processor Utility.
+            _usageCounter ??= new PerformanceCounter("Processor Information", "% Processor Time", "_Total", true);
+            var value = _usageCounter.NextValue();
+            _utilityUnavailable = false;
+            return value;
+        }
+        catch
+        {
+            _usageCounter?.Dispose();
+            _usageCounter = null;
+            _utilityUnavailable = true;
+            _retryUtilityAt = DateTimeOffset.UtcNow.AddMinutes(1);
+            throw;
+        }
+    });
+
+    public static double? ReadUsagePercent()
+    {
+        var utility = !_utilityUnavailable || DateTimeOffset.UtcNow >= _retryUtilityAt ? UsageSampler.Read() : null;
+        return _utilityUnavailable ? NativeSampler.Read() : utility;
+    }
+
+    public static string UsageSource => _utilityUnavailable ? "Windows processor busy time (fallback)" : "Windows processor busy time";
+    public static DateTimeOffset? UsageCapturedAt => _utilityUnavailable ? NativeSampler.CapturedAt : UsageSampler.CapturedAt;
+    public static double? UsageWindowSeconds => _utilityUnavailable ? NativeSampler.WindowSeconds : UsageSampler.WindowSeconds;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CpuFileTime
+    {
+        public uint Low;
+        public uint High;
+        public readonly ulong Value => ((ulong)High << 32) | Low;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemTimes(out CpuFileTime idle, out CpuFileTime kernel, out CpuFileTime user);
+
     public CpuStatsDto GetCpuStats()
     {
-        var dto = new CpuStatsDto();
+        var dto = new CpuStatsDto { UsageAvailable = false };
 
         try
         {
             LoadStaticCpuInfo(dto);
-            LoadLiveCpuInfo(dto);
         }
         catch
         {
             ApplyFallback(dto);
         }
+
+        try { LoadLiveCpuInfo(dto); }
+        catch { /* Frequency metadata must not invalidate a measured activity sample. */ }
 
         dto.SetTemperatureReading(CpuTemperatureSensorReader.Read());
         return dto;
@@ -94,10 +154,11 @@ public class WmiCpuProvider : ICpuProvider
     private static void LoadLiveCpuInfo(
         CpuStatsDto dto)
     {
+        RefreshUsage(dto);
         using var searcher =
             new ManagementObjectSearcher(
                 @"root\CIMV2",
-                "SELECT Name, ProcessorFrequency, PercentProcessorTime, PercentProcessorUtility FROM Win32_PerfFormattedData_Counters_ProcessorInformation");
+                "SELECT Name, ProcessorFrequency FROM Win32_PerfFormattedData_Counters_ProcessorInformation");
 
         foreach (
             ManagementObject obj
@@ -115,38 +176,30 @@ public class WmiCpuProvider : ICpuProvider
                 continue;
             }
 
-            var utility =
-                TryConvertToDouble(
-                    obj["PercentProcessorUtility"]);
-
-            var processorTime =
-                TryConvertToDouble(
-                    obj["PercentProcessorTime"]);
-
             var frequency =
                 TryConvertToDouble(
                     obj["ProcessorFrequency"]);
-
-            var usage =
-                utility > 0
-                    ? utility
-                    : processorTime;
-
-            dto.UsagePercent =
-                Math.Clamp(
-                    usage,
-                    0,
-                    100);
-
-            if (frequency > 0)
-            {
-                dto.FrequencyMhz =
-                    frequency;
-            }
-            
+            if (frequency > 0) dto.FrequencyMhz = frequency;
             break;
         }
+    }
 
+    public void RefreshActivity(CpuStatsDto cpu) => RefreshUsage(cpu);
+
+    private static void RefreshUsage(CpuStatsDto dto)
+    {
+        var sampledUsage = ReadUsagePercent();
+        dto.UsageAvailable = sampledUsage.HasValue;
+        dto.UsagePercent = sampledUsage ?? 0;
+        dto.UsageSource = sampledUsage.HasValue ? UsageSource : "Unavailable";
+        dto.UsageCapturedAtUtc = sampledUsage.HasValue ? UsageCapturedAt : null;
+        dto.UsageWindowSeconds = sampledUsage.HasValue ? UsageWindowSeconds : null;
+    }
+
+    internal static double? ReadUsage(object? value)
+    {
+        return value != null && double.TryParse(value.ToString(), out var parsed) &&
+            double.IsFinite(parsed) && parsed >= 0 ? parsed : null;
     }
 
     private static double TryConvertToDouble(

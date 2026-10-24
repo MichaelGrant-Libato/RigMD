@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using RigMD.Api.Controllers;
 using RigMD.Application.Contracts.Autonomy;
@@ -17,6 +18,166 @@ namespace RigMD.Tests.Api;
 
 public class AutonomyControllerTests
 {
+    [Theory]
+    [InlineData(0, "App closed")]
+    [InlineData(6, "App still running in background")]
+    [InlineData(null, "App state not verified")]
+    public async Task SelectedAppEvidenceIsHonestAndSurvivesHistoryRoundTrip(int? remaining, string expected)
+    {
+        // Exercise result construction and persistence without enumerating or closing any real app.
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var outcomeType = typeof(AutonomyController).GetNestedType("CloseAppOutcome", System.Reflection.BindingFlags.NonPublic)!;
+        var outcome = Activator.CreateInstance(outcomeType, nonPublic: true)!;
+        void Set(string name, object? value) => outcomeType.GetProperty(name)!.SetValue(outcome, value);
+        Set("ProcessName", "discord"); Set("DisplayName", "Discord");
+        Set("BeforeMemoryMb", 850d); Set("BeforeProcessCount", 6);
+        Set("AfterMemoryMb", 100d); Set("AfterProcessCount", remaining); Set("ClosedWindows", 1);
+        var list = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(outcomeType))!;
+        list.Add(outcome);
+        var result = (OrchestrationResult)typeof(AutonomyController).GetMethod("BuildSelectedAppResult", flags)!
+            .Invoke(null, new object[] { Guid.NewGuid(), list })!;
+        Assert.Equal(expected, Assert.Single(result.Execution!.Proof).Status);
+        Assert.Equal(VerificationStatus.Unknown, result.Verification);
+        Assert.Same(result.Execution, Assert.Single(result.Attempts).Execution);
+
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<RigMD.Infrastructure.Persistence.RigMdDbContext>()
+            .UseSqlite("DataSource=:memory:").Options;
+        await using var db = new RigMD.Infrastructure.Persistence.RigMdDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var profile = new SystemProfile { CpuModel = "Test CPU", OsVersion = "Test Windows" };
+        var session = new DiagnosticSession { Profile = profile, SystemProfileId = profile.Id };
+        var diagnostic = CreateDiagnostic(); diagnostic.DiagnosticSessionId = session.Id;
+        session.Output = diagnostic;
+        db.DiagnosticSessions.Add(session);
+        await db.SaveChangesAsync();
+        var run = (RemediationRun)typeof(AutonomyController).GetMethod("BuildRemediationRun", flags)!
+            .Invoke(null, new object[] { diagnostic.Id, result, new HardwareProfileDto() })!;
+        await new RigMD.Infrastructure.Persistence.RemediationRepository(db).SaveRunAsync(run);
+        db.ChangeTracker.Clear();
+        var stored = await db.VerificationResults.SingleAsync();
+        Assert.False(stored.IsSuccessful);
+        Assert.Equal("Unknown", stored.FailureReason);
+        Assert.Contains(expected, stored.ObservedState);
+        Assert.Contains("no force close", stored.ObservedState);
+        var history = await new RigMD.Infrastructure.Persistence.DiagnosticSessionRepository(db, new HistoryClientProvider())
+            .GetRemediationHistoryAsync(session.Id);
+        var attempt = Assert.Single(Assert.Single(history).Attempts);
+        Assert.Equal(expected, Assert.Single(attempt.Proof).Status);
+        Assert.Contains("Review each app", attempt.ExecutionSummary);
+    }
+
+    private sealed class HistoryClientProvider : RigMD.Application.Contracts.Common.ICurrentClientProvider
+    {
+        public string GetCurrentClientId() => string.Empty;
+    }
+
+    [Fact]
+    public async Task CrashMemoryFindingMustOpenANewMemoryScopeBeforeObtainingApproval()
+    {
+        var diagnostic = CreateDiagnostic(); diagnostic.DiagnosedCategory = "Application stability risk needs review";
+        diagnostic.Session = new() { Answers = new List<SessionAnswer> { new()
+        {
+            QuestionKey = "proof", AnswerValue = "[{\"metric_id\":\"memory_usage\",\"status\":\"high\",\"value\":\"84.7% (13.3 / 15.7 GB)\"}]"
+        } } };
+        var hardware = new HardwareProfileDto
+        {
+            Ram = new() { UsagePercent = 84.7, TotalGb = 15.7 },
+            ProcessInsights = new() { TopMemoryApps = new() { new() { Name = "chrome", MemoryMb = 256, ProcessCount = 1 } } }
+        };
+        var orchestrator = new FakeOrchestrator();
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository(), hardware: hardware);
+        var request = new AutonomyController.CloseSelectedAppRequest { SessionId = Guid.NewGuid().ToString(), ProcessNames = new() { "chrome" } };
+        Assert.IsType<ConflictObjectResult>(await controller.PreviewCloseSelectedApp(request));
+        Assert.IsType<ConflictObjectResult>(await controller.CloseSelectedApp(new()
+        {
+            SessionId = request.SessionId, ProcessNames = request.ProcessNames, Confirmed = true, ApprovalToken = "invented"
+        }));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new()
+        {
+            SessionId = request.SessionId, ToolName = "run_system_file_checker", UserConsentProvided = true
+        }));
+        var memoryController = CreateController(orchestrator, CreateMemoryDiagnostic(), new FakeRemediationRepository(), hardware: hardware);
+        request.SessionId = Guid.NewGuid().ToString();
+        var preview = Assert.IsType<ToolDryRunPreview>(Assert.IsType<OkObjectResult>(await memoryController.PreviewCloseSelectedApp(request)).Value);
+        Assert.NotNull(preview.ApprovalToken);
+        hardware.Ram.UsagePercent = 60;
+        Assert.IsType<ConflictObjectResult>(await memoryController.CloseSelectedApp(new()
+        {
+            SessionId = request.SessionId, ProcessNames = request.ProcessNames, Confirmed = true, ApprovalToken = preview.ApprovalToken
+        }));
+        Assert.IsType<ConflictObjectResult>(await memoryController.PreviewCloseSelectedApp(request));
+        Assert.Equal(0, orchestrator.Calls);
+        // Execution is rejected before the method that enumerates or closes real processes.
+    }
+
+    [Fact]
+    public async Task MemoryFindingCannotObtainCleanupApprovalOrExecuteAnIncompatibleTool()
+    {
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible) { CanPreviewExecute = true };
+        var diagnostic = CreateDiagnostic(); diagnostic.DiagnosedCategory = "High Memory Pressure";
+        var orchestrator = new FakeOrchestrator();
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository(),
+            registry: new RigMdAgentToolRegistry(new[] { tool }));
+        Assert.IsType<ConflictObjectResult>(await controller.PreviewTool(new()
+        {
+            SessionId = Guid.NewGuid().ToString(), ToolName = tool.Name,
+            Arguments = JsonSerializer.SerializeToElement(new { })
+        }, CancellationToken.None));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new()
+        {
+            SessionId = Guid.NewGuid().ToString(), ToolName = tool.Name, UserConsentProvided = true
+        }));
+        Assert.Equal(0, orchestrator.Calls);
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Theory]
+    [InlineData("Application crash history requires review")]
+    [InlineData("Scanner evidence unavailable")]
+    public async Task UnverifiedCauseCannotObtainOrUseGenericRepairApproval(string category)
+    {
+        var diagnostic = CreateDiagnostic(); diagnostic.DiagnosedCategory = category;
+        var orchestrator = new FakeOrchestrator();
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository());
+        Assert.IsType<ConflictObjectResult>(await controller.Preview(new() { SessionId = Guid.NewGuid().ToString() }));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new() { SessionId = Guid.NewGuid().ToString(), UserConsentProvided = true, ToolName = "run_system_file_checker" }));
+        Assert.IsType<ConflictObjectResult>(await controller.PreviewCloseSelectedApp(new() { SessionId = Guid.NewGuid().ToString(), ProcessNames = ["chrome"] }));
+        Assert.Equal(0, orchestrator.Calls);
+    }
+
+    [Theory]
+    [InlineData(0, 6, 850.23, false)]
+    [InlineData(0, 6, 100d, false)]
+    [InlineData(0, null, null, false)]
+    [InlineData(1, 6, 850.23, true)]
+    [InlineData(0, 0, 0d, true)]
+    public void AppClosureOutcome_DoesNotTreatMemoryFluctuationAsAnExecutedClose(int requests, int? remaining, double? after, bool expected)
+    {
+        var type = typeof(AutonomyController).GetNestedType("CloseAppOutcome", System.Reflection.BindingFlags.NonPublic)!;
+        var outcome = Activator.CreateInstance(type, nonPublic: true)!;
+        void Set(string name, object? value) => type.GetProperty(name)!.SetValue(outcome, value);
+        Set("BeforeMemoryMb", 850.31); Set("BeforeProcessCount", 6);
+        Set("AfterMemoryMb", after); Set("AfterProcessCount", remaining); Set("ClosedWindows", requests);
+        Assert.Equal(expected, type.GetProperty("Success")!.GetValue(outcome));
+    }
+
+    [Fact]
+    public async Task HardwareWarningBlocksSoftwareRepair_EvenWithConsentAndAnExplicitTool()
+    {
+        var diagnostic = CreateDiagnostic();
+        diagnostic.DiagnosedCategory = "Storage health behavior";
+        var orchestrator = new FakeOrchestrator();
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository());
+        var preview = Assert.IsType<ConflictObjectResult>(await controller.Preview(new AutonomyController.PreviewRequest { SessionId = Guid.NewGuid().ToString() }));
+        Assert.Contains("hardware inspection", JsonSerializer.Serialize(preview.Value));
+        var execute = Assert.IsType<ConflictObjectResult>(await controller.Execute(new AutonomyController.ExecuteRequest
+        {
+            SessionId = Guid.NewGuid().ToString(), UserConsentProvided = true, ToolName = "clear_temp_files"
+        }));
+        Assert.Contains("cannot repair physical damage", JsonSerializer.Serialize(execute.Value));
+        Assert.Equal(0, orchestrator.Calls);
+    }
     [Fact]
     public async Task Preview_DoesNotPersistRemediationHistory()
     {
@@ -255,11 +416,12 @@ public class AutonomyControllerTests
         DiagnosticOutput diagnostic,
         FakeRemediationRepository remediationRepository,
         RemediationApprovalStore? approvals = null,
-        IRigMdAgentToolRegistry? registry = null)
+        IRigMdAgentToolRegistry? registry = null,
+        HardwareProfileDto? hardware = null)
     {
         return new AutonomyController(
             orchestrator,
-            new FakeSystemProfileService(),
+            new FakeSystemProfileService { Hardware = hardware },
             new FakeDiagnosticSessionRepository(
                 diagnostic),
             remediationRepository,
@@ -351,7 +513,8 @@ public class AutonomyControllerTests
     public async Task SelectedAppPreview_DoesNotCloseProcesses_AndBindsTheSelection()
     {
         var approvals = new RemediationApprovalStore(TimeProvider.System);
-        var controller = CreateController(new FakeOrchestrator(), CreateDiagnostic(), new FakeRemediationRepository(), approvals);
+        var controller = CreateController(new FakeOrchestrator(), CreateMemoryDiagnostic(), new FakeRemediationRepository(), approvals,
+            hardware: new() { Ram = new() { UsagePercent = 90 }, ProcessInsights = new() { TopMemoryApps = [new() { Name = "chrome", MemoryMb = 256 }] } });
         var sessionId = Guid.NewGuid();
         var response = Assert.IsType<OkObjectResult>(await controller.PreviewCloseSelectedApp(new()
         {
@@ -366,6 +529,46 @@ public class AutonomyControllerTests
             SessionId = sessionId.ToString(), ProcessNames = new() { "calculator" },
             Confirmed = true, ApprovalToken = preview.ApprovalToken
         }));
+    }
+
+    private static DiagnosticOutput CreateMemoryDiagnostic() => new()
+    {
+        DiagnosedCategory = "High Memory Pressure", ActionCategory = "Troubleshoot",
+        Session = new() { Answers = new List<SessionAnswer>
+        {
+            new() { QuestionKey = "diagnosis_mode", AnswerValue = "component" },
+            new() { QuestionKey = "component_ids", AnswerValue = "[\"memory\"]" },
+            new() { QuestionKey = "proof", AnswerValue = "[{\"metric_id\":\"memory_usage\",\"status\":\"high\",\"value\":\"90%\"}]" }
+        } }
+    };
+
+    [Fact]
+    public async Task ExplicitScopeRejectsAnUnrelatedToolBeforeIssuingOrConsumingApproval()
+    {
+        var diagnostic = CreateDiagnostic();
+        diagnostic.Session = new() { Answers = new List<SessionAnswer>
+        {
+            new() { QuestionKey = "diagnosis_mode", AnswerValue = "component" },
+            new() { QuestionKey = "component_ids", AnswerValue = "[\"network\"]" }
+        } };
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible) { CanPreviewExecute = true };
+        var orchestrator = new FakeOrchestrator();
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository(), approvals,
+            new RigMdAgentToolRegistry(new[] { tool }));
+        var id = Guid.NewGuid();
+        Assert.IsType<ConflictObjectResult>(await controller.PreviewTool(new()
+        {
+            SessionId = id.ToString(), ToolName = tool.Name, Arguments = JsonSerializer.SerializeToElement(new { })
+        }, CancellationToken.None));
+        var approval = approvals.Issue(RemediationApprovalStore.CreateScope("remediation", id, tool.Name, "{}"));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new()
+        {
+            SessionId = id.ToString(), ToolName = tool.Name, ToolArgumentsJson = "{}", ApprovalToken = approval.Token,
+            UserConsentProvided = true
+        }));
+        Assert.Equal(0, orchestrator.Calls);
+        Assert.Equal(0, tool.ExecutionCount);
     }
 
     private static DiagnosticOutput CreateDiagnostic()
@@ -411,6 +614,7 @@ public class AutonomyControllerTests
     private sealed class FakeOrchestrator :
         IAutonomousOrchestrator
     {
+        public int Calls { get; private set; }
         public OrchestrationResult PreviewResult
         {
             get;
@@ -431,6 +635,7 @@ public class AutonomyControllerTests
                 Action<ReActTraceStep>? stepReporter = null,
                 CancellationToken cancellationToken = default)
         {
+            Calls++;
             return Task.FromResult(
                 PreviewResult);
         }
@@ -446,6 +651,7 @@ public class AutonomyControllerTests
                 Action<ReActTraceStep>? stepReporter = null,
                 CancellationToken cancellationToken = default)
         {
+            Calls++;
             return Task.FromResult(
                 ExecutionResult);
         }
@@ -454,10 +660,11 @@ public class AutonomyControllerTests
     private sealed class FakeSystemProfileService :
         IWindowsSystemProfileService
     {
+        public HardwareProfileDto? Hardware { get; init; }
         public HardwareProfileDto
             GetLiveSystemProfile()
         {
-            return new HardwareProfileDto
+            return Hardware ?? new HardwareProfileDto
             {
                 OsVersion = "Windows 11",
                 ProcessInsights = new ProcessInsightsDto
@@ -557,7 +764,9 @@ public class AutonomyControllerTests
             string clientId = "",
             string? primaryResult = null,
             string? incidentalWarning = null,
-            string? componentStatus = null)
+            string? componentStatus = null,
+            IReadOnlyList<AutomaticDiagnosisProof>? proof = null,
+            string? recommendedNextStep = null)
         {
             return Task.FromResult(Guid.NewGuid());
         }

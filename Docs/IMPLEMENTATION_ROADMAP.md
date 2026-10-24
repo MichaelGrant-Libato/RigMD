@@ -1,6 +1,6 @@
 # IMPLEMENT_ME.md — RigMD 17-Phase Autonomous Engine Roadmap
 
-This document is the **canonical implementation reference** for all developers and AI agents working on RigMD. It describes every phase of the migration from the Python advisory system to the C#/.NET closed-loop autonomous diagnostic and remediation platform.
+This is a historical implementation roadmap for the Python-to-.NET migration. Its completed phase markers are not whole-system release acceptance, hardware compatibility certification, or evidence that every SRS requirement has passed. Use [SYSTEM_CONSISTENCY_AUDIT.md](SYSTEM_CONSISTENCY_AUDIT.md) for the current consistency review and remaining verification work.
 
 ---
 

@@ -57,7 +57,7 @@ export default function AlertsSummaryCard({ dashboard, setActivePage }: Props) {
             <p className="truncate text-[11px] text-slate-400">
               {hasWarnings
                 ? `${dashboard.warning_signs_active_count} recorded alert${dashboard.warning_signs_active_count !== 1 ? 's' : ''}`
-                : 'No warnings detected'}
+                : 'No saved alerts'}
             </p>
           </div>
         </div>

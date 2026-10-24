@@ -102,7 +102,7 @@ public class InspectNetworkConnectivityTool : IRigMdAgentTool
             dnsError = ex.Message;
         }
 
-        long? livePingMs = net.PingLatencyMs;
+        long? livePingMs = null;
         string? pingStatus = null;
 
         try
@@ -110,10 +110,7 @@ public class InspectNetworkConnectivityTool : IRigMdAgentTool
             using var ping = new Ping();
             var reply = await ping.SendPingAsync(targetHost, TimeSpan.FromMilliseconds(2000), cancellationToken: cancellationToken);
             pingStatus = reply.Status.ToString();
-            if (reply.Status == IPStatus.Success)
-            {
-                livePingMs = reply.RoundtripTime;
-            }
+            livePingMs = MeasuredPingLatency(reply.Status, reply.RoundtripTime);
         }
         catch (Exception ex)
         {
@@ -122,6 +119,8 @@ public class InspectNetworkConnectivityTool : IRigMdAgentTool
 
         var payload = new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
+            querySucceeded = net.QuerySucceeded,
             hasActiveAdapter = net.HasActiveAdapter,
             adapterName = net.AdapterName,
             ipAddress = net.IpAddress,
@@ -156,4 +155,7 @@ public class InspectNetworkConnectivityTool : IRigMdAgentTool
             OutputLog = summary
         };
     }
+
+    internal static long? MeasuredPingLatency(IPStatus status, long roundtripMs) =>
+        status == IPStatus.Success && roundtripMs >= 0 ? roundtripMs : null;
 }

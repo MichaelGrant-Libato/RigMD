@@ -76,6 +76,7 @@ export interface ToolDryRunPreview {
   whatWillHappen: string;
   affectedItemsCount: number;
   estimatedBytesAffected: number;
+  estimatedBytesKnown?: boolean;
   affectedTargets?: string[];
   warnings?: string[];
 }
@@ -108,6 +109,7 @@ export interface RegisteredAgentTool {
 }
 
 export interface AutonomyResult {
+  persistenceWarning?: string;
   engineMode?: string;
   rootCauseAnalysis?: string;
   plan?: AutonomyPlan;

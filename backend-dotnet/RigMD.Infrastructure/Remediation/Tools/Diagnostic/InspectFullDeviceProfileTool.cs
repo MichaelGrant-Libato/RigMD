@@ -24,7 +24,7 @@ public class InspectFullDeviceProfileTool : IRigMdAgentTool
     public string DisplayName => "Inspect Full Device Info & Hardware Profile";
 
     public string Description =>
-        "Reads the complete Windows hardware and OS profile ('My Device Info'), including device name, chassis type (Desktop/Laptop), OS build, motherboard/chipset, active power plan, CPU specs, GPU specs & driver, RAM sticks & slots, physical storage drives & S.M.A.R.T. health, battery presence, connected displays, network adapter, and Device Manager errors.";
+        "Reads reported Windows hardware/OS metadata, available resource readings and device-status warnings. This is not a comprehensive hardware, memory-cell, startup-impact or Windows-integrity test.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -80,6 +80,7 @@ public class InspectFullDeviceProfileTool : IRigMdAgentTool
 
         var payload = new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
             deviceName = profile.DeviceName,
             deviceType = profile.DeviceType,
             osVersion = profile.OsVersion,
@@ -98,7 +99,7 @@ public class InspectFullDeviceProfileTool : IRigMdAgentTool
                 name = profile.Cpu.Name,
                 cores = profile.Cpu.Cores,
                 threads = profile.Cpu.Threads,
-                usagePercent = Math.Round(profile.Cpu.UsagePercent, 1),
+                usagePercent = profile.Cpu.UsageAvailable != false && double.IsFinite(profile.Cpu.UsagePercent) && profile.Cpu.UsagePercent is >= 0 and <= 100 ? (double?)Math.Round(profile.Cpu.UsagePercent, 1) : null,
                 frequencyMhz = Math.Round(profile.Cpu.FrequencyMhz, 0),
                 temperatureCelsius = profile.Cpu.TemperatureCelsius
             },
@@ -113,8 +114,8 @@ public class InspectFullDeviceProfileTool : IRigMdAgentTool
             ram = new
             {
                 totalGb = Math.Round(profile.Ram.TotalGb, 1),
-                usedGb = Math.Round(profile.Ram.UsedGb, 1),
-                usagePercent = Math.Round(profile.Ram.UsagePercent, 1),
+                usedGb = profile.Ram.UsageAvailable == false ? (double?)null : Math.Round(profile.Ram.UsedGb, 1),
+                usagePercent = profile.Ram.UsageAvailable != false && double.IsFinite(profile.Ram.UsagePercent) && profile.Ram.UsagePercent is >= 0 and <= 100 ? (double?)Math.Round(profile.Ram.UsagePercent, 1) : null,
                 speedMtps = profile.Ram.SpeedMtps,
                 slotsUsed = profile.Ram.SlotsUsed,
                 slotsTotal = profile.Ram.SlotsTotal
@@ -122,17 +123,17 @@ public class InspectFullDeviceProfileTool : IRigMdAgentTool
             storageDrives = driveSummaries,
             battery = profile.Battery,
             connectedDisplays = profile.ConnectedDisplays,
-            deviceErrorsCount = profile.DeviceErrors?.Count ?? 0,
+            deviceErrorsCount = profile.DeviceErrorsAvailable == true ? (int?)(profile.DeviceErrors?.Count ?? 0) : null,
             deviceErrors = profile.DeviceErrors?.Take(5).ToList()
         };
 
         var summary =
             $"Device: {profile.DeviceName} ({profile.DeviceType}, {profile.OsVersion}) | " +
-            $"CPU: {profile.Cpu.Name} ({profile.Cpu.UsagePercent:F1}%, {(profile.Cpu.TemperatureCelsius.HasValue ? $"{profile.Cpu.TemperatureCelsius.Value:F0}°C" : "N/A")}) | " +
-            $"RAM: {profile.Ram.UsedGb:F1}/{profile.Ram.TotalGb:F1} GB ({profile.Ram.UsagePercent:F1}%) | " +
+            $"CPU: {profile.Cpu.Name} ({(profile.Cpu.UsageAvailable == false ? "activity unavailable" : $"{profile.Cpu.UsagePercent:F1}%")}, {(profile.Cpu.TemperatureCelsius.HasValue ? $"{profile.Cpu.TemperatureCelsius.Value:F0}°C" : "temperature unavailable")}) | " +
+            $"RAM: {(profile.Ram.UsageAvailable == false ? "unavailable" : $"{profile.Ram.UsedGb:F1}/{profile.Ram.TotalGb:F1} GB ({profile.Ram.UsagePercent:F1}%)")} | " +
             $"GPU: {profile.Gpu.Name} | " +
             $"Drives: {driveSummaries.Count} ({profile.PrimaryStorageType}) | " +
-            $"Device Manager Errors: {profile.DeviceErrors?.Count ?? 0}.";
+            $"Device Manager Errors: {(profile.DeviceErrorsAvailable == true ? (profile.DeviceErrors?.Count ?? 0).ToString() : "unavailable")}. These are reported readings, not functional health certification.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

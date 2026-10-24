@@ -1,3 +1,4 @@
+import { plainDiagnosticText, friendlyActionCategory } from '../../lib/diagnosticLanguage';
 import { motion } from 'motion/react';
 import { ChevronRight, Clock3 } from 'lucide-react';
 import type { DashboardSummary, PageKey } from '../../types/rigmd';
@@ -115,10 +116,10 @@ export default function RecentDiagnosticsTimeline({ dashboard, onViewSession, se
                 {/* Content */}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-white group-hover:text-cyan-100 transition-colors">
-                    {s.symptom}
+                    {plainDiagnosticText(s.symptom)}
                   </p>
                   <div className="mt-0.5 flex items-center gap-2">
-                    <span className={`text-[11px] font-semibold capitalize ${ac.text}`}>{s.action}</span>
+                    <span className={`text-[11px] font-semibold capitalize ${ac.text}`}>{friendlyActionCategory(s.action)}</span>
                     <span className="text-[11px] text-slate-500">·</span>
                     <span className="text-[11px] text-slate-500">{formatDate(s.date, s.displayDate)}</span>
                   </div>

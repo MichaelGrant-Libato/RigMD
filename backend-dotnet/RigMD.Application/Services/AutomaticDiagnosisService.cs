@@ -17,6 +17,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Hardware);
+        return ScannerEvidencePolicy.Complete(input, DiagnoseCore(input));
+    }
+
+    private static AutomaticDiagnosisResult DiagnoseCore(AutomaticDiagnosisInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(input.Hardware);
 
         var hw = input.Hardware;
         var mode = (input.Mode ?? "full").Trim().ToLowerInvariant();
@@ -41,7 +48,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         {
             if (selectedComponents.Contains("battery") && !hasBattery)
             {
-                if (selectedComponents.Count == 1)
+                if (selectedComponents.Count == 1 && hw.Battery?.QuerySucceeded == true)
                 {
                     return new AutomaticDiagnosisResult
                     {
@@ -52,24 +59,27 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                         DiagnosedCategory = "Component Not Present",
                         ActionCategory = "Monitor",
                         ConfidenceLabel = "High",
-                        Explanation = "No battery detected on this device. This desktop computer operates on direct AC power and does not have a physical battery to scan.",
+                        Explanation = "Windows reported no battery during a completed query. This does not identify the device type or test power delivery.",
                         RecommendedNextStep = "Select present hardware components (such as Processor, Memory, Storage, or Network) to run a targeted check.",
                         Proof = new List<AutomaticDiagnosisProof>
                         {
                             new()
                             {
                                 Label = "Battery / Power",
-                                Value = "Not Present (Desktop PC)",
-                                Status = "normal",
+                                Value = "No battery reported",
+                                Status = "info",
                                 Meaning = "No battery detected on this device via Win32_Battery."
                             }
                         }
                     };
                 }
 
-                selectedComponents.Remove("battery");
-                targetScopeLabels = selectedComponents.Select(DiagnosticScopeMapper.GetComponentDisplayName).ToList();
-                absentComponentNote = "Battery / Power was skipped because no battery was detected on this desktop device.";
+                if (hw.Battery?.QuerySucceeded == true)
+                {
+                    selectedComponents.Remove("battery");
+                    targetScopeLabels = selectedComponents.Select(DiagnosticScopeMapper.GetComponentDisplayName).ToList();
+                    absentComponentNote = "Battery / Power was skipped because Windows reported no battery.";
+                }
             }
 
             if (selectedComponents.Contains("gpu") && !hasGpu && selectedComponents.Count == 1)
@@ -101,16 +111,12 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         var cpuUsage = hw.Cpu.UsagePercent;
         var cpuTemp = hw.Cpu.TemperatureCelsius;
-        var ramUsage = hw.Ram.UsagePercent;
+        var ramUsage = hw.Ram.UsageAvailable == false ? double.NaN : hw.Ram.UsagePercent;
         var maxDiskUsage = hw.AllDisks.Any()
             ? hw.AllDisks.Max(d => d.UsagePercent)
             : hw.StorageDrives.FirstOrDefault()?.UsagePercent ?? 0;
         var smartFailing = hw.StorageDrives.Any(d => d.IsFailingSmart);
-        var graphicsOnly = (mode == "scenario" && scenarioId == "no-display") ||
-            (mode == "component" && selectedComponents.Overlaps(new[] { "gpu", "display" }) &&
-             !selectedComponents.Overlaps(new[] { "drivers", "peripherals", "audio" }));
-        var deviceErrorsInScope = DeviceErrorAttribution.Select(hw.DeviceErrors, graphicsOnly,
-            includeMonitors: scenarioId == "no-display" || selectedComponents.Contains("display"));
+        var deviceErrorsInScope = DeviceErrorAttribution.SelectForScope(hw.DeviceErrors, mode, scenarioId, selectedComponents);
         var hasDeviceErrors = deviceErrorsInScope.Count > 0;
         var browserMemoryMb = hw.ProcessInsights?.BrowserMemoryMb ?? 0;
         var browserProcs = hw.ProcessInsights?.BrowserProcessCount ?? 0;
@@ -128,7 +134,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             smartFailing,
             deviceErrorsInScope.Count,
             browserMemoryMb,
-            browserProcs);
+            browserProcs,
+            input.CapturedAt == default ? null : input.CapturedAt, input.EventsSince);
 
         // 1. Scenario-driven investigation runs FIRST when user explicitly picked a problem scenario
         // so general RAM/browser workload never hijacks a targeted Scenario Scan.
@@ -202,9 +209,9 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         // 3. Combined severe system thrashing (only when CPU, Memory, and Storage are all in scope)
         if (EvalComponent("cpu") && EvalComponent("memory") && EvalComponent("storage") &&
-            cpuUsage >= 85 && ramUsage >= 85 && maxDiskUsage >= 85)
+            cpuUsage >= 85 && ramUsage >= 85)
         {
-            var primary = $"Combined resource exhaustion detected across CPU ({cpuUsage:0.#}%), RAM ({ramUsage:0.#}%), and Storage ({maxDiskUsage:0.#}%).";
+            var primary = $"High processor activity ({cpuUsage:0.#}%) and memory use ({ramUsage:0.#}%) were measured together. Storage capacity use ({maxDiskUsage:0.#}%) is a separate reading, not disk activity.";
             return new AutomaticDiagnosisResult
             {
                 ComponentStatus = ComponentStatus.Present,
@@ -334,13 +341,15 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         // 7. Memory & Process Workload checks (strictly when Memory is in scope and genuinely elevated)
         bool explicitMemoryScan = mode == "component" && selectedComponents.Contains("memory");
-        bool workloadMemoryPressure = explicitMemoryScan
-            ? (ramUsage >= 75 && browserMemoryMb >= 1800)
-            : (ramUsage >= 82 && browserMemoryMb >= 2600);
+        var memoryState = MemoryPressureRules.Evaluate(ramUsage, hw.ProcessInsights?.BrowserMemoryMb,
+            memLeakWarning, explicitMemoryScan, hw.ProcessInsights != null);
 
-        if (EvalComponent("memory") && (!string.IsNullOrWhiteSpace(memLeakWarning) || ramUsage >= 82 || workloadMemoryPressure))
+        if (EvalComponent("memory") && memoryState == MemoryPressureState.Unknown)
+            return BuildMemoryUnavailableDiagnosis(targetScopeLabels, proof);
+
+        if (EvalComponent("memory") && memoryState == MemoryPressureState.Active)
         {
-            var category = ramUsage >= 82
+            var category = MemoryPressureRules.IsValidUsage(ramUsage) && ramUsage >= MemoryPressureRules.HighUsagePercent
                 ? "High Memory Pressure"
                 : !string.IsNullOrWhiteSpace(memLeakWarning)
                     ? "OS performance degradation"
@@ -359,7 +368,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = ramUsage >= 85 ? "Troubleshoot" : "Maintain",
                 ConfidenceLabel = ramUsage >= 85 ? "High" : "Medium",
                 Explanation = primary,
-                RecommendedNextStep = "Close unused memory-heavy apps or run the guided inspection below to review active processes and clear caches.",
+                RecommendedNextStep = "Save your work, review which running apps use the most memory, and close only apps you no longer need. File cleanup frees storage, not app memory.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -369,6 +378,24 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 }
             };
         }
+
+        if (EvalComponent("cpu") && (hw.Cpu.UsageAvailable == false || !double.IsFinite(cpuUsage) || cpuUsage is < 0 or > 100))
+            return new AutomaticDiagnosisResult
+            {
+                TargetScope = targetScopeLabels, DiagnosedCategory = "Processor readings unavailable", ActionCategory = "Monitor",
+                ConfidenceLabel = "Low", PrimaryResult = "Processor activity could not be measured.",
+                Explanation = "A failed activity reading is not zero activity.",
+                RecommendedNextStep = "Try the read-only check again when processor activity can be measured.", Proof = proof
+            };
+
+        if (EvalComponent("storage") && !hw.AllDisks.Any() && !hw.StorageDrives.Any(d => d.UsagePercent.HasValue))
+            return new AutomaticDiagnosisResult
+            {
+                TargetScope = targetScopeLabels, DiagnosedCategory = "Storage readings unavailable", ActionCategory = "Monitor",
+                ConfidenceLabel = "Low", PrimaryResult = "Storage use could not be measured.",
+                Explanation = "No measured storage-use value was returned.",
+                RecommendedNextStep = "Check again when the drive can be read.", Proof = proof
+            };
 
         // 8. Scoped Component-driven healthy verdict when user explicitly selected specific parts
         if (mode == "component" && selectedComponents.Count > 0)
@@ -428,7 +455,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (selectedComponents.Contains("memory"))
         {
             var leakText = string.IsNullOrWhiteSpace(hw.ProcessInsights?.MemoryLeakWarning)
-                ? "no leaks detected"
+                ? "no app memory warning reported"
                 : hw.ProcessInsights!.MemoryLeakWarning!;
             componentSummaries.Add(
                 $"Memory (RAM) is operating normally ({hw.Ram.TotalGb:0.#} GB, {ramUsage:0.#}% in use, {leakText}).");
@@ -438,7 +465,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         {
             var tempPart = cpuTemp.HasValue ? $", {cpuTemp.Value:0.#}°C" : ", CPU temperature unavailable";
             componentSummaries.Add(
-                $"Processor (CPU) is operating normally ({cpuUsage:0.#}% load on {hw.Cpu.Name}{tempPart}).");
+                $"Processor activity is below the workload warning threshold ({cpuUsage:0.#}% load on {hw.Cpu.Name}{tempPart}).");
         }
 
         if (selectedComponents.Contains("thermal"))
@@ -452,7 +479,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (selectedComponents.Contains("storage"))
         {
             componentSummaries.Add(
-                $"Storage / SSD / HDD is operating normally ({maxDiskUsage:0.#}% in use on {hw.PrimaryStorageType}, S.M.A.R.T. {(smartFailing ? "warning" : "healthy")}).");
+                $"Storage / SSD / HDD is operating normally ({maxDiskUsage:0.#}% in use on {hw.PrimaryStorageType}, drive warning: {(smartFailing ? "reported" : "not reported")}).");
         }
 
         if (selectedComponents.Contains("startup"))
@@ -562,7 +589,9 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             (hw.Network.PingLatencyMs ?? 0) >= 120 ||
             (hw.Network.IsWifi && hw.Network.WifiSignalStrength is > 0 and <= 45);
         var storageIssue = smartFailing || maxDiskUsage >= 80;
-        var responsivenessIssue = cpuUsage >= CpuLoadThresholds.Responsiveness || ramUsage >= 75 || maxDiskUsage >= 80;
+        var validRamUsage = MemoryPressureRules.IsValidUsage(ramUsage);
+        var responsivenessIssue = cpuUsage >= CpuLoadThresholds.Responsiveness ||
+            (validRamUsage && ramUsage >= MemoryPressureRules.ResponsivenessUsagePercent) || maxDiskUsage >= 80;
         var startupIssue = maxDiskUsage >= 80 || cpuUsage >= CpuLoadThresholds.Startup;
         var batteryIssue = hw.Battery?.HasBattery == true &&
             !hw.Battery.IsCharging &&
@@ -571,11 +600,13 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
         var appCrashEventCount = stabilityEvents.ApplicationCrashEvents?.Count ?? 0;
         var systemCrashEventCount = stabilityEvents.SystemCrashEvents?.Count ?? 0;
-        var appCrashSupportingRisk = cpuUsage >= CpuLoadThresholds.Elevated || ramUsage >= 80 || hasDeviceErrors;
+        var appCrashSupportingRisk = cpuUsage >= CpuLoadThresholds.Elevated || (validRamUsage && ramUsage >= MemoryPressureRules.HighUsagePercent) || hasDeviceErrors;
         var systemCrashSupportingRisk = cpuUsage >= CpuLoadThresholds.SystemStabilityRisk || hasDeviceErrors;
 
         return scenarioId switch
         {
+            "slow-system" or "stuttering-freezing" when !responsivenessIssue && !validRamUsage =>
+                BuildMemoryUnavailableDiagnosis(targetScopeLabels, proof),
             "slow-system" or "stuttering-freezing" when !responsivenessIssue => BuildScenarioHealthyDiagnosis(
                 targetScopeLabels,
                 $"No active performance bottleneck detected. Live scan recorded CPU at {cpuUsage:0.#}%, RAM at {ramUsage:0.#}%, and Storage at {maxDiskUsage:0.#}%.",
@@ -626,6 +657,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                     Description = "Review applications configured to launch at Windows sign-in."
                 }
             },
+            "app-crashes" when eventLogAvailable && appCrashEventCount == 0 && !appCrashSupportingRisk && !validRamUsage =>
+                BuildMemoryUnavailableDiagnosis(targetScopeLabels, proof),
             "app-crashes" when eventLogAvailable && appCrashEventCount == 0 && !appCrashSupportingRisk => BuildScenarioHealthyDiagnosis(
                 targetScopeLabels,
                 $"No active application crash issue detected. Windows Event Logs show 0 recent application crash event(s), CPU is {cpuUsage:0.#}%, and RAM is {ramUsage:0.#}%.",
@@ -798,7 +831,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             },
             "storage-problem" or "disk-full" when !storageIssue => BuildScenarioHealthyDiagnosis(
                 targetScopeLabels,
-                $"No active storage issue detected. Storage check recorded primary volume usage at {maxDiskUsage:0.#}% ({(smartFailing ? "S.M.A.R.T. warning active" : "S.M.A.R.T. healthy")}) across {hw.StorageDrives.Count} drive(s).",
+                $"No active storage issue detected. Storage check recorded primary volume usage at {maxDiskUsage:0.#}% ({(smartFailing ? "S.M.A.R.T. warning active" : "no drive-health warning reported")}) across {hw.StorageDrives.Count} drive(s).",
                 "Windows Storage Settings",
                 "storage_settings",
                 "Review storage again if save/load behavior slows down or free space drops below the warning threshold.",
@@ -873,6 +906,26 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         };
     }
 
+    private static AutomaticDiagnosisResult BuildMemoryUnavailableDiagnosis(
+        IReadOnlyList<string> targetScopeLabels,
+        List<AutomaticDiagnosisProof> proof) => new()
+    {
+        ComponentStatus = ComponentStatus.Present,
+        TargetScope = targetScopeLabels,
+        PrimaryResult = "Memory pressure could not be verified because required RAM or process data is unavailable.",
+        DiagnosedCategory = "Memory telemetry unavailable",
+        ActionCategory = "Monitor",
+        ConfidenceLabel = "Low",
+        Explanation = "Missing or invalid memory readings cannot confirm normal RAM usage or active memory pressure.",
+        RecommendedNextStep = "Refresh the device data and recheck when RAM and process readings are available.",
+        Proof = proof,
+        VerificationTarget = new AutomaticVerificationTarget
+        {
+            Target = "task_manager", Label = "Task Manager - Memory",
+            Description = "Review physical memory usage and active applications."
+        }
+    };
+
     private static AutomaticDiagnosisResult BuildThermalUnavailableDiagnosis(
         IReadOnlyList<string> targetScopeLabels,
         List<AutomaticDiagnosisProof> proof) => new()
@@ -934,7 +987,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         bool smartFailing,
         int deviceErrorCount,
         double browserMemoryMb,
-        int browserProcs)
+        int browserProcs,
+        DateTimeOffset? capturedAt, DateTimeOffset? eventsSince)
     {
         var activeScopeKeys = ResolveScopeKeys(mode, scenarioId, selectedComponents);
         bool Include(params string[] keys) =>
@@ -944,14 +998,41 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (Include("cpu", "thermal", "os"))
         {
-            var tempText = cpuTemp.HasValue ? $", Temp: {cpuTemp.Value:0.#}°C" : ", CPU temperature unavailable";
+            var validLoad = hw.Cpu.UsageAvailable != false && double.IsFinite(cpuUsage) && cpuUsage is >= 0 and <= 100;
+            var staleLoad = hw.Cpu.UsageCapturedAtUtc.HasValue && capturedAt.HasValue &&
+                (capturedAt.Value - hw.Cpu.UsageCapturedAtUtc.Value > TimeSpan.FromSeconds(5) ||
+                 hw.Cpu.UsageCapturedAtUtc.Value - capturedAt.Value > TimeSpan.FromSeconds(2));
+            validLoad &= !staleLoad;
+            var loadThreshold = scenarioId is "slow-system" or "stuttering-freezing" ? CpuLoadThresholds.Responsiveness
+                : scenarioId == "slow-boot" ? CpuLoadThresholds.Startup
+                : scenarioId == "blue-screen-crash" ? CpuLoadThresholds.SystemStabilityRisk : CpuLoadThresholds.Elevated;
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = "Processor (CPU)",
-                Value = $"{cpuUsage:0.#}% load{tempText}",
-                Status = cpuUsage >= 85 || hw.Cpu.IsThermallyThrottling || cpuTemp is >= 85 ? "high" : cpuUsage >= 65 ? "elevated" : !cpuTemp.HasValue ? "unknown" : "normal",
-                Meaning = $"{hw.Cpu.Name} ({hw.Cpu.Cores}C/{hw.Cpu.Threads}T @ {hw.Cpu.FrequencyMhz} MHz). CPU temperature source: {hw.Cpu.TemperatureSource}."
+                MetricId = "cpu_usage", Label = "Processor (CPU)",
+                CapturedAt = hw.Cpu.UsageCapturedAtUtc,
+                Value = validLoad ? $"{cpuUsage:0.#}%" : "Unavailable",
+                Status = !validLoad ? "unknown" : scenarioId == "overheating-loud-fan" ||
+                    mode == "component" && selectedComponents.Contains("thermal") && !selectedComponents.Contains("cpu")
+                    ? "info" : cpuUsage >= loadThreshold ? "high" : "normal",
+                Meaning = staleLoad ? "The processor activity sample is too old or has an invalid time. Recheck for a fresh measurement."
+                    : $"Processor activity measured for {hw.Cpu.Name}. Workload does not measure temperature. Activity source: {hw.Cpu.UsageSource}."
             });
+            var validTemp = cpuTemp.HasValue && double.IsFinite(cpuTemp.Value) && cpuTemp.Value is > 0 and <= 125;
+            proof.Add(new AutomaticDiagnosisProof
+            {
+                MetricId = "cpu_temperature", Label = "Processor temperature",
+                Value = validTemp ? $"{cpuTemp:0.#}°C" : "Unavailable",
+                Status = !validTemp ? "unknown" : cpuTemp >= 85 ? "high" : "normal",
+                CapturedAt = hw.Cpu.TemperatureCapturedAtUtc,
+                Meaning = $"CPU temperature source: {hw.Cpu.TemperatureSource}. Missing temperature is not inferred from activity."
+            });
+            if (hw.Cpu.IsThermallyThrottling)
+                proof.Add(new AutomaticDiagnosisProof
+                {
+                    MetricId = "cpu_throttling", Label = "Heat-related slowdown report",
+                    Value = "Reported", Status = "high",
+                    Meaning = "A heat-related slowdown was reported independently of the temperature reading."
+                });
         }
 
         if (Include("memory"))
@@ -961,23 +1042,40 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = "Physical Memory (RAM)",
-                Value = $"{ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB)",
-                Status = ramUsage >= 85 ? "high" : ramUsage >= 75 ? "elevated" : "normal",
+                MetricId = "memory_usage", Label = "Physical Memory (RAM)",
+                Value = hw.Ram.UsageAvailable != false && MemoryPressureRules.IsValidUsage(ramUsage)
+                    ? $"{ramUsage:0.#}% ({hw.Ram.UsedGb:0.0} / {hw.Ram.TotalGb:0.0} GB)" : "Unavailable",
+                Status = hw.Ram.UsageAvailable == false || !MemoryPressureRules.IsValidUsage(ramUsage) ? "unknown"
+                    : ramUsage >= MemoryPressureRules.HighUsagePercent ? "high" : "normal",
                 Meaning = showBrowserDetail
                     ? $"Active browser workload: {browserMemoryMb:0.#} MB across {browserProcs} processes."
                     : "Physical RAM utilization across active Windows processes."
             });
+            if (!string.IsNullOrWhiteSpace(hw.ProcessInsights?.MemoryLeakWarning))
+                proof.Add(new AutomaticDiagnosisProof
+                {
+                    MetricId = "memory_app_warning", Label = "Application memory warning", Value = hw.ProcessInsights.MemoryLeakWarning,
+                    Status = "high", Meaning = "The process inspection reported unusual application memory behavior."
+                });
         }
 
         if (Include("storage", "startup"))
         {
+            var hasUsage = (hw.AllDisks.Any() || hw.StorageDrives.Any(d => d.UsagePercent.HasValue)) &&
+                double.IsFinite(maxDiskUsage) && maxDiskUsage is >= 0 and <= 100;
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = "Storage & S.M.A.R.T.",
-                Value = $"{maxDiskUsage:0.#}% used ({(smartFailing ? "S.M.A.R.T. Warning" : "S.M.A.R.T. Healthy")})",
-                Status = smartFailing || maxDiskUsage >= 90 ? "high" : maxDiskUsage >= 80 ? "elevated" : "normal",
-                Meaning = $"Primary storage type: {hw.PrimaryStorageType} across {hw.StorageDrives.Count} drive(s)."
+                MetricId = "storage_usage", Label = "Storage space",
+                Value = hasUsage ? $"{maxDiskUsage:0.#}% used" : "Unavailable",
+                Status = !hasUsage ? "unknown" : maxDiskUsage >= 80 ? "high" : "normal",
+                Meaning = "Space used by Windows and saved files. This does not measure drive health."
+            });
+            proof.Add(new AutomaticDiagnosisProof
+            {
+                MetricId = "storage_health", Label = "Drive-health warnings",
+                Value = smartFailing ? "Warning reported" : hw.StorageDrives.Count > 0 ? "No warning reported" : "Unavailable",
+                Status = smartFailing ? "high" : hw.StorageDrives.Count > 0 ? "info" : "unknown",
+                Meaning = "Absence of a reported warning is not a comprehensive drive-health test."
             });
         }
 
@@ -989,45 +1087,66 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 activeScopeKeys.Contains("peripherals") ||
                 activeScopeKeys.Contains("audio") ||
                 (mode == "component" && selectedComponents.Contains("gpu"));
-            var gpuTempText = hw.Gpu.TemperatureCelsius.HasValue ? $", {hw.Gpu.TemperatureCelsius.Value:0.#}°C" : ", GPU temperature unavailable";
+            if (driverErrorInScope)
+            {
+                var scopedErrors = DeviceErrorAttribution.SelectForScope(hw.DeviceErrors, mode, scenarioId, selectedComponents);
+                proof.Add(new AutomaticDiagnosisProof
+                {
+                    MetricId = "graphics_devices", Label = "Graphics & Drivers",
+                    Value = hw.DeviceErrorsAvailable != true ? "Unavailable" : $"{scopedErrors.Count} device error(s) reported in the checked scope",
+                    Status = hw.DeviceErrorsAvailable != true ? "unknown" : "info",
+                    Meaning = "Device Manager error codes describe device status, not a confirmed driver conflict or a functional test."
+                });
+                for (var i = 0; i < scopedErrors.Count; i++)
+                {
+                    var error = scopedErrors[i];
+                    proof.Add(new AutomaticDiagnosisProof
+                    {
+                        MetricId = DeviceErrorAttribution.MetricId(error), Label = error.Name,
+                        Value = $"Device Manager code {error.ErrorCode}", Status = "high",
+                        Meaning = error.Description + " Review this specific code before choosing a repair."
+                    });
+                }
+            }
+            else
+                proof.Add(new AutomaticDiagnosisProof
+                {
+                    MetricId = "graphics_context", Label = "Graphics Thermal Context",
+                    Value = hw.Gpu.Name, Status = "info",
+                    Meaning = "Graphics hardware information only. This is not a temperature measurement."
+                });
+            if (activeScopeKeys == null || (activeScopeKeys.Contains("gpu") || activeScopeKeys.Contains("thermal")) &&
+                scenarioId is not ("driver-error" or "no-display" or "blue-screen-crash"))
+            {
+            var gpuTemp = hw.Gpu.TemperatureCelsius;
+            var validGpuTemp = gpuTemp.HasValue && double.IsFinite(gpuTemp.Value) && gpuTemp.Value is > 0 and <= 125;
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = driverErrorInScope ? "Graphics & Drivers" : "Graphics Thermal Context",
-                Value = driverErrorInScope && deviceErrorCount > 0
-                    ? $"{deviceErrorCount} PnP Device Error(s)"
-                    : $"{hw.Gpu.Name}{gpuTempText}",
-                Status = (driverErrorInScope && deviceErrorCount > 0) || hw.Gpu.TemperatureCelsius is >= 85 ? "high" : "normal",
-                Meaning = driverErrorInScope
-                    ? $"Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} display(s) connected."
-                    : $"GPU context is shown only for thermal correlation; driver warnings are handled under Driver or Display checks."
+                MetricId = "gpu_temperature", Label = "Graphics temperature",
+                Value = validGpuTemp ? $"{gpuTemp:0.#}°C" : "Unavailable",
+                Status = !validGpuTemp ? "unknown" : gpuTemp >= 85 ? "high" : "normal",
+                Meaning = "Graphics temperature must come from its own sensor, not the processor workload."
             });
+            }
         }
 
-        if (Include("network") && hw.Network != null)
-        {
-            var pingText = hw.Network.PingLatencyMs.HasValue ? $"{hw.Network.PingLatencyMs.Value} ms ping" : "No ping";
-            var lossText = $"{hw.Network.PacketLossPercent ?? 0:0.#}% loss";
-            var badNet = !hw.Network.HasActiveAdapter || (hw.Network.PacketLossPercent ?? 0) >= 5 || (hw.Network.PingLatencyMs ?? 0) >= 150;
-            proof.Add(new AutomaticDiagnosisProof
-            {
-                Label = "Network Connectivity",
-                Value = hw.Network.HasActiveAdapter ? $"{pingText}, {lossText}" : "Adapter Offline",
-                Status = badNet ? "elevated" : "normal",
-                Meaning = hw.Network.IsWifi
-                    ? $"Wi-Fi connection (Signal: {hw.Network.WifiSignalStrength}%, IP: {hw.Network.IpAddress})."
-                    : $"Wired Ethernet connection (IP: {hw.Network.IpAddress})."
-            });
-        }
+        if (Include("network")) proof.AddRange(NetworkEvidence.Read(hw.Network));
 
         if (Include("battery") && hw.Battery?.HasBattery == true)
         {
             proof.Add(new AutomaticDiagnosisProof
             {
-                Label = "Battery & Power State",
-                Value = $"{hw.Battery.EstimatedChargeRemaining}% ({hw.Battery.StatusDescription})",
-                Status = hw.Battery.EstimatedChargeRemaining <= 15 && !hw.Battery.IsCharging ? "elevated" : "normal",
-                Meaning = $"Active Power Plan: {hw.ActivePowerPlan}, Health: {hw.Battery.HealthStatus}."
+                MetricId = "battery_charge", Label = "Battery & Power State",
+                Value = hw.Battery.ChargeAvailable == false || hw.Battery.EstimatedChargeRemaining is < 0 or > 100
+                    ? "Unavailable" : $"{hw.Battery.EstimatedChargeRemaining}% ({hw.Battery.StatusDescription})",
+                Status = hw.Battery.ChargeAvailable == false || hw.Battery.EstimatedChargeRemaining is < 0 or > 100 ? "unknown"
+                    : hw.Battery.EstimatedChargeRemaining <= 20 && !hw.Battery.IsCharging ? "elevated" : "normal",
+                Meaning = $"Active Power Plan: {hw.ActivePowerPlan}. Charge does not establish battery health."
             });
+        }
+        else if (Include("battery") && hw.Battery?.QuerySucceeded != true)
+        {
+            proof.Add(new AutomaticDiagnosisProof { MetricId = "battery_charge", Label = "Battery detection", Value = "Unavailable", Status = "unknown", Meaning = "Battery information could not be obtained. This does not confirm the battery is absent." });
         }
         else if (Include("os", "startup"))
         {
@@ -1037,7 +1156,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 Value = hw.Battery?.HasBattery == true
                     ? $"Battery {hw.Battery.EstimatedChargeRemaining}% ({hw.Battery.StatusDescription})"
                     : $"AC Power ({hw.ActivePowerPlan})",
-                Status = "normal",
+                Status = "info",
                 Meaning = $"{hw.OsVersion} on {hw.DeviceName} ({hw.DeviceType})."
             });
         }
@@ -1045,28 +1164,38 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (mode == "scenario" && scenarioId is "app-crashes" or "blue-screen-crash")
         {
             var stabilityEvents = hw.StabilityEvents ?? new StabilityEventSnapshotDto();
-            var eventLogAvailable = string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
+            var eventLogAvailable = stabilityEvents.QuerySucceeded == true && string.IsNullOrWhiteSpace(stabilityEvents.QueryWarning);
             var relevantEvents = scenarioId == "app-crashes"
                 ? stabilityEvents.ApplicationCrashEvents
                 : stabilityEvents.SystemCrashEvents;
-            var eventCount = relevantEvents?.Count ?? 0;
-            var label = scenarioId == "app-crashes"
-                ? "Application crash history (last 7 days)"
-                : "System crash history (last 7 days)";
+            var timedEvents = relevantEvents ?? new List<WindowsEventSummaryDto>();
+            if (eventsSince.HasValue && (eventsSince.Value > DateTimeOffset.UtcNow || eventsSince.Value < DateTimeOffset.UtcNow.AddDays(-7) ||
+                timedEvents.Any(e => !e.TimeUtc.HasValue || e.TimeUtc > DateTimeOffset.UtcNow))) eventLogAvailable = false;
+            var eventCount = timedEvents.Count(e => !eventsSince.HasValue ||
+                e.TimeUtc.HasValue && e.TimeUtc >= eventsSince.Value && e.TimeUtc <= DateTimeOffset.UtcNow);
+            var label = (scenarioId == "app-crashes" ? "Application crash records" : "System crash or unexpected restart records") +
+                (eventsSince.HasValue ? " since diagnosis" : " (last 7 days, up to 40 matching records)");
 
             proof.Add(new AutomaticDiagnosisProof
             {
+                MetricId = scenarioId == "app-crashes" ? "application_crash_history" : "system_crash_history",
+                WindowKind = eventsSince.HasValue ? "since_diagnosis" : "rolling_history",
+                WindowStart = eventsSince ?? (capturedAt ?? DateTimeOffset.UtcNow).AddDays(-7),
+                WindowEnd = capturedAt ?? DateTimeOffset.UtcNow,
                 Label = label,
-                Value = eventLogAvailable
+                Value = eventLogAvailable || eventCount > 0
                     ? $"{eventCount} found"
                     : "Could not verify",
-                Status = !eventLogAvailable ? "elevated" : eventCount > 0 ? "high" : "normal",
+                Status = eventCount > 0 ? "high" : !eventLogAvailable ? "unknown" : "normal",
                 Meaning = eventLogAvailable
-                    ? $"Checked Windows Event Logs for {label.ToLowerInvariant()} within the last 7 days."
+                    ? $"Checked Windows Event Logs for {label.ToLowerInvariant()}. This is a bounded event query, not a cause analysis or proof that the problem is happening now."
                     : stabilityEvents.QueryWarning ?? "Windows Event Logs could not be checked."
             });
+            if (!eventLogAvailable && eventCount > 0)
+                proof.Add(new AutomaticDiagnosisProof { MetricId = "event_query_coverage", Label = "Error-record coverage", Value = "Unavailable", Status = "unknown", Meaning = "Some matching records were obtained, but complete coverage of the requested time window could not be confirmed." });
         }
 
+        foreach (var item in proof) item.CapturedAt ??= capturedAt;
         return proof;
     }
 

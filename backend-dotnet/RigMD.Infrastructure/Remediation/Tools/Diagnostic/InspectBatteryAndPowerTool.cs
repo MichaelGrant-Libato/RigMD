@@ -30,7 +30,7 @@ public class InspectBatteryAndPowerTool : IRigMdAgentTool
     public string DisplayName => "Inspect Battery & Power Plan";
 
     public string Description =>
-        "Reads device form factor (Desktop vs. Laptop), active Windows power plan (Balanced, High Performance, Power Saver), and battery charge/charging/health status if a battery is present.";
+        "Reads reported device type, power plan and available battery charge/status. It does not measure wear, full-charge capacity or drain rate.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -75,13 +75,15 @@ public class InspectBatteryAndPowerTool : IRigMdAgentTool
 
         var payload = new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
+            querySucceeded = battery?.QuerySucceeded,
             deviceType,
             activePowerPlan,
-            hasBattery = battery?.HasBattery ?? false,
+            hasBattery = battery?.QuerySucceeded == true ? (bool?)battery.HasBattery : null,
             battery = battery != null && battery.HasBattery
                 ? new
                 {
-                    chargePercent = battery.ChargePercent,
+                    chargePercent = battery.ChargeAvailable == false ? (int?)null : battery.ChargePercent,
                     isCharging = battery.IsCharging,
                     statusDescription = battery.StatusDescription,
                     healthStatus = battery.HealthStatus,
@@ -90,9 +92,10 @@ public class InspectBatteryAndPowerTool : IRigMdAgentTool
                 : null
         };
 
-        var batterySummary = battery != null && battery.HasBattery
+        var batterySummary = battery?.QuerySucceeded != true ? "Battery detection unavailable"
+            : battery != null && battery.HasBattery
             ? $"Battery: {battery.ChargePercent}% ({battery.StatusDescription}, Health: {battery.HealthStatus})"
-            : "No battery detected (AC Desktop)";
+            : "Windows reported no battery";
 
         var summary = $"Device: {deviceType}, Active Power Plan: '{activePowerPlan}', {batterySummary}.";
 

@@ -1,3 +1,4 @@
+import { plainDiagnosticText, friendlyConfidence, friendlyActionCategory } from '../lib/diagnosticLanguage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -52,6 +53,11 @@ interface PatternTimelineDot {
 }
 
 interface RecurringPattern {
+  risk_level?: string;
+  priority_rank?: number;
+  risk_reason?: string;
+  evidence_summary?: string;
+  current_condition?: string;
   id: string;
   pattern_key: string;
   symptom: string;
@@ -98,13 +104,10 @@ const emptyRecurring: RecurringResponse = {
 
 const patternFilters = [
   'All',
-  'Stable',
-  'Worsening',
-  'Improving',
-  'Escalated',
-  'Maintain',
-  'Troubleshoot',
-  'Escalate',
+  'Protect files first',
+  'Review promptly',
+  'Review',
+  'Needs verification',
 ];
 
 const DEFAULT_VISIBLE_OCCURRENCES = 5;
@@ -129,19 +132,19 @@ function getFriendlyAction(action: string) {
   const value = action.toLowerCase();
 
   if (value.includes('monitor')) {
-    return 'Watch for now';
+    return friendlyActionCategory('Monitor');
   }
 
   if (value.includes('maintain')) {
-    return 'Do simple care';
+    return friendlyActionCategory('Maintain');
   }
 
   if (value.includes('troubleshoot')) {
-    return 'Try a safe fix';
+    return friendlyActionCategory('Troubleshoot');
   }
 
   if (value.includes('escalate')) {
-    return 'Get help';
+    return friendlyActionCategory('Escalate');
   }
 
   return action || 'Not sure yet';
@@ -162,21 +165,11 @@ function getFriendlyStatus(status: string) {
     return 'Needs help';
   }
 
-  return 'Not changing';
+  return status || 'Trend not established';
 }
 
 function getFriendlyConfidence(confidence: string) {
-  const value = confidence.toLowerCase();
-
-  if (value.includes('high')) {
-    return 'Strong match';
-  }
-
-  if (value.includes('moderate') || value.includes('medium')) {
-    return 'Possible match';
-  }
-
-  return 'Needs more checks';
+  return friendlyConfidence(confidence);
 }
 
 function getSummaryCardTone(value: number, activeTone: 'cyan' | 'red' | 'orange') {
@@ -254,15 +247,11 @@ function getStatusStyle(status: string) {
 function getConfidenceStyle(confidence: string) {
   const value = confidence.toLowerCase();
 
-  if (value.includes('high')) {
-    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
-  }
-
-  if (value.includes('moderate') || value.includes('medium')) {
+  if (value === 'partial') {
     return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
   }
 
-  return 'border-red-400/30 bg-red-400/10 text-red-300';
+  return 'border-slate-400/30 bg-slate-400/10 text-slate-300';
 }
 
 function getPatternBorder(status: string) {
@@ -324,21 +313,7 @@ function filterPatterns(patterns: RecurringPattern[], filter: string, search: st
   const query = search.trim().toLowerCase();
 
   return patterns.filter((pattern) => {
-    const status = pattern.status.toLowerCase();
-    const previousAction = pattern.previous_action.toLowerCase();
-    const updatedAction = pattern.updated_action.toLowerCase();
-
-    if (filter === 'Escalated' && !pattern.action_escalated && !status.includes('escalated')) {
-      return false;
-    }
-
-    if (
-      filter !== 'All' &&
-      filter !== 'Escalated' &&
-      !status.includes(filter.toLowerCase()) &&
-      !previousAction.includes(filter.toLowerCase()) &&
-      !updatedAction.includes(filter.toLowerCase())
-    ) {
+    if (filter !== 'All' && (pattern.risk_level || 'Needs verification') !== filter) {
       return false;
     }
 
@@ -458,9 +433,11 @@ function PatternCard({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-lg font-bold text-white">
-                {incompletePattern ? 'Repeated checks need more details' : pattern.symptom}
+                {incompletePattern ? 'Repeated checks need more details' : plainDiagnosticText(pattern.symptom)}
               </h3>
-              <StatusBadge status={pattern.status} />
+              <span className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-bold ${(pattern.priority_rank ?? 0) >= 2 ? 'border-red-400/40 text-red-300' : 'border-amber-400/40 text-amber-200'}`}>
+                <AlertTriangle size={12} />{pattern.risk_level || 'Needs verification'}
+              </span>
 
               {pattern.action_escalated && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-400">
@@ -471,11 +448,12 @@ function PatternCard({
             </div>
 
             <p className="mt-1 text-sm text-slate-400">
-              {incompletePattern ? 'The symptom was not saved for these checks.' : `Possible cause: ${pattern.probable_cause || 'No cause identified yet'}.`}
+              {pattern.current_condition || 'Current condition not verified'}
             </p>
             <p className="mt-2 text-xs font-semibold text-cyan-300">
-              Next step: {getFriendlyAction(pattern.updated_action)}
+              {plainDiagnosticText(pattern.risk_reason || 'Open the related checks to review the evidence.')}
             </p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-200">{plainDiagnosticText(getRecommendedNextStep(pattern))}</p>
           </div>
 
           <div className="flex justify-end">
@@ -500,14 +478,15 @@ function PatternCard({
         <div className="px-5 py-5">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4">
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
+              <section className="border-b border-[var(--rigmd-border)] pb-4">
                 <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
                   What to do next
                 </p>
-                <p className="text-sm leading-relaxed text-white">{getRecommendedNextStep(pattern)}</p>
+                <p className="text-sm leading-relaxed text-white">{plainDiagnosticText(getRecommendedNextStep(pattern))}</p>
+                <p className="mt-3 text-sm leading-relaxed text-slate-400">{plainDiagnosticText(pattern.evidence_summary)}</p>
               </section>
 
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
+              <section className="border-b border-[var(--rigmd-border)] pb-4">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Checks included</p>
                   <span className="text-xs font-semibold text-cyan-400">{occurrences.length} related checks</span>
@@ -536,8 +515,8 @@ function PatternCard({
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate font-semibold text-white">{occurrence.symptom}</p>
-                        <p className="truncate text-sm text-slate-400">{occurrence.probable_cause}</p>
+                        <p className="truncate font-semibold text-white">{plainDiagnosticText(occurrence.symptom)}</p>
+                        <p className="truncate text-sm text-slate-400">{plainDiagnosticText(occurrence.probable_cause)}</p>
                       </div>
 
                       <div className="flex justify-center">
@@ -592,30 +571,21 @@ function PatternCard({
             </div>
 
             <aside className="space-y-4">
-              <section className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-4">
+              <section className="border-b border-[var(--rigmd-border)] pb-4">
                 <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                  Simple summary
+                  Saved history
                 </p>
 
                 <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Before</span>
-                    <ActionBadge action={pattern.previous_action} />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Now</span>
-                    <ActionBadge action={pattern.updated_action} />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Trend</span>
-                    <StatusBadge status={pattern.status} />
-                  </div>
+                  <p className="text-slate-300">{pattern.status}</p>
 
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Repeated checks</span>
                     <span className="font-bold text-white">{pattern.occurrence_count}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-slate-400">Latest warning</span>
+                    <span className="text-white">{pattern.latest_detected}</span>
                   </div>
                 </div>
               </section>
@@ -630,7 +600,7 @@ function PatternCard({
                 Open past checks
               </motion.button>
 
-              <section className="rounded-xl border border-red-400/20 bg-red-400/[0.06] p-4">
+              <section className="border-t border-[var(--rigmd-border)] pt-4">
                 <p className="text-sm font-bold text-red-200">Remove this repeated problem?</p>
                 <p className="mt-1 text-sm leading-relaxed text-slate-400">
                   This deletes the saved checks that created this repeated problem. It also removes them from Past Checks.
@@ -664,7 +634,7 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
       initial="hidden"
       animate="visible"
       transition={cardTransition}
-      className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)]"
+      className="min-w-[1100px] overflow-hidden"
     >
       <div className="border-b border-[var(--rigmd-border)] px-5 py-4">
         <div className="flex items-center gap-2">
@@ -702,8 +672,8 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
             className="grid grid-cols-[150px_minmax(170px,1fr)_minmax(220px,1fr)_180px_190px_150px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0"
           >
             <div className="text-sm font-semibold text-white">{row.date}</div>
-            <div className="font-bold text-white">{row.symptom}</div>
-            <div className="text-center text-sm text-slate-400">{row.probable_cause}</div>
+            <div className="font-bold text-white">{plainDiagnosticText(row.symptom)}</div>
+            <div className="text-center text-sm text-slate-400">{plainDiagnosticText(row.probable_cause)}</div>
             <div className="flex justify-center">
               <ActionBadge action={row.action_category} />
             </div>
@@ -811,7 +781,7 @@ export default function RecurringPatternsView({
       recurring_issues: visiblePatterns.length,
       worsening_trends: visiblePatterns.filter((pattern) => pattern.status.toLowerCase().includes('worsening')).length,
       action_escalated: visiblePatterns.filter((pattern) => pattern.action_escalated).length,
-      total_occurrences: visiblePatterns.reduce((total, pattern) => total + pattern.occurrence_count, 0),
+      total_occurrences: new Set(visiblePatterns.flatMap(pattern => pattern.occurrences.map(item => item.id))).size,
     }),
     [visiblePatterns]
   );
@@ -902,7 +872,7 @@ export default function RecurringPatternsView({
 
             <MetricCard
               icon={<BarChart3 size={20} className={occurrencesTone.iconColor} />}
-              label="Times Seen"
+              label="Related saved checks"
               value={visibleMetrics.total_occurrences}
               borderColor={occurrencesTone.borderColor}
               valueColor={occurrencesTone.valueColor}
@@ -1012,7 +982,7 @@ export default function RecurringPatternsView({
 
           {visibleTimeline.length > 0 && <details className="rounded-xl border border-[var(--rigmd-border)] p-5">
             <summary className="font-semibold text-slate-200">View related check history ({visibleTimeline.length})</summary>
-            <div className="mt-4"><PatternTimelineTable rows={visibleTimeline} /></div>
+            <div className="mt-4 min-w-0 overflow-x-auto"><PatternTimelineTable rows={visibleTimeline} /></div>
           </details>}
         </div>
       </motion.div>

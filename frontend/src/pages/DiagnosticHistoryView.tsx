@@ -1,3 +1,5 @@
+import { friendlyActionCategory } from '../lib/diagnosticLanguage';
+import { getCheckOverview, getCheckStatus, getAdditionalFindingStatus, crashMetric, repeatedFindingLabel, getCheckEvidenceLabel } from '../lib/checkPresentation';
 import {
   useCallback,
   useEffect,
@@ -12,6 +14,7 @@ import {
   CalendarDays,
   Clock3,
   FileText,
+  ArrowUpRight,
   RefreshCw,
   Search,
   Trash2,
@@ -27,7 +30,6 @@ import type { SessionSummary } from '../types/rigmd';
 
 import {
   getSessionCheckLabel,
-  getResolutionCategory,
   matchesCheckType,
 } from '../lib/pastChecksFormatting';
 
@@ -36,16 +38,16 @@ const CHECK_TYPE_OPTIONS = [
   { value: 'full', label: 'Full device checks' },
   { value: 'component', label: 'Component checks' },
   { value: 'scenario', label: 'Problem scenarios' },
-  { value: 'react', label: 'ReAct actions' },
+  { value: 'react', label: 'Checks with actions' },
 ];
 
 const ACTION_FILTER_OPTIONS = [
-  { value: 'All Actions', label: 'All action tiers' },
+  { value: 'All Actions', label: 'All next steps' },
   { value: 'Recurring Only', label: 'Repeated checks' },
-  { value: 'Monitor', label: 'Monitor' },
-  { value: 'Maintain', label: 'Maintain' },
-  { value: 'Troubleshoot', label: 'Troubleshoot' },
-  { value: 'Escalate', label: 'Escalate' },
+  { value: 'Monitor', label: 'Watch for changes' },
+  { value: 'Maintain', label: 'Review cleanup options' },
+  { value: 'Troubleshoot', label: 'Review possible actions' },
+  { value: 'Escalate', label: 'Get more help' },
 ];
 
 const DEFAULT_VISIBLE_SESSIONS = 10;
@@ -68,10 +70,7 @@ function normalizeAction(action: string): string {
 }
 
 function getPlainActionLabel(action: string) {
-  if (action === 'Escalate') return 'Get help';
-  if (action === 'Troubleshoot') return 'Fix a problem';
-  if (action === 'Maintain') return 'Keep maintained';
-  return 'Watch for now';
+  return friendlyActionCategory(action);
 }
 
 function isCurrentMonth(value: string | null) {
@@ -107,24 +106,6 @@ function getActionStyle(action: string) {
 
   return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
 }
-
-function getConfidenceStyle(confidence: string) {
-  const value = confidence.toLowerCase();
-
-  if (value.includes('high')) {
-    return 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300';
-  }
-
-  if (
-    value.includes('moderate') ||
-    value.includes('medium')
-  ) {
-    return 'border-amber-400/35 bg-amber-400/10 text-amber-300';
-  }
-
-  return 'border-slate-500/35 bg-slate-500/10 text-slate-300';
-}
-
 
 
 function formatSessionDate(session: SessionSummary) {
@@ -246,13 +227,14 @@ function SessionRow({
 
   return (
     <motion.div
+      data-testid="past-check-row"
       variants={cardFadeUp}
       initial="hidden"
       animate="visible"
       whileHover={canOpen ? { y: -1 } : undefined}
       transition={{ duration: 0.2 }}
       onClick={canOpen ? openSession : undefined}
-      className={`grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] items-center border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${
+      className={`grid grid-cols-1 gap-3 xl:grid-cols-[7rem_minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_5rem] xl:items-center xl:gap-4 border-b border-l-2 border-b-[var(--rigmd-border)] px-5 py-4 transition-colors last:border-b-0 ${
         canOpen ? 'cursor-pointer' : ''
       } ${
         selected
@@ -271,28 +253,31 @@ function SessionRow({
       </div>
 
       <div className="min-w-0">
-        <p className="truncate font-semibold text-white">
+        <p className="break-words text-sm font-semibold leading-relaxed text-white">
           {getSessionSymptom(session)}
         </p>
 
+        <p className="mt-1 text-xs text-slate-500" title="A saved evidence rating, not a confirmed cause or a percentage likelihood.">
+          {getCheckEvidenceLabel(session)}
+        </p>
         {getSessionScope(session) && (
           <p className="mt-1 text-xs text-slate-500">Checked: {getSessionScope(session)}</p>
         )}
 
         {session.is_recurring && (
           <span className="mt-1 inline-flex rounded-full border border-amber-400/25 bg-amber-400/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-300">
-            Recurring
+            {repeatedFindingLabel(session)}
           </span>
         )}
       </div>
 
-      <p className="mx-auto max-w-[360px] whitespace-normal text-center text-sm leading-relaxed text-slate-400">
-        {session.diagnosed_category || 'Unknown'}
+      <p className="min-w-0 break-words text-sm leading-relaxed text-slate-300">
+        {crashMetric(session) ? getCheckOverview(session).summary : getCheckOverview(session).title}
       </p>
 
-      <div className="flex justify-center">
+      <div className="flex min-w-0 items-start">
         <span
-          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getActionStyle(
+          className={`max-w-full rounded border px-2 py-1 text-xs font-medium leading-relaxed ${getActionStyle(
             action
           )}`}
         >
@@ -300,35 +285,23 @@ function SessionRow({
         </span>
       </div>
 
-      <div className="flex justify-center">
-        <span
-          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${getConfidenceStyle(
-            session.confidence_label || ''
-          )}`}
-        >
-          {session.confidence_label || 'Low'}
-        </span>
-      </div>
-
-      <div className="flex justify-center">
+      <div className="flex min-w-0 items-start">
         {(() => {
-          const resInfo = getResolutionCategory(
-            session.resolution_status,
-            session.action_category,
-            session.diagnosed_category,
-            Boolean(session.last_action_status || session.last_action_summary),
-          );
+          const resInfo = getCheckStatus(session);
           return (
+            <div>
             <span
-              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${resInfo.className}`}
+              className={`max-w-full break-words rounded border px-2 py-1 text-xs font-medium leading-relaxed ${resInfo.className}`}
             >
               {resInfo.label}
             </span>
+            {crashMetric(session) && getAdditionalFindingStatus(session.resolution_proof) && <p className="mt-2 text-xs text-slate-300">{getAdditionalFindingStatus(session.resolution_proof)}</p>}
+            </div>
           );
         })()}
       </div>
 
-      <div className="flex justify-center gap-2">
+      <div className="flex items-center gap-2">
         <motion.button
           type="button"
           disabled={!canOpen}
@@ -337,10 +310,11 @@ function SessionRow({
             openSession();
           }}
           whileTap={buttonTap}
-          className="inline-flex items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-[11px] font-bold uppercase text-cyan-300 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Open this diagnosis"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10 text-cyan-300 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Open saved check"
+          aria-label="Open saved check"
         >
-          View
+          <ArrowUpRight size={16} />
         </motion.button>
 
         <motion.button
@@ -351,8 +325,9 @@ function SessionRow({
             onDeleteSession?.(session);
           }}
           whileTap={buttonTap}
-          className="inline-flex items-center justify-center rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] font-bold uppercase text-red-300 transition hover:border-red-300/55 hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-50"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-400/25 bg-red-400/10 text-red-300 transition hover:border-red-300/55 hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-50"
           title="Delete this saved check"
+          aria-label="Delete this saved check"
         >
           <Trash2 size={13} />
           <span className="sr-only">Delete</span>
@@ -364,9 +339,9 @@ function SessionRow({
 
 function TableRowSkeleton() {
   return (
-    <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] items-center border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0">
-      {Array.from({ length: 7 }).map((_, index) => (
-        <div key={index} className="flex justify-center">
+    <div className="grid grid-cols-1 gap-4 border-b border-[var(--rigmd-border)] px-5 py-4 last:border-b-0 xl:grid-cols-[7rem_minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_5rem]">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="flex min-w-0 items-start">
           <div className="h-4 w-24 animate-pulse rounded bg-[var(--rigmd-card-soft)]" />
         </div>
       ))}
@@ -504,6 +479,7 @@ export default function DiagnosticHistoryView({
 
           return (
             getSessionCheckLabel(session).toLowerCase().includes(query) ||
+            `${getCheckOverview(session).title} ${getCheckOverview(session).summary}`.toLowerCase().includes(query) ||
             session.diagnosed_category
               ?.toLowerCase()
               .includes(query)
@@ -602,8 +578,8 @@ export default function DiagnosticHistoryView({
   return (
     <>
       <TopHeader
-        title="Diagnostic History"
-        subtitle="All saved diagnostic sessions and their outcomes"
+        title="Past Checks"
+        subtitle="Saved findings and follow-up results"
       />
 
       <motion.div
@@ -640,7 +616,7 @@ export default function DiagnosticHistoryView({
                   className="text-orange-400"
                 />
               }
-              label="Repeated patterns"
+              label="Checks in repeated patterns"
               value={recurringCount}
               borderColor="border-orange-500/30"
             />
@@ -681,7 +657,7 @@ export default function DiagnosticHistoryView({
                 />
 
                 <FilterDropdown
-                  label="Action Tier"
+                  label="Next step"
                   value={actionFilter}
                   onChange={setActionFilter}
                   options={ACTION_FILTER_OPTIONS}
@@ -702,8 +678,8 @@ export default function DiagnosticHistoryView({
                         event.target.value
                       )
                     }
-                    placeholder="Search symptom or cause..."
-                    aria-label="Search past checks by symptom or cause"
+                    placeholder="Search checks or findings..."
+                    aria-label="Search past checks"
                     className="h-10 min-w-0 w-full rounded-xl bg-transparent pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 sm:w-[300px]"
                   />
                 </label>
@@ -743,7 +719,7 @@ export default function DiagnosticHistoryView({
                 />
 
                 <h3 className="font-bold uppercase tracking-wider text-white">
-                  Sessions
+                  Saved checks
                 </h3>
 
                 <span className="rounded-full bg-[var(--rigmd-card-soft)] px-2 py-0.5 text-xs font-bold text-slate-400">
@@ -757,36 +733,10 @@ export default function DiagnosticHistoryView({
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <div className="min-w-[1380px]">
-                <div className="grid grid-cols-[130px_minmax(190px,1fr)_minmax(280px,1.35fr)_140px_140px_170px_160px] border-b border-[var(--rigmd-border)] bg-[#0f1824] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
-                  <div>
-                    Date
-                  </div>
-
-                  <div>
-                    Check
-                  </div>
-
-                  <div className="text-center">
-                    Probable Cause
-                  </div>
-
-                  <div className="text-center">
-                    Action
-                  </div>
-
-                  <div className="text-center">
-                    Confidence
-                  </div>
-
-                  <div className="text-center">
-                    Follow-up Status
-                  </div>
-
-                  <div className="text-center">
-                    Actions
-                  </div>
+            <div className="min-w-0">
+              <div className="min-w-0">
+                <div aria-hidden="true" className="hidden grid-cols-[7rem_minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_5rem] gap-4 border-b border-[var(--rigmd-border)] px-5 py-3 text-xs font-medium text-slate-400 xl:grid">
+                  <div>Date</div><div>Check</div><div>Original finding</div><div>Original next step</div><div>Follow-up</div><div>Actions</div>
                 </div>
 
                 {loading ? (

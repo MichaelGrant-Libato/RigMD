@@ -21,10 +21,10 @@ public class TerminateProcessesTool : IRigMdAgentTool
 
     public string Name => "terminate_processes";
 
-    public string DisplayName => "Terminate High-Resource User Processes";
+    public string DisplayName => "Try to close reviewed high-use apps";
 
     public string Description =>
-        "Gracefully closes (and force-terminates after 2 seconds if unresponsive) specified non-system user processes to reclaim RAM or CPU. Protected Windows OS and RigMD processes are strictly blocked.";
+        "Requests normal closure of the reviewed non-system user apps only. Apps may keep running in the background; force termination is not used. This does not guarantee memory relief or a crash repair. Protected Windows, security and RigMD processes are blocked.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier2_DestructiveOrAdmin;
 
@@ -45,7 +45,7 @@ public class TerminateProcessesTool : IRigMdAgentTool
                 ["reason"] = new()
                 {
                     Type = "string",
-                    Description = "Concise technical reason explaining why terminating these processes resolves the user's symptom."
+                    Description = "Evidence supporting review of these specific apps. Do not claim that closing an app will repair a crash or free an exact amount of system memory."
                 }
             },
             Required = new List<string> { "processNames", "reason" }

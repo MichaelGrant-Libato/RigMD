@@ -2,6 +2,8 @@
 
 Updated: 2026-10-16
 
+Historical scoped record: the percentages and test counts below apply to the stated phase and date, not the current whole-system release. See [the October 21 consistency audit](SYSTEM_CONSISTENCY_AUDIT.md) for current boundaries and outstanding acceptance work.
+
 ## How Progress Is Counted
 
 Progress measures the explicit checklist below, not the percentage of all possible
