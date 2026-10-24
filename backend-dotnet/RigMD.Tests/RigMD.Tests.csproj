@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\RigMD.Desktop\DesktopZoomPolicy.cs" Link="Desktop\DesktopZoomPolicy.cs" />
   </ItemGroup>
 
   <ItemGroup>
