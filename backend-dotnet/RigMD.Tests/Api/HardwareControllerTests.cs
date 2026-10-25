@@ -9,6 +9,38 @@ namespace RigMD.Tests.Api;
 public class HardwareControllerTests
 {
     [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public void NetworkQueryAndRouteFailuresRemainDistinctFromAHealthyConnection(bool collected, bool adapter)
+    {
+        var profile = new HardwareProfileDto { Network = new() { QuerySucceeded = collected, HasActiveAdapter = adapter } };
+        var response = Assert.IsType<OkObjectResult>(new HardwareController(new StubProfileService(profile)).GetLiveHardware());
+        var network = JsonSerializer.SerializeToElement(response.Value).GetProperty("network");
+        Assert.Equal(collected, network.GetProperty("query_succeeded").GetBoolean());
+        Assert.Equal(adapter, network.GetProperty("has_active_adapter").GetBoolean());
+        Assert.False(network.GetProperty("dns_resolution_succeeded").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UsageSamplingFailure_IsNull_NotMeasuredZero(bool available)
+    {
+        var profile = new HardwareProfileDto();
+        profile.Cpu.UsageAvailable = available;
+        profile.Ram.UsageAvailable = available;
+        var result = Assert.IsType<OkObjectResult>(new HardwareController(new StubProfileService(profile)).GetLiveHardware());
+        var data = JsonSerializer.SerializeToElement(result.Value);
+        foreach (var key in new[] { "cpu", "ram" })
+        {
+            var usage = data.GetProperty(key).GetProperty("usage_percent");
+            Assert.Equal(available ? JsonValueKind.Number : JsonValueKind.Null, usage.ValueKind);
+            if (available) Assert.Equal(0, usage.GetDouble());
+        }
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public void LiveHardware_PreservesCpuTemperatureProvenanceAndUnavailableValues(bool hasReading)

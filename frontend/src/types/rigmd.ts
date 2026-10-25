@@ -66,6 +66,8 @@ export interface AgentHardwareSnapshot {
     cores: number;
     threads: number;
     frequencyMhz: number;
+    usageAvailable?: boolean | null;
+    usageSource?: string;
     usagePercent: number;
     maxFrequencyMhz?: number;
     sockets?: number;
@@ -98,6 +100,7 @@ export interface AgentHardwareSnapshot {
 
   ram: {
     usedGb: number;
+    usageAvailable?: boolean | null;
     totalGb: number;
     usagePercent: number;
     speedMtps?: number;
@@ -200,6 +203,12 @@ export interface HardwareStats {
   } | null;
   network?: {
     is_wifi: boolean;
+    query_succeeded?: boolean;
+    has_active_adapter?: boolean;
+    has_ipv4_address?: boolean;
+    has_default_gateway?: boolean;
+    has_dns_servers?: boolean;
+    dns_resolution_succeeded?: boolean;
     wifi_signal_strength: number | null;
     mac_address: string;
     ip_address: string;
@@ -255,7 +264,10 @@ export interface HardwareStats {
   }>;
   cpu: {
     name: string;
-    usage_percent: number;
+    usage_percent: number | null;
+    usage_source?: string;
+    usage_captured_at_utc?: string | null;
+    usage_window_seconds?: number | null;
     cores: number;
     threads: number;
     frequency_mhz: number;
@@ -286,8 +298,8 @@ export interface HardwareStats {
   };
   ram: {
     total_gb: number;
-    used_gb: number;
-    usage_percent: number;
+    used_gb: number | null;
+    usage_percent: number | null;
     speed_mtps?: number;
     slots_used?: number;
     slots_total?: number;
@@ -317,6 +329,8 @@ export interface HardwareStats {
 }
 
 export interface DashboardSessionSummary {
+  proof?: import('../lib/diagnosticLanguage').DiagnosticReading[];
+  resolution_proof?: import('../lib/diagnosticLanguage').DiagnosticReading[];
   session_id: string;
   session_code?: string;
   symptom_type: string;
@@ -331,6 +345,8 @@ export interface DashboardSessionSummary {
   resolution_status?: string;
   resolution_checked_at?: string | null;
   resolution_summary?: string;
+  last_action_status?: string;
+  last_action_summary?: string;
   diagnosis_mode?: string;
   component_ids?: string;
   scenario_id?: string;

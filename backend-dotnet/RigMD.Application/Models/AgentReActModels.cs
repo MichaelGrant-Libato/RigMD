@@ -79,7 +79,7 @@ public class ReActConversationContext
 public class ReActFinalProposal
 {
     public string RootCauseAnalysis { get; set; } = string.Empty;
-    public string ConfidenceLevel { get; set; } = "High";
+    public string ConfidenceLevel { get; set; } = "NotRated";
     public string? RecommendedToolName { get; set; }
     public string RecommendedToolArgumentsJson { get; set; } = "{}";
     public string RemediationRationale { get; set; } = string.Empty;

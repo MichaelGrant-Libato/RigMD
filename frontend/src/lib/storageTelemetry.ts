@@ -1,3 +1,16 @@
+import { REVIEW_THRESHOLDS, percentReviewStatus } from './reviewThresholds.ts';
+
+export function storageReviewStatus(stats?: {
+  all_disks?: Array<{ usage_percent?: number | null }>;
+  storage_drives?: Array<{ usage_percent?: number | null }>;
+  disk?: { total_gb?: number; usage_percent?: number | null };
+} | null): 'unknown' | 'high' | 'normal' {
+  const rows = stats?.all_disks?.length ? stats.all_disks : stats?.storage_drives?.length ? stats.storage_drives
+    : stats?.disk?.total_gb && stats.disk.total_gb > 0 ? [stats.disk] : [];
+  const statuses = rows.map(row => percentReviewStatus(row.usage_percent, REVIEW_THRESHOLDS.storage));
+  return statuses.includes('high') ? 'high' : !statuses.length || statuses.includes('unknown') ? 'unknown' : 'normal';
+}
+
 /** Match physical disk numbers exactly; disk 1 must never match disk 10. */
 export function findDiskReading<T extends { DeviceId: string }>(readings: T[], diskIndex: number | null | undefined): T | undefined {
   if (diskIndex == null || !Number.isInteger(diskIndex)) return undefined;

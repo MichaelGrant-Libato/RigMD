@@ -114,6 +114,149 @@ public class ReActOrchestratorTests
         public string GetDeviceType() => "Desktop";
     }
 
+    [Theory]
+    [InlineData("app-crashes", 0, "valid", VerificationStatus.Unknown)]
+    [InlineData("app-crashes", 1, "valid", VerificationStatus.Unresolved)]
+    [InlineData("blue-screen-crash", 1, "valid", VerificationStatus.Unresolved)]
+    [InlineData("app-crashes", 12, "wrong-focus", VerificationStatus.Unknown)]
+    [InlineData("app-crashes", 12, "wrong-time", VerificationStatus.Unknown)]
+    [InlineData("app-crashes", 12, "failed", VerificationStatus.Unknown)]
+    [InlineData("app-crashes", 12, "warning", VerificationStatus.Unknown)]
+    [InlineData("app-crashes", -1, "valid", VerificationStatus.Unknown)]
+    public async Task CrashVerification_UsesScopedNewRecords_NotHistoricalCounts(
+        string scenario, int count, string evidence, VerificationStatus expected)
+    {
+        var action = new FakeSafeRemediationTool { Name = "run_system_file_checker" };
+        var records = new FakeCrashInspectionTool(count, evidence);
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[] { action, records });
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            registry);
+        var diagnostic = new DiagnosticOutput
+        {
+            DiagnosedCategory = "Application stability risk needs review",
+            Session = new DiagnosticSession
+            {
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = "scenario" },
+                    new() { QuestionKey = "scenario_id", AnswerValue = scenario }
+                }
+            }
+        };
+        var started = DateTimeOffset.UtcNow;
+        var result = await orchestrator.RunExecutionCycleAsync(diagnostic, new HardwareProfileDto(),
+            userConsentProvided: true, requestedToolName: action.Name, requestedArgumentsJson: "{}");
+        Assert.Equal(0, action.ExecutionCount);
+        Assert.Null(result.Execution);
+        Assert.Empty(records.Arguments);
+        Assert.Equal(VerificationStatus.Unknown, result.Verification);
+        Assert.Contains("cause", result.Safety!.RejectionReason, StringComparison.OrdinalIgnoreCase);
+        var focus = scenario == "app-crashes" ? "ApplicationCrash" : "BugCheck";
+        var beforeArgs = JsonSerializer.SerializeToElement(new
+        {
+            eventFocus = focus, logName = scenario == "app-crashes" ? "Application" : "System", sinceUtc = (string?)null
+        });
+        var afterArgs = JsonSerializer.SerializeToElement(new
+        {
+            eventFocus = focus, logName = scenario == "app-crashes" ? "Application" : "System", sinceUtc = started.ToString("O")
+        });
+        await records.ExecuteAsync(beforeArgs);
+        var snapshot = await records.ExecuteAsync(afterArgs);
+        Assert.Equal(expected, AutonomousOrchestrator.EvaluateEventLogEvidence(snapshot, focus, started));
+        Assert.Equal(2, records.Arguments.Count);
+        var before = records.Arguments[0];
+        var after = records.Arguments[1];
+        Assert.Equal(focus, before.GetProperty("eventFocus").GetString());
+        Assert.Equal(focus, after.GetProperty("eventFocus").GetString());
+        Assert.Equal(scenario == "app-crashes" ? "Application" : "System", after.GetProperty("logName").GetString());
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("sinceUtc").ValueKind);
+        Assert.InRange(DateTimeOffset.Parse(after.GetProperty("sinceUtc").GetString()!), started, DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
+    public async Task CrashExecution_WithoutConsent_DoesNotQueryOrRunAction()
+    {
+        var action = new FakeSafeRemediationTool { Name = "run_system_file_checker" };
+        var records = new FakeCrashInspectionTool(0, "valid");
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            new RigMdAgentToolRegistry(new IRigMdAgentTool[] { action, records }));
+        await orchestrator.RunExecutionCycleAsync(new DiagnosticOutput { DiagnosedCategory = "Application crash history" },
+            new HardwareProfileDto(), userConsentProvided: false, requestedToolName: action.Name, requestedArgumentsJson: "{}");
+        Assert.Empty(records.Arguments);
+        Assert.Equal(0, action.ExecutionCount);
+    }
+
+    [Theory]
+    [InlineData("app-crashes", "ApplicationCrash", "Application")]
+    [InlineData("blue-screen-crash", "BugCheck", "System")]
+    public async Task CrashInvestigation_DoesNotAcceptUnscopedModelLogArguments(string scenario, string focus, string channel)
+    {
+        var action = new FakeSafeRemediationTool { Name = "run_system_file_checker" };
+        var records = new FakeCrashInspectionTool(0, "valid");
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            new RigMdAgentToolRegistry(new IRigMdAgentTool[] { action, records }), new UnscopedCrashQueryLlmStub());
+        await orchestrator.RunDryRunCycleAsync(new DiagnosticOutput
+        {
+            DiagnosedCategory = "Application stability risk needs review",
+            Session = new DiagnosticSession { Answers = new List<SessionAnswer>
+            {
+                new() { QuestionKey = "diagnosis_mode", AnswerValue = "scenario" },
+                new() { QuestionKey = "scenario_id", AnswerValue = scenario }
+            } }
+        }, new HardwareProfileDto());
+        var args = Assert.Single(records.Arguments);
+        Assert.Equal(focus, args.GetProperty("eventFocus").GetString());
+        Assert.Equal(channel, args.GetProperty("logName").GetString());
+        Assert.Equal(168, args.GetProperty("hoursBack").GetInt32());
+        Assert.Equal(0, action.ExecutionCount);
+    }
+
+    private sealed class UnscopedCrashQueryLlmStub : IReActLlmClient
+    {
+        public Task<ReActModelTurnDecision> DecideNextTurnAsync(ReActConversationContext context,
+            IReadOnlyList<AgentToolFunctionDeclaration> availableTools, CancellationToken cancellationToken = default)
+            => Task.FromResult(context.CurrentTurn == 0 ? new ReActModelTurnDecision
+            {
+                ToolCalls = new List<ReActToolCallRequest> { new() { ToolName = "query_windows_event_logs", ArgumentsJson = "{}" } }
+            } : new ReActModelTurnDecision
+            {
+                FinalProposal = new ReActFinalProposal { RecommendedToolName = "run_system_file_checker", RecommendedToolArgumentsJson = "{}" }
+            });
+    }
+
+    private sealed class FakeCrashInspectionTool(int count, string evidence) : IRigMdAgentTool
+    {
+        public List<JsonElement> Arguments { get; } = new();
+        public string Name => "query_windows_event_logs";
+        public string DisplayName => "Test crash records";
+        public string Description => "In-memory records only.";
+        public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
+        public AgentToolFunctionDeclaration GetFunctionDeclaration() => new() { Name = Name, Description = Description };
+        public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ToolDryRunPreview { CanExecute = true });
+        public Task<AgentToolExecutionResult> ExecuteAsync(JsonElement arguments, Action<string>? progressReporter = null,
+            CancellationToken cancellationToken = default)
+        {
+            Arguments.Add(arguments.Clone());
+            return Task.FromResult(new AgentToolExecutionResult
+            {
+                ToolName = Name, Success = evidence != "failed", Summary = "Test records",
+                DataJson = JsonSerializer.Serialize(new
+                {
+                    logName = arguments.GetProperty("logName").GetString(),
+                    eventFocus = evidence == "wrong-focus" ? "General" : arguments.GetProperty("eventFocus").GetString(),
+                    sinceUtc = evidence == "wrong-time" ? DateTimeOffset.UtcNow.AddDays(-1).ToString("O")
+                        : arguments.TryGetProperty("sinceUtc", out var since) ? since.GetString() : null,
+                    warning = evidence == "warning" ? "Access denied" : null,
+                    eventCount = Arguments.Count == 1 ? 12 : count
+                })
+            });
+        }
+    }
+
     private sealed class FakeSafeRemediationTool : IRigMdAgentTool
     {
         public int ExecutionCount { get; private set; }
@@ -174,6 +317,7 @@ public class ReActOrchestratorTests
 
     private sealed class FakeHighMemoryInspectionTool : IRigMdAgentTool
     {
+        public string Payload { get; init; } = "{\"memory\":{\"totalGb\":15.7,\"usedGb\":13.0,\"usagePercent\":82.9},\"browserSummary\":{\"browserDetected\":true,\"browserProcessCount\":28,\"browserMemoryMb\":3309.0,\"browserHeavy\":true},\"memoryLeakWarning\":false}";
         public string Name => "inspect_memory_and_processes";
         public string DisplayName => "Inspect RAM and Active Processes";
         public string Description => "Returns a high live-memory snapshot.";
@@ -207,7 +351,7 @@ public class ReActOrchestratorTests
                 ToolName = Name,
                 Success = true,
                 Summary = "RAM usage: 13.0/15.7 GB (82.9%). Browser RAM: 3309 MB across 28 processes.",
-                DataJson = "{\"memory\":{\"totalGb\":15.7,\"usedGb\":13.0,\"usagePercent\":82.9},\"browserSummary\":{\"browserDetected\":true,\"browserProcessCount\":28,\"browserMemoryMb\":3309.0,\"browserHeavy\":true},\"memoryLeakWarning\":false}",
+                DataJson = Payload,
                 OutputLog = "High memory snapshot."
             });
         }
@@ -308,6 +452,23 @@ public class ReActOrchestratorTests
         Assert.Equal(RemediationAttemptState.AwaitingConsent, result.Attempts[0].State);
     }
 
+    [Theory]
+    [InlineData("High Memory Pressure")]
+    [InlineData("Elevated Memory Pressure From Active Workloads")]
+    public async Task MemoryProposal_NeverPresentsStorageCleanupAsTheMemoryRemedy(string category)
+    {
+        var (orchestrator, action) = CreateOrchestratorWithTools(new DirectWriteToolCallingLlmStub());
+        var result = await orchestrator.RunDryRunCycleAsync(new DiagnosticOutput
+        {
+            DiagnosedCategory = category, DiagnosticSessionId = Guid.NewGuid()
+        }, new HardwareProfileDto());
+        Assert.Null(result.ProposedTool);
+        Assert.Null(result.DryRunPreview);
+        Assert.Empty(result.Plan!.PlannedActions);
+        Assert.Contains("Storage cleanup does not directly free app memory", result.Plan.StrategyReasoning);
+        Assert.Equal(0, action.ExecutionCount);
+    }
+
     private sealed class DirectWriteToolCallingLlmStub : IReActLlmClient
     {
         public Task<ReActModelTurnDecision> DecideNextTurnAsync(
@@ -402,7 +563,7 @@ public class ReActOrchestratorTests
     [Fact]
     public async Task RunExecutionCycleAsync_MemoryPressure_DoesNotMarkResolvedWhenRamStillHigh()
     {
-        var fakeTempTool = new FakeSafeRemediationTool();
+        var fakeTempTool = new FakeSafeRemediationTool { Name = "terminate_processes" };
         var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
         {
             new FakeHighMemoryInspectionTool(),
@@ -429,8 +590,8 @@ public class ReActOrchestratorTests
             diagnostic,
             new HardwareProfileDto(),
             userConsentProvided: true,
-            requestedToolName: "clear_temp_files",
-            requestedArgumentsJson: "{\"includeWindowsTemp\":false}");
+            requestedToolName: fakeTempTool.Name,
+            requestedArgumentsJson: "{}");
 
         Assert.Equal(1, fakeTempTool.ExecutionCount);
         Assert.True(result.Execution!.Success);
@@ -439,11 +600,89 @@ public class ReActOrchestratorTests
         Assert.Contains("\"usagePercent\":82.9", result.VerificationReport.AfterSnapshotJson);
     }
 
+    public static IEnumerable<object[]> MemoryVerificationCases()
+    {
+        static string Payload(double? usage, double? browserMb, object? warning = null) => JsonSerializer.Serialize(new
+        {
+            memory = new { usagePercent = usage },
+            browserSummary = new { browserMemoryMb = browserMb, browserProcessCount = 100 },
+            memoryLeakWarning = warning
+        });
+
+        yield return new object[] { "full", "High Memory Pressure", Payload(81.99, 5000), VerificationStatus.Resolved };
+        yield return new object[] { "full", "High Memory Pressure", Payload(82, 0), VerificationStatus.Unresolved };
+        yield return new object[] { "memory", "High Memory Pressure", Payload(81.99, 500), VerificationStatus.Resolved };
+        yield return new object[] { "memory", "High Memory Pressure", Payload(74.99, 6000), VerificationStatus.Resolved };
+        yield return new object[] { "memory", "High Memory Pressure", Payload(75, 1799.99), VerificationStatus.Resolved };
+        yield return new object[] { "memory", "Elevated Memory Pressure From Active Workloads", Payload(75, 1800), VerificationStatus.Resolved };
+        yield return new object[] { "full", "Elevated Memory Pressure From Active Workloads", Payload(76, 1900), VerificationStatus.Resolved };
+        yield return new object[] { "memory", "High Memory Pressure", Payload(75, null), VerificationStatus.Resolved };
+        yield return new object[] { "full", "High Memory Pressure", Payload(null, 500), VerificationStatus.Unknown };
+        yield return new object[] { "full", "High Memory Pressure", Payload(-1, 500), VerificationStatus.Unknown };
+        yield return new object[] { "full", "High Memory Pressure", Payload(101, 500), VerificationStatus.Unknown };
+        yield return new object[] { "full", "High Memory Pressure", Payload(0, 0), VerificationStatus.Resolved };
+        yield return new object[] { "memory", "High Memory Pressure", Payload(25, 0, "Unusual application memory growth."), VerificationStatus.Unresolved };
+        yield return new object[] { "full", "High Memory Pressure", Payload(null, 0, "Unusual application memory growth."), VerificationStatus.Unresolved };
+        yield return new object[] { "full", "High Memory Pressure", Payload(25, 0, true), VerificationStatus.Unresolved };
+        yield return new object[] { "full", "High Memory Pressure", Payload(25, 0, false), VerificationStatus.Resolved };
+        yield return new object[] { "full", "High Memory Pressure", "{\"memory\":{\"usagePercent\":25}}", VerificationStatus.Unknown };
+        yield return new object[] { "full", "High Memory Pressure", "{\"memory\":{\"usagePercent\":82}}", VerificationStatus.Unresolved };
+        yield return new object[] { "full", "High Memory Pressure", "{\"memory\":{\"usagePercent\":25},\"memoryLeakWarning\":{}}", VerificationStatus.Unknown };
+        yield return new object[] { "mixed", "High Memory Pressure", Payload(25, 0), VerificationStatus.Unknown };
+        yield return new object[] { "cpu", "High Memory Pressure", Payload(25, 0), VerificationStatus.Unknown };
+        yield return new object[] { "cpu", "High Memory Pressure", Payload(82, 0), VerificationStatus.Unknown };
+        yield return new object[] { "slow-system", "OS performance degradation", Payload(25, 0), VerificationStatus.Unknown };
+        yield return new object[] { "full", "OS performance degradation", Payload(25, 0), VerificationStatus.Unknown };
+    }
+
+    [Theory]
+    [MemberData(nameof(MemoryVerificationCases))]
+    public async Task MemoryVerification_UsesScopedEvidenceAndDoesNotDiscardTextWarnings(
+        string scope, string category, string payload, VerificationStatus expected)
+    {
+        var fakeAction = new FakeSafeRemediationTool { Name = category.Contains("Memory") || scope == "cpu" ? "terminate_processes" : "clear_temp_files" };
+        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
+        {
+            new FakeHighMemoryInspectionTool { Payload = payload }, fakeAction
+        });
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            registry,
+            new GeminiReActLlmClient(new HttpClient(),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" }).Build(),
+                NullLogger<GeminiReActLlmClient>.Instance));
+        var diagnostic = new DiagnosticOutput
+        {
+            Id = Guid.NewGuid(), DiagnosticSessionId = Guid.NewGuid(), DiagnosedCategory = category
+        };
+        if (scope != "full")
+        {
+            diagnostic.Session = new DiagnosticSession
+            {
+                Id = diagnostic.DiagnosticSessionId,
+                Answers = new List<SessionAnswer>
+                {
+                    new() { QuestionKey = "diagnosis_mode", AnswerValue = scope == "slow-system" ? "scenario" : "component" },
+                    scope == "slow-system"
+                        ? new() { QuestionKey = "scenario_id", AnswerValue = scope }
+                        : new() { QuestionKey = "component_ids", AnswerValue = scope switch
+                            { "mixed" => "[\"memory\",\"cpu\"]", "cpu" => "[\"cpu\"]", _ => "[\"memory\"]" } }
+                }
+            };
+        }
+        var result = await orchestrator.RunExecutionCycleAsync(diagnostic, new HardwareProfileDto(),
+            userConsentProvided: true, requestedToolName: fakeAction.Name, requestedArgumentsJson: "{}");
+
+        Assert.Equal(1, fakeAction.ExecutionCount);
+        Assert.Equal("inspect_memory_and_processes", result.VerificationReport!.VerificationToolName);
+        Assert.Equal(expected, result.Verification);
+    }
+
     [Theory]
     [InlineData("Thermal condition", null, 42d, VerificationStatus.Unknown)]
-    [InlineData("Thermal condition", 45d, 42d, VerificationStatus.Resolved)]
+    [InlineData("Thermal condition", 45d, 42d, VerificationStatus.Unknown)]
     [InlineData("Thermal condition", 85d, 42d, VerificationStatus.Unresolved)]
-    [InlineData("Thermal condition", 45d, 95d, VerificationStatus.Resolved)]
+    [InlineData("Thermal condition", 45d, 95d, VerificationStatus.Unknown)]
     [InlineData("Elevated CPU Utilization", null, 42d, VerificationStatus.Resolved)]
     [InlineData("Elevated CPU Utilization", null, 79.9, VerificationStatus.Resolved)]
     [InlineData("Elevated CPU Utilization", null, 79.99, VerificationStatus.Resolved)]
@@ -573,11 +812,10 @@ public class ReActOrchestratorTests
             diagnostic,
             new HardwareProfileDto());
 
-        Assert.NotNull(result.ProposedTool);
-        Assert.NotEqual("clear_browser_cache", result.ProposedTool!.ToolName);
-        Assert.Contains(
-            result.ProposedTool.ToolName,
-            new[] { "restart_windows_explorer", "run_system_file_checker" });
+        Assert.Null(result.ProposedTool);
+        Assert.Empty(result.Plan!.PlannedActions);
+        Assert.False(result.Safety!.IsApproved);
+        Assert.Contains("cause", result.Safety.RejectionReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -655,6 +893,7 @@ public class ReActOrchestratorTests
         public HardwareProfileDto GetLiveSystemProfile() => new()
         {
             DeviceName = "RIGMD-TEST-PC",
+            DeviceErrorsAvailable = true,
             DeviceType = "Desktop",
             OsVersion = "Windows 11 Pro 24H2",
             PrimaryStorageType = "NVMe SSD",

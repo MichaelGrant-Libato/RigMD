@@ -63,6 +63,7 @@ public class ToolDryRunPreview
     public string WhatWillHappen { get; set; } = string.Empty;
     public int AffectedItemsCount { get; set; }
     public long EstimatedBytesAffected { get; set; }
+    public bool EstimatedBytesKnown { get; set; } = true;
     public List<string> AffectedTargets { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
 }

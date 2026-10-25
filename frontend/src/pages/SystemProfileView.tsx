@@ -21,6 +21,8 @@ import TopHeader from '../components/TopHeader';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { formatTemperature, validTemperature } from '../lib/temperatureTelemetry';
+import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
+import { storageReviewStatus } from '../lib/storageTelemetry';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
@@ -93,10 +95,9 @@ function formatStorageDisplay(stats: HardwareStats): string {
   return hasKnownType ? `${sizeStr} ${rawType}` : `${sizeStr} Total`;
 }
 
-function getUsageTone(value: number | null | undefined) {
+function getUsageTone(value: number | null | undefined, warningAt: number = REVIEW_THRESHOLDS.storage) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'neutral';
-  if (value >= 90) return 'danger';
-  if (value >= 75) return 'watch';
+  if (value >= warningAt) return 'watch';
   return 'good';
 }
 
@@ -347,7 +348,7 @@ export default function SystemProfileView({
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
                     helper={`Temperature: ${formatTemperature(stats.cpu.temperature_celsius, liveCpuTemp, liveCpuTemp !== undefined)}`}
                     tone={getUsageTone(stats.cpu.usage_percent)}
-                    warningLabel={stats.cpu.usage_percent >= 90 ? 'Processor was very busy' : 'Processor was busy'}
+                    warningLabel={(stats.cpu.usage_percent ?? -1) >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}
                   />
 
@@ -356,8 +357,8 @@ export default function SystemProfileView({
                     title="Memory"
                     value={`${stats.ram.total_gb} GB total`}
                     helper={usageLabel(stats.ram.usage_percent)}
-                    tone={getUsageTone(stats.ram.usage_percent)}
-                    warningLabel={stats.ram.usage_percent >= 90 ? 'Memory was very high' : 'Memory was high'}
+                    tone={getUsageTone(stats.ram.usage_percent, REVIEW_THRESHOLDS.memory)}
+                    warningLabel={(stats.ram.usage_percent ?? -1) >= 90 ? 'Memory was very high' : 'Memory was high'}
                     onClick={() => handleCardClick('Memory')}
                   />
 
@@ -368,8 +369,8 @@ export default function SystemProfileView({
                     helper={typeof stats.disk.used_gb === 'number' && stats.disk.total_gb > 0
                       ? `${formatStorageSize(Math.max(0, stats.disk.total_gb - stats.disk.used_gb))} free | ${stats.disk.usage_percent.toFixed(1)}% of space used`
                       : usageLabel(stats.disk.usage_percent)}
-                    tone={getUsageTone(stats.disk.usage_percent)}
-                    warningLabel={stats.disk.usage_percent >= 90 ? 'Storage is almost full' : 'Storage is getting full'}
+                    tone={storageReviewStatus(stats) === 'high' ? 'watch' : storageReviewStatus(stats) === 'normal' ? 'good' : 'neutral'}
+                    warningLabel={storageReviewStatus(stats) === 'high' ? 'Review volume free space' : ''}
                     onClick={() => handleCardClick('Storage')}
                   />
 
@@ -426,20 +427,15 @@ export default function SystemProfileView({
                       <FriendlyInfoCard
                         icon={stats.network.is_wifi ? Wifi : Activity}
                         title="Network"
-                        value={stats.network.is_wifi ? 'Wi-Fi Connected' : 'Ethernet Connected'}
+                        value={stats.network.query_succeeded === false ? 'Check unavailable' : stats.network.has_active_adapter === false ? 'No active IPv4 adapter' : stats.network.is_wifi ? 'Wi-Fi adapter' : 'Ethernet adapter'}
                         helper={
                           [
                             stats.network.is_wifi && stats.network.wifi_signal_strength ? `Signal: ${stats.network.wifi_signal_strength}%` : '',
-                            stats.network.ping_latency_ms ? `Ping: ${stats.network.ping_latency_ms}ms` : ''
+                            stats.network.ping_latency_ms != null ? `Ping: ${stats.network.ping_latency_ms}ms` : ''
                           ].filter(Boolean).join(' | ') || undefined
                         }
-                        tone={
-                          (stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50) ||
-                          (stats.network.ping_latency_ms && stats.network.ping_latency_ms > 150)
-                            ? 'watch'
-                            : 'good'
-                        }
-                        warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength && stats.network.wifi_signal_strength < 50 ? 'Weak signal' : ''}
+                        tone={networkReviewStatus(stats.network) === 'high' ? 'watch' : networkReviewStatus(stats.network) === 'normal' ? 'good' : 'neutral'}
+                        warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength != null && stats.network.wifi_signal_strength > 0 && stats.network.wifi_signal_strength <= NETWORK_THRESHOLDS.weakSignalPercent ? 'Weak signal' : ''}
                         onClick={() => handleCardClick('Network')}
                       />
                     )}

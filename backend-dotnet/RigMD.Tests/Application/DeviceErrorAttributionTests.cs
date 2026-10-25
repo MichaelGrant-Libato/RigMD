@@ -33,10 +33,10 @@ public class DeviceErrorAttributionTests
         var hardware = Hardware(Error("USB controller", "USB"), Error("Adapter failure", pnpClass, classGuid));
         var diagnosis = Diagnose(hardware, "gpu");
 
-        Assert.Equal("Driver conflict", diagnosis.DiagnosedCategory);
+        Assert.Equal("Device status warning", diagnosis.DiagnosedCategory);
         Assert.Contains("Adapter failure", diagnosis.PrimaryResult);
         Assert.DoesNotContain("USB controller", diagnosis.PrimaryResult);
-        Assert.Contains(diagnosis.Proof, p => p.Value == "1 PnP Device Error(s)" && p.Status == "high");
+        Assert.Contains(diagnosis.Proof, p => p.Label == "Adapter failure" && p.Value == "Device Manager code 43" && p.Status == "high");
         var recheck = new ResolutionService().CheckResolution("Driver conflict", hardware, componentIds: "[\"gpu\"]");
         Assert.Equal("still_active", recheck.resolution_status);
     }
@@ -46,7 +46,7 @@ public class DeviceErrorAttributionTests
     {
         var hardware = Hardware(Error("Monitor failure", "Monitor"));
         Assert.Equal("No Active Issue Detected", Diagnose(hardware, "gpu").DiagnosedCategory);
-        Assert.Equal("Driver conflict", Diagnose(hardware, "display").DiagnosedCategory);
+        Assert.Equal("Device status warning", Diagnose(hardware, "display").DiagnosedCategory);
         Assert.Equal("resolved", new ResolutionService().CheckResolution("Driver conflict", hardware, componentIds: "[\"gpu\"]").resolution_status);
         Assert.Equal("still_active", new ResolutionService().CheckResolution("Driver conflict", hardware, componentIds: "[\"display\"]").resolution_status);
     }
@@ -55,17 +55,18 @@ public class DeviceErrorAttributionTests
     public void DisplayScenario_IgnoresUsbErrors_ButNotMonitorErrorsOrMissingDisplays()
     {
         var hardware = Hardware(Error("USB controller", "USB"));
-        Assert.Equal("No Active Issue Detected", Scenario(hardware, "no-display").DiagnosedCategory);
-        Assert.Equal("resolved", new ResolutionService().CheckResolution("Display driver behavior", hardware, scenarioId: "no-display").resolution_status);
+        // Detection is not a picture/cable test, even when device status has no warning.
+        Assert.Equal("Scanner evidence unavailable", Scenario(hardware, "no-display").DiagnosedCategory);
+        Assert.Equal("needs_recheck", new ResolutionService().CheckResolution("Display driver behavior", hardware, scenarioId: "no-display").resolution_status);
 
         hardware.DeviceErrors.Add(Error("Monitor failure", "", "{4d36e96e-e325-11ce-bfc1-08002be10318}"));
-        Assert.Equal("Display driver behavior", Scenario(hardware, "no-display").DiagnosedCategory);
+        Assert.Equal("Device status warning", Scenario(hardware, "no-display").DiagnosedCategory);
         Assert.Equal("still_active", new ResolutionService().CheckResolution("Display driver behavior", hardware, scenarioId: "no-display").resolution_status);
 
         hardware.DeviceErrors.Clear();
         hardware.ConnectedDisplays = 0;
-        Assert.Equal("Display driver behavior", Scenario(hardware, "no-display").DiagnosedCategory);
-        Assert.Equal("still_active", new ResolutionService().CheckResolution("Display driver behavior", hardware, scenarioId: "no-display").resolution_status);
+        Assert.Equal("Scanner evidence unavailable", Scenario(hardware, "no-display").DiagnosedCategory);
+        Assert.Equal("needs_recheck", new ResolutionService().CheckResolution("Display driver behavior", hardware, scenarioId: "no-display").resolution_status);
     }
 
     [Fact]
@@ -73,11 +74,11 @@ public class DeviceErrorAttributionTests
     {
         var hardware = Hardware(Error("USB controller", "USB"), Error("Unclassified failure", ""));
         var full = new AutomaticDiagnosisService().Diagnose(new AutomaticDiagnosisInput { Mode = "full", Hardware = hardware });
-        Assert.Equal("Driver conflict", full.DiagnosedCategory);
-        Assert.Equal("Driver conflict", Diagnose(hardware, "drivers").DiagnosedCategory);
-        Assert.Equal("Driver conflict", Diagnose(hardware, "gpu", "drivers").DiagnosedCategory);
-        Assert.Equal("Driver conflict", Scenario(hardware, "driver-error").DiagnosedCategory);
-        Assert.Contains(full.Proof, p => p.Value == "2 PnP Device Error(s)");
+        Assert.Equal("Device status warning", full.DiagnosedCategory);
+        Assert.Equal("Device status warning", Diagnose(hardware, "drivers").DiagnosedCategory);
+        Assert.Equal("Device status warning", Diagnose(hardware, "gpu", "drivers").DiagnosedCategory);
+        Assert.Equal("Device status warning", Scenario(hardware, "driver-error").DiagnosedCategory);
+        Assert.Equal(2, full.Proof.Count(p => p.MetricId.StartsWith("device_error_") && p.Status == "high"));
         Assert.Equal("still_active", new ResolutionService().CheckResolution("Driver conflict", hardware, componentIds: "[\"gpu\",\"drivers\"]").resolution_status);
         Assert.Equal("still_active", new ResolutionService().CheckResolution("Driver conflict", hardware, scenarioId: "driver-error").resolution_status);
     }
@@ -89,7 +90,7 @@ public class DeviceErrorAttributionTests
         Assert.Equal("No Active Issue Detected", Diagnose(hardware, "gpu", "cpu").DiagnosedCategory);
         hardware.DeviceErrors.Add(Error("Adapter failure", "Display"));
         var diagnosis = Diagnose(hardware, "gpu", "cpu");
-        Assert.Equal("Driver conflict", diagnosis.DiagnosedCategory);
+        Assert.Equal("Device status warning", diagnosis.DiagnosedCategory);
         var service = new ResolutionService();
         Assert.Equal("still_active", service.CheckResolution(diagnosis.DiagnosedCategory, hardware, componentIds: "[\"gpu\",\"cpu\"]").resolution_status);
         hardware.DeviceErrors.RemoveAt(1);
@@ -125,6 +126,7 @@ public class DeviceErrorAttributionTests
 
     private static HardwareProfileDto Hardware(params DeviceErrorDto[] errors) => new()
     {
+        DeviceErrorsAvailable = true,
         Cpu = new() { Name = "Test CPU", UsagePercent = 10, TemperatureCelsius = 45 },
         Ram = new() { TotalGb = 16, UsedGb = 4, UsagePercent = 25 },
         Gpu = new() { HasGpu = true, Name = "Test GPU", Driver = "Test driver", TemperatureCelsius = 45 },

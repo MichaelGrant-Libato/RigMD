@@ -163,6 +163,8 @@ public class DiagnosticController : ControllerBase
                     .Diagnose(input);
 
             var explanation = result.Explanation;
+            var explanationSource = "local";
+            string? explanationModel = null;
             if (_aiExplainer != null && result.ComponentStatus != ComponentStatus.NotPresent)
             {
                 try
@@ -197,12 +199,14 @@ public class DiagnosticController : ControllerBase
                                 : "Full computer check",
                         AffectedActivity = $"Mode: {request.Mode}"
                     };
-                    var generated = await _aiExplainer.GenerateExplanationAsync(mappedResult, scopeSymptom);
-                    if (!string.IsNullOrWhiteSpace(generated))
+                    var generated = await _aiExplainer.GenerateExplanationWithSourceAsync(mappedResult, scopeSymptom);
+                    if (!string.IsNullOrWhiteSpace(generated.Text))
                     {
+                        explanationSource = generated.Source;
+                        explanationModel = generated.Model;
                         explanation = string.IsNullOrWhiteSpace(result.IncidentalWarning)
-                            ? generated
-                            : $"{generated}\n\n{result.IncidentalWarning}";
+                            ? generated.Text
+                            : $"{generated.Text}\n\n{result.IncidentalWarning}";
                     }
                 }
                 catch
@@ -227,13 +231,21 @@ public class DiagnosticController : ControllerBase
                         "local",
                         result.PrimaryResult,
                         result.IncidentalWarning,
-                        result.ComponentStatus.ToString());
+                        result.ComponentStatus.ToString(),
+                        result.Proof,
+                        result.RecommendedNextStep);
+
+            await _sessionRepository.SaveExplanationSourceAsync(sessionId, explanationSource, explanationModel);
 
             return Ok(
                 new
                 {
                     session_id =
                         sessionId.ToString(),
+
+                    diagnosis_mode = request.Mode,
+                    component_ids = request.Mode == "component" ? request.ComponentIds : Array.Empty<string>(),
+                    scenario_id = request.Mode == "scenario" ? request.ScenarioId : null,
 
                     component_status =
                         result.ComponentStatus.ToString(),
@@ -258,6 +270,8 @@ public class DiagnosticController : ControllerBase
 
                     ai_explanation =
                         explanation,
+                    explanation_source = explanationSource,
+                    explanation_model = explanationModel,
 
                     proof =
                         result.Proof,
@@ -316,7 +330,8 @@ public class DiagnosticController : ControllerBase
                 sessions[i].SessionCode = $"S-{count - i:D3}";
             }
 
-            var recurringCount = sessions.Count(s => s.IsRecurring);
+            var recurringCount = new RecurringPatternService().BuildPatterns(await _sessionRepository.GetRecurringSessionsAsync())
+                .metrics.recurring_issues;
             var escalatedCount = sessions.Count(s => s.ActionCategory.Contains("escalate", StringComparison.OrdinalIgnoreCase));
             var now = DateTime.UtcNow;
             var thisMonthCount = sessions.Count(s => 
@@ -429,7 +444,9 @@ public class DiagnosticController : ControllerBase
                 hardware,
                 session.ScenarioId,
                 session.ComponentIds,
-                sessionCreatedAt);
+                sessionCreatedAt,
+                session.DiagnosisMode,
+                session.Proof);
 
             var updated = await _sessionRepository.UpdateResolutionAsync(
                 id,
@@ -480,7 +497,7 @@ public class DiagnosticController : ControllerBase
                 session_id = sessionId,
                 resolution_status = "needs_recheck",
                 last_action_status = "completed",
-                last_action_summary = "A safe action was performed. Run a follow-up check to see if the issue improved."
+                last_action_summary = "The approved action finished. Its effect still needs checking."
             });
         }
         catch (Exception ex)

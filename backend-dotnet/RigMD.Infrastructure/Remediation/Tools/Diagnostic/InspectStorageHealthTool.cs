@@ -32,7 +32,7 @@ public class InspectStorageHealthTool : IRigMdAgentTool
     public string DisplayName => "Inspect Storage Health & Reclaimable Caches";
 
     public string Description =>
-        "Inspects physical drives (NVMe/SATA SSD/HDD), SMART failure status, logical volume free space/usage percentages, and measures reclaimable bytes in User Temp, Windows Temp, Browser Caches, and Windows Update Download cache.";
+        "Reads reported physical-drive status warnings, logical-volume space, and accessible cache/temp sizes. It does not run a SMART self-test or certify drive health; accessible size is not guaranteed recoverable space.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -135,7 +135,7 @@ public class InspectStorageHealthTool : IRigMdAgentTool
             : $"{volumes.Count} volume(s)";
 
         var summary =
-            $"Storage: {volSummary}. SMART failures: {drives.Count(d => d.IsFailingSmart)}. Reclaimable cache/temp space: {ToolArgumentHelper.FormatBytes(totalReclaimableBytes)}.";
+            $"Storage: {(volumes.Count == 0 ? "volume readings unavailable" : volSummary)}. Reported drive-status warnings: {drives.Count(d => d.IsFailingSmart)} (not a SMART self-test). Accessible cache/temp size estimate: {ToolArgumentHelper.FormatBytes(totalReclaimableBytes)}; inaccessible or in-use files may not be recoverable.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

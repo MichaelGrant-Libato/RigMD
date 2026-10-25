@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.SignalR;
 using RigMD.Api.Hubs;
 using RigMD.Application.Models;
 using System.Diagnostics;
-using System.Management;
 using System.Net.NetworkInformation;
 using RigMD.Infrastructure.Windows;
 
@@ -14,7 +13,6 @@ public class TelemetryBackgroundService : BackgroundService
     private readonly IHardwareMonitorService _hardwareMonitor;
     private readonly ILogger<TelemetryBackgroundService> _logger;
     
-    private PerformanceCounter? _cpuCounter;
     private PerformanceCounter? _threadCounter;
     private PerformanceCounter? _handleCounter;
     private PerformanceCounter? _processCounter;
@@ -38,7 +36,6 @@ public class TelemetryBackgroundService : BackgroundService
     {
         try 
         {
-            _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
             _threadCounter = new PerformanceCounter("System", "Threads");
             _processCounter = new PerformanceCounter("System", "Processes");
             // Handles are not easily grabbed globally from System category without iterating processes, 
@@ -59,16 +56,12 @@ public class TelemetryBackgroundService : BackgroundService
 
                 var dto = new TelemetryUpdateDto();
                 
-                // CPU
-                if (_cpuCounter != null)
-                {
-                    dto.CpuUsagePercent = Math.Round((double)_cpuCounter.NextValue(), 1);
-                }
-                else
-                {
-                    dto.CpuUsagePercent = Math.Round(_hardwareMonitor.GetCpuLoad() ?? 0, 1);
-                }
-                
+                // Use the same activity metric and availability rules as a saved diagnostic.
+                dto.CpuUsagePercent = WmiCpuProvider.ReadUsagePercent();
+                dto.CpuUsageSource = dto.CpuUsagePercent.HasValue ? WmiCpuProvider.UsageSource : "Unavailable";
+                dto.CpuUsageCapturedAtUtc = WmiCpuProvider.UsageCapturedAt;
+                dto.CpuUsageWindowSeconds = WmiCpuProvider.UsageWindowSeconds;
+
                 var cpuTemperature = _hardwareMonitor.GetCpuTemperatureReading();
                 dto.CpuTempCelsius = cpuTemperature?.Celsius;
                 dto.CpuTemperatureSource = cpuTemperature?.Source ?? "Unavailable";
@@ -79,32 +72,10 @@ public class TelemetryBackgroundService : BackgroundService
                 try { if (_threadCounter != null) dto.CpuThreads = (int)_threadCounter.NextValue(); } catch {}
                 try { if (_handleCounter != null) dto.CpuHandles = (int)_handleCounter.NextValue(); } catch {}
 
-                // RAM
-                dto.RamUsagePercent = Math.Round(_hardwareMonitor.GetRamLoad() ?? 0, 1);
-                // Getting absolute memory used is tricky with LHM without total, but let's grab from WMI OperatingSystem briefly, 
-                // or just rely on static values for absolute. Let's do a lightweight WMI query or GC memory. 
-                // Wait, LHM "Data" sensor for Memory usually has "Used Memory".
-                // Let's implement it inside the DTO, but for now we'll do the WMI one fast.
-                try 
-                {
-                    using var osSearcher = new ManagementObjectSearcher("SELECT TotalVisibleMemorySize, FreePhysicalMemory FROM Win32_OperatingSystem");
-                    foreach (var obj in osSearcher.Get())
-                    {
-                        if (long.TryParse(obj["TotalVisibleMemorySize"]?.ToString(), out var totalKb) && 
-                            long.TryParse(obj["FreePhysicalMemory"]?.ToString(), out var freeKb))
-                        {
-                            var totalGb = totalKb / (1024.0 * 1024.0);
-                            var freeGb = freeKb / (1024.0 * 1024.0);
-                            var usedGb = totalGb - freeGb;
-                            
-                            dto.RamUsedGb = Math.Round(usedGb, 2);
-                            if (totalGb > 0 && dto.RamUsagePercent == 0)
-                                dto.RamUsagePercent = Math.Round((usedGb / totalGb) * 100, 1);
-                        }
-                        break;
-                    }
-                }
-                catch { }
+                var memory = WmiMemoryProvider.ReadUsage();
+                dto.RamUsagePercent = memory.UsageAvailable == true ? memory.UsagePercent : null;
+                dto.RamUsedGb = memory.UsageAvailable == true ? memory.UsedGb : null;
+                dto.RamTotalGb = memory.UsageAvailable == true ? memory.TotalGb : null;
 
                 // GPU
                 dto.GpuUsagePercent = Math.Round(_hardwareMonitor.GetGpuLoad() ?? 0, 1);

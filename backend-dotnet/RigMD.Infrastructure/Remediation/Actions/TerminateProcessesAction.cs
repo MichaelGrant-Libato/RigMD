@@ -127,7 +127,7 @@ public class TerminateProcessesAction
         var preview = new ToolDryRunPreview
         {
             ToolName = "terminate_processes",
-            DisplayName = "Terminate High-Resource Processes",
+            DisplayName = "Try to close reviewed high-use apps",
             SafetyTier = ToolSafetyTier.Tier2_DestructiveOrAdmin,
             RequiresAdmin = false,
             IsRunningAsAdmin = ToolArgumentHelper.IsCurrentProcessElevated(),
@@ -213,7 +213,7 @@ public class TerminateProcessesAction
         var reasonSuffix = !string.IsNullOrWhiteSpace(reason) ? $" Reason: {reason}" : string.Empty;
         preview.CanExecute = true;
         preview.WhatWillHappen =
-            $"Will gracefully close (and force-terminate after 2s if unresponsive) {totalInstances} process instance(s) ({string.Join(", ", preview.AffectedTargets)}), reclaiming approximately {ToolArgumentHelper.FormatBytes(totalBytes)} of RAM.{reasonSuffix}";
+            $"Try normal close requests for {totalInstances} process instance(s) ({string.Join(", ", preview.AffectedTargets)}). Apps may remain running in the background. No force close is used; the displayed app memory is not guaranteed system memory freed.{reasonSuffix}";
         preview.Warnings.Add("Unsaved work in the target application(s) may be lost when closed.");
 
         return preview;
@@ -233,9 +233,7 @@ public class TerminateProcessesAction
         var logs = new List<string>();
         var proofs = new List<ExecutionProof>();
         int totalClosedGracefully = 0;
-        int totalForceKilled = 0;
         int totalFailed = 0;
-        long totalReclaimedBytes = 0;
 
         foreach (var target in distinctTargets)
         {
@@ -285,7 +283,7 @@ public class TerminateProcessesAction
                 }
                 catch
                 {
-                    // Ignore if process has no main window or denies access
+                    totalFailed++;
                 }
             }
 
@@ -293,24 +291,7 @@ public class TerminateProcessesAction
 
             foreach (var proc in processes)
             {
-                try
-                {
-                    proc.Refresh();
-                    if (!proc.HasExited)
-                    {
-                        proc.Kill(entireProcessTree: true);
-                        totalForceKilled++;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    totalFailed++;
-                    logs.Add($"FAILED to kill {target}.exe (PID {proc.Id}): {ex.Message}");
-                }
-                finally
-                {
-                    proc.Dispose();
-                }
+                proc.Dispose();
             }
 
             var remaining = Process.GetProcessesByName(target);
@@ -329,28 +310,25 @@ public class TerminateProcessesAction
                 }
             }
 
-            var deltaBytes = Math.Max(0, beforeBytes - afterBytes);
-            totalReclaimedBytes += deltaBytes;
-
             logs.Add(
-                $"TERMINATED '{target}.exe': {beforeCount} -> {afterCount} instance(s), RAM {ToolArgumentHelper.FormatBytes(beforeBytes)} -> {ToolArgumentHelper.FormatBytes(afterBytes)}.");
+                $"OBSERVED '{target}.exe': {beforeCount} -> {afterCount} instance(s), app working set {ToolArgumentHelper.FormatBytes(beforeBytes)} -> {ToolArgumentHelper.FormatBytes(afterBytes)}. No force close.");
 
             proofs.Add(new ExecutionProof
             {
                 Label = $"{target}.exe",
-                Status = afterCount == 0 ? "Terminated" : $"{afterCount} Remaining",
+                Status = afterCount == 0 ? "App closed" : "App still running in background",
                 Before = $"{beforeCount} proc(s) ({ToolArgumentHelper.FormatBytes(beforeBytes)})",
                 After = $"{afterCount} proc(s) ({ToolArgumentHelper.FormatBytes(afterBytes)})",
                 Meaning = afterCount == 0
-                    ? $"All {beforeCount} instance(s) closed; freed ~{ToolArgumentHelper.FormatBytes(deltaBytes)}."
-                    : $"Closed {Math.Max(0, beforeCount - afterCount)} of {beforeCount} instance(s)."
+                    ? "No matching app processes were observed. A process working-set change is not a measurement of system-wide memory freed."
+                    : "The app has not fully exited. RigMD did not force it to close. Save work before quitting it from the app itself."
             });
         }
 
-        bool anySucceeded = (totalClosedGracefully + totalForceKilled) > 0;
+        bool anySucceeded = totalClosedGracefully > 0;
         var summary = anySucceeded
-            ? $"Terminated processes ({totalClosedGracefully} graceful, {totalForceKilled} force-killed), reclaiming ~{ToolArgumentHelper.FormatBytes(totalReclaimedBytes)} of working set memory."
-            : "No target processes were terminated.";
+            ? $"Sent {totalClosedGracefully} normal close request(s); {totalFailed} blocked attempt(s). No force close was used. Review each app result; a request does not confirm an app exited or memory pressure improved."
+            : "No normal close request was accepted. No force close was used. Review each app result.";
 
         return new ExecutionResult
         {

@@ -143,11 +143,13 @@ public class InspectMemoryAndProcessesTool : IRigMdAgentTool
 
         var payload = new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
             memory = new
             {
                 totalGb = Math.Round(memory.TotalGb, 2),
                 usedGb = Math.Round(memory.UsedGb, 2),
-                usagePercent = Math.Round(memory.UsagePercent, 1),
+                usagePercent = memory.UsageAvailable != false && double.IsFinite(memory.UsagePercent) && memory.UsagePercent is >= 0 and <= 100
+                    ? (double?)memory.UsagePercent : null,
                 committedGb = Math.Round(memory.CommittedGb, 2),
                 cachedGb = Math.Round(memory.CachedGb, 2),
                 speedMtps = memory.SpeedMtps,
@@ -157,7 +159,8 @@ public class InspectMemoryAndProcessesTool : IRigMdAgentTool
             {
                 browserDetected = insights.BrowserDetected,
                 browserProcessCount = insights.BrowserProcessCount,
-                browserMemoryMb = Math.Round(insights.BrowserMemoryMb, 1),
+                browserMemoryMb = double.IsFinite(insights.BrowserMemoryMb) && insights.BrowserMemoryMb >= 0
+                    ? (double?)insights.BrowserMemoryMb : null,
                 browserHeavy = insights.BrowserHeavy
             },
             gameSummary = new
@@ -169,8 +172,10 @@ public class InspectMemoryAndProcessesTool : IRigMdAgentTool
             topProcesses = liveGroups
         };
 
+        var usageSummary = memory.UsageAvailable != false && double.IsFinite(memory.UsagePercent) && memory.UsagePercent is >= 0 and <= 100
+            ? $"{memory.UsedGb:F1}/{memory.TotalGb:F1} GB ({memory.UsagePercent:F1}%)" : "unavailable";
         var summary =
-            $"RAM usage: {memory.UsedGb:F1}/{memory.TotalGb:F1} GB ({memory.UsagePercent:F1}%). Browser RAM: {insights.BrowserMemoryMb:F0} MB across {insights.BrowserProcessCount} processes.";
+            $"RAM usage: {usageSummary}. Browser RAM: {insights.BrowserMemoryMb:F0} MB across {insights.BrowserProcessCount} processes.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

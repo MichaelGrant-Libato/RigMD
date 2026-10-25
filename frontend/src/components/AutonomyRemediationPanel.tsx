@@ -1,13 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import {
   Activity,
+  ArrowRight,
   AlertTriangle,
   Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Cpu,
   Info,
   Loader2,
   Play,
@@ -24,6 +25,10 @@ import {
   cardFadeUp,
   cardTransition,
 } from '../lib/motion';
+import DiagnosticReadings from './DiagnosticReadings';
+import { hardwareInspectionNotice, requiresHardwareInspection, reviewOnlyNotice, memoryActionDisposition, crashCheckNotice, type ScanScope } from '../lib/repairSupport';
+import { friendlyToolName, getActionExplanation, getDiagnosticOverview, friendlyVerification,
+  getSnapshotReadings, plainDiagnosticText, type DiagnosticReading } from '../lib/diagnosticLanguage';
 
 import {
   type AutonomyExecution,
@@ -43,6 +48,12 @@ import {
 } from '../services/autonomyService';
 
 interface AutonomyRemediationPanelProps {
+  readings?: DiagnosticReading[];
+  originalReadings?: DiagnosticReading[];
+  check?: ScanScope;
+  onOpenMemoryCheck?: () => void;
+  followUpSummary?: string;
+  followUpCheckedAt?: string | null;
   sessionId: string;
   diagnosedCategory: string;
   onExecutionComplete?: (result: AutonomyResult) => void;
@@ -229,7 +240,7 @@ function getStatusStyle(state: string) {
   if (state === 'success') {
     return {
       icon: CheckCircle2,
-      title: 'Verified Complete',
+      title: 'Follow-up check passed',
       className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200',
     };
   }
@@ -275,32 +286,7 @@ function getToolOption(toolId?: string, displayName?: string): RemediationToolOp
 }
 
 function getToolDisplayName(toolId?: string, displayName?: string) {
-  if (toolId === 'inspect_full_device_profile') {
-    return 'Device Manager and hardware check';
-  }
-  if (toolId === 'inspect_gpu_and_displays') {
-    return 'graphics and display check';
-  }
-  if (toolId === 'inspect_memory_and_processes') {
-    return 'memory and running apps check';
-  }
-  if (toolId === 'inspect_cpu_and_thermals') {
-    return 'processor and temperature check';
-  }
-  if (toolId === 'inspect_storage_health') {
-    return 'storage health check';
-  }
-  if (toolId === 'inspect_network_connectivity') {
-    return 'network connection check';
-  }
-  if (toolId === 'inspect_battery_and_power') {
-    return 'battery and power check';
-  }
-  if (toolId === 'query_windows_event_logs') {
-    return 'Windows error history check';
-  }
-
-  return getToolOption(toolId, displayName)?.userLabel || 'this tool';
+  return friendlyToolName(toolId, displayName);
 }
 
 function getDiagnosisMatchedToolIds(diagnosedCategory: string) {
@@ -339,12 +325,12 @@ function getDiagnosisMatchedToolIds(diagnosedCategory: string) {
     category.includes('application crash') ||
     category.includes('app crash')
   ) {
-    return ['run_system_file_checker', 'restart_windows_explorer'];
+    return [];
   }
 
+  if (/memory|\bram\b/i.test(category)) return ['close_selected_app'];
+
   if (
-    category.includes('memory') ||
-    category.includes('ram') ||
     category.includes('performance') ||
     category.includes('stuttering') ||
     category.includes('freezing') ||
@@ -393,11 +379,7 @@ function getContextualToolOptions(
     ids.add(id);
   }
 
-  if (ids.size === 0) {
-    ids.add('clear_temp_files');
-  }
-
-  return [...ids]
+  return [...ids].filter(id => !/memory|\bram\b/i.test(diagnosedCategory) || id === 'close_selected_app')
     .map((id) => getToolOption(id, proposedTool?.toolName === id ? proposedTool.displayName : undefined))
     .filter((tool): tool is RemediationToolOption => Boolean(tool));
 }
@@ -507,89 +489,8 @@ function readNumber(source: SnapshotRecord | null, key: string): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function readString(source: SnapshotRecord | null, key: string): string | null {
-  const value = source?.[key];
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function formatMetric(value: number | null, suffix = '') {
-  return value === null ? 'Not available' : `${value.toFixed(value % 1 === 0 ? 0 : 1)}${suffix}`;
-}
-
 function getSnapshotFacts(toolName: string, snapshot: SnapshotRecord | null) {
-  if (!snapshot) {
-    return [] as string[];
-  }
-
-  const normalized = toolName.toLowerCase();
-
-  if (normalized === 'inspect_full_device_profile') {
-    const gpu = readRecord(snapshot, 'gpu');
-    return [
-      `Device Manager errors: ${readNumber(snapshot, 'deviceErrorsCount') ?? 0}`,
-      `Graphics: ${readString(gpu, 'name') ?? 'Detected'}${readString(gpu, 'driver') ? `, driver ${readString(gpu, 'driver')}` : ''}`,
-      `Connected displays: ${readNumber(snapshot, 'connectedDisplays') ?? 0}`,
-    ];
-  }
-
-  if (normalized === 'inspect_memory_and_processes') {
-    const memory = readRecord(snapshot, 'memory');
-    const browser = readRecord(snapshot, 'browserSummary');
-    return [
-      `Memory use: ${formatMetric(readNumber(memory, 'usagePercent'), '%')}`,
-      `Browser workload: ${formatMetric(readNumber(browser, 'browserMemoryMb'), ' MB')}`,
-    ];
-  }
-
-  if (normalized === 'inspect_cpu_and_thermals') {
-    const cpu = readRecord(snapshot, 'cpu');
-    return [
-      `Processor load: ${formatMetric(readNumber(cpu, 'usagePercent'), '%')}`,
-      `Temperature: ${formatMetric(readNumber(cpu, 'temperatureCelsius'), '°C')}`,
-    ];
-  }
-
-  if (normalized === 'inspect_storage_health') {
-    const primary = readRecord(snapshot, 'primaryVolume') || readRecord(snapshot, 'volume');
-    const smart = readString(snapshot, 'smartStatus') || readString(primary, 'smartStatus') || 'Reported by Windows';
-    return [
-      `Drive use: ${formatMetric(readNumber(primary, 'usagePercent'), '%')}`,
-      `Drive health: ${smart}`,
-    ];
-  }
-
-  if (normalized === 'inspect_network_connectivity') {
-    const connectivity = readRecord(snapshot, 'connectivity') || snapshot;
-    return [
-      `Ping: ${formatMetric(readNumber(connectivity, 'latencyMs'), ' ms')}`,
-      `Packet loss: ${formatMetric(readNumber(connectivity, 'packetLossPercent'), '%')}`,
-    ];
-  }
-
-  if (normalized === 'inspect_battery_and_power') {
-    const battery = readRecord(snapshot, 'battery') || snapshot;
-    return [
-      `Battery: ${formatMetric(readNumber(battery, 'chargePercent'), '%')}`,
-      `Power state: ${readString(battery, 'powerLineStatus') || readString(snapshot, 'activePowerPlan') || 'Detected'}`,
-    ];
-  }
-
-  if (normalized === 'query_windows_event_logs') {
-    const focus = readString(snapshot, 'eventFocus')?.toLowerCase() || '';
-    const eventLabel = focus.includes('applicationcrash')
-      ? 'Application crash/fault events'
-      : focus.includes('bugcheck')
-        ? 'System crash/stop-error events'
-        : focus.includes('boot')
-          ? 'Boot/startup events'
-          : 'Recent Windows events';
-
-    return [
-      `${eventLabel}: ${readNumber(snapshot, 'eventCount') ?? readNumber(snapshot, 'count') ?? 'Detected'}`,
-    ];
-  }
-
-  return [];
+  return getSnapshotReadings(toolName, snapshot).map(reading => `${reading.label}: ${reading.value}`);
 }
 
 function getUnresolvedReason(diagnosedCategory: string, result: AutonomyResult) {
@@ -614,7 +515,7 @@ function getUnresolvedReason(diagnosedCategory: string, result: AutonomyResult) 
     const memory = readRecord(after, 'memory');
     const usage = readNumber(memory, 'usagePercent');
     return usage !== null
-      ? `Memory is still high at ${usage.toFixed(1)}%.`
+      ? `The follow-up check recorded ${usage.toFixed(1)}% memory use. Review the remaining warning.`
       : 'The follow-up check still sees performance pressure.';
   }
 
@@ -627,7 +528,7 @@ function getUnresolvedReason(diagnosedCategory: string, result: AutonomyResult) 
   }
 
   if (category.includes('thermal') || category.includes('overheat') || category.includes('fan')) {
-    return 'Temperature or processor-load readings still need attention.';
+    return 'The cooling check still reported a concern. Review the available temperature readings.';
   }
 
   if (category.includes('application crash') || category.includes('app crash') || category.includes('blue screen')) {
@@ -878,7 +779,19 @@ function ReActTimeline({ steps }: { steps: ReActTraceStep[] }) {
   );
 }
 
-function ProofList({ execution }: { execution?: AutonomyExecution }) {
+function TechnicalCheckDetails({ steps, engine, analysis, citations }: {
+  steps?: ReActTraceStep[]; engine?: string; analysis?: string; citations?: string[];
+}) {
+  return <details className="mt-4 min-w-0 border-t border-white/10 pt-3 text-xs text-slate-400">
+    <summary className="cursor-pointer py-2 font-semibold text-slate-300">Technical check details</summary>
+    {engine && <p className="my-2 break-words">Engine: {engine}</p>}
+    {analysis && <p className="my-3 whitespace-pre-wrap break-words leading-relaxed">{analysis}</p>}
+    {citations?.length ? <ul className="my-3 space-y-2 break-words">{citations.map((citation, index) => <li key={index}>{formatCitation(citation)}</li>)}</ul> : null}
+    {steps?.length ? <ReActTimeline steps={steps} /> : <p className="py-2">No detailed check log was returned.</p>}
+  </details>;
+}
+
+export function ProofList({ execution }: { execution?: AutonomyExecution }) {
   if (!execution?.proof?.length) {
     return null;
   }
@@ -888,13 +801,21 @@ function ProofList({ execution }: { execution?: AutonomyExecution }) {
       {execution.proof.map((item, index) => (
         <div
           key={`${item.label}-${index}`}
-          className="rounded-lg border border-current/15 bg-black/10 p-3"
+          className="min-w-0 border-t border-current/15 py-3"
         >
           <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">
-            {item.label || 'Checked'}
+            {item.label === 'Directory size' ? 'Temporary-file storage' : item.label === 'File count' ? 'Temporary files' : plainDiagnosticText(item.label || 'Checked')}
           </p>
 
-          {item.before && item.after ? (
+          {item.status && /^(App closed|App still running|App state not verified)/.test(item.status) ? (
+            <>
+              <p className="mt-1 text-sm font-semibold text-white">{item.status}</p>
+              <details className="mt-2 text-xs leading-relaxed opacity-80">
+                <summary className="cursor-pointer">App process details</summary>
+                <p className="mt-1 break-words">{item.before} &rarr; {item.after}</p>
+              </details>
+            </>
+          ) : item.before && item.after ? (
             <p className="mt-1 text-xs font-semibold text-white">
               {item.before} &rarr; {item.after}
             </p>
@@ -906,7 +827,7 @@ function ProofList({ execution }: { execution?: AutonomyExecution }) {
 
           {item.meaning && (
             <p className="mt-1 text-[11px] leading-relaxed opacity-80">
-              {item.meaning}
+              {plainDiagnosticText(item.meaning)}
             </p>
           )}
         </div>
@@ -932,25 +853,25 @@ function FollowUpEvidence({
 
   if (beforeFacts.length === 0 && afterFacts.length === 0) {
     return (
-      <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3 text-xs">
+      <div className="mt-4 border-t border-current/20 pt-3 text-xs">
         <p className="font-bold uppercase tracking-wider opacity-80">
           Follow-up check ({getToolDisplayName(report.verificationToolName)})
         </p>
         <p className="mt-1 leading-relaxed opacity-90">
-          {report.summary.replace(/Before:/g, 'Before check:').replace(/After:/g, 'After check:')}
+          {plainDiagnosticText(report.summary).replace(/Before:/g, 'Before check:').replace(/After:/g, 'After check:')}
         </p>
       </div>
     );
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3">
+    <div className="mt-4 border-t border-current/20 pt-3">
       <p className="text-xs font-bold uppercase tracking-wider opacity-80">
         Follow-up check ({getToolDisplayName(report.verificationToolName)})
       </p>
 
       <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-        <div className="rounded-md border border-current/15 bg-black/20 p-2.5">
+        <div className="min-w-0 py-2">
           <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">
             Before action
           </p>
@@ -1005,22 +926,30 @@ function NextStepsPanel({
 function ResultCard({
   result,
   diagnosedCategory,
+  followUpSummary,
 }: {
   result: AutonomyResult;
   diagnosedCategory: string;
+  followUpSummary?: string;
 }) {
-  const state = getState(result);
-  const style = getStatusStyle(state);
-  const Icon = style.icon;
+  const state = followUpSummary ? 'info' : getState(result);
   const attempt = getLatestAttempt(result);
-  const verificationLabel = getVerificationLabel(result.verification);
+  const statusLabel = followUpSummary ? 'Follow-up checked' : friendlyVerification(result.verification ?? attempt?.verification ?? getAttemptStateLabel(attempt?.state));
+  const verifiedResolved = statusLabel === 'Issue no longer detected';
+  const style = getStatusStyle(state === 'success' && !verifiedResolved ? 'info' : state);
+  const Icon = style.icon;
   const summary =
     state === 'unresolved'
       ? 'The action ran, but the follow-up Windows check still sees the issue.'
       : state === 'success'
-        ? result.execution?.summary || attempt?.notes || 'The action completed and the follow-up check passed.'
-        : null;
+        ? verifiedResolved ? 'The follow-up check no longer reported this issue. A problem that comes and goes may still need another check.' : 'The action finished. Its effect on the original issue has not been confirmed.'
+        : result.execution?.success === true
+          ? 'The action finished, but the follow-up check could not confirm whether the issue improved.'
+          : null;
   const displaySummary =
+    followUpSummary ||
+    (result.execution?.success === true && result.verificationReport?.verificationToolName === 'query_windows_event_logs'
+      ? result.verificationReport.summary : null) ||
     summary ||
     attempt?.notes ||
     result.execution?.summary ||
@@ -1032,6 +961,7 @@ function ResultCard({
 
   return (
     <div className="space-y-3">
+      {result.persistenceWarning && <p role="alert" className="rounded-md border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-200">{result.persistenceWarning}</p>}
       <div className={`rounded-xl border p-4 text-sm ${style.className}`}>
         <div className="flex items-start gap-3">
           <Icon size={18} className="mt-0.5 shrink-0" />
@@ -1039,22 +969,17 @@ function ResultCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-bold uppercase tracking-wider">
-                {style.title}
+                {followUpSummary ? 'Latest follow-up' : state === 'info' && statusLabel === 'Could not verify' ? statusLabel : state === 'success' && !verifiedResolved ? 'Action finished' : style.title}
               </p>
 
-              {result.engineMode && (
-                <span className="rounded-full border border-current/30 px-2 py-0.5 font-mono text-[10px]">
-                  {result.engineMode}
-                </span>
-              )}
             </div>
 
             <p className="mt-2 leading-relaxed">
-              {displaySummary}
+              {plainDiagnosticText(displaySummary)}
             </p>
 
             {unresolvedReason && (
-              <div className="mt-3 rounded-lg border border-current/20 bg-black/20 p-3 text-xs leading-relaxed">
+              <div className="mt-3 border-t border-current/20 pt-3 text-xs leading-relaxed">
                 <p className="font-bold uppercase tracking-wider opacity-80">
                   Why it is still active
                 </p>
@@ -1064,13 +989,11 @@ function ResultCard({
               </div>
             )}
 
-            <FollowUpEvidence result={result} />
-            <NextStepsPanel diagnosedCategory={diagnosedCategory} result={result} />
+            {!followUpSummary && <FollowUpEvidence result={result} />}
+            {!followUpSummary && <NextStepsPanel diagnosedCategory={diagnosedCategory} result={result} />}
 
             <span className="mt-3 inline-flex rounded-full border border-current/30 px-2.5 py-1 text-[10px] font-bold uppercase">
-              {verificationLabel ||
-                getAttemptStateLabel(attempt?.state) ||
-                'Completed'}
+              {statusLabel}
             </span>
           </div>
         </div>
@@ -1078,18 +1001,27 @@ function ResultCard({
         <ProofList execution={result.execution || attempt?.execution} />
       </div>
 
-      {result.reasoningSteps && result.reasoningSteps.length > 0 && (
-        <ReActTimeline steps={result.reasoningSteps} />
-      )}
+      <TechnicalCheckDetails steps={result.reasoningSteps} engine={result.engineMode}
+        analysis={[result.rootCauseAnalysis, result.execution?.summary, attempt?.notes].filter(Boolean).join('\n')} />
     </div>
   );
 }
 
 export default function AutonomyRemediationPanel({
+  readings = [],
+  originalReadings,
+  check,
+  onOpenMemoryCheck,
   sessionId,
   diagnosedCategory,
   onExecutionComplete,
+  followUpSummary,
+  followUpCheckedAt,
 }: AutonomyRemediationPanelProps) {
+  const memoryDisposition = memoryActionDisposition(check ?? { diagnosed_category: diagnosedCategory }, readings);
+  const memoryAction = memoryDisposition === 'direct';
+  const actionCategory = memoryAction ? 'High Memory Pressure' : diagnosedCategory;
+  const [executedAt, setExecutedAt] = useState<number | null>(null);
   const [previewResult, setPreviewResult] =
     useState<AutonomyResult | null>(null);
 
@@ -1103,7 +1035,7 @@ export default function AutonomyRemediationPanel({
     useState<string | null>(null);
 
   const [activeToolId, setActiveToolId] =
-    useState<string>('clear_temp_files');
+    useState<string>('');
 
   const [customDryRun, setCustomDryRun] =
     useState<ToolDryRunPreview | null>(null);
@@ -1134,13 +1066,41 @@ export default function AutonomyRemediationPanel({
     useState<string[]>([]);
 
   const requestActive = isPreviewLoading || isExecuteLoading;
+  const reviewDialog = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!reviewOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    reviewDialog.current?.focus();
+    const keepFocusInReview = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(reviewDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]') ?? [])
+        .filter(control => control.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first || !last) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === reviewDialog.current)) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === reviewDialog.current)) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', keepFocusInReview);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', keepFocusInReview);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [reviewOpen]);
 
   const isCloseSelectedAppMode = activeToolId === 'close_selected_app';
 
   const primaryAction = getPrimaryAction(previewResult);
 
   const effectiveDryRun: ToolDryRunPreview | undefined =
-    customDryRun ??
+    isCloseSelectedAppMode ? customDryRun ?? undefined : customDryRun ??
     previewResult?.dryRunPreview ??
     previewResult?.proposedTool?.dryRunPreview;
 
@@ -1163,6 +1123,7 @@ export default function AutonomyRemediationPanel({
       .replace(/telemetry/gi, 'device readings')
       .replace(/Tier 1/gi, 'low-risk')
       .replace(/Tier 2/gi, 'approval-required');
+  const actionExplanation = getActionExplanation(activeToolId);
 
   const dynamicWarnings =
     effectiveDryRun?.warnings && effectiveDryRun.warnings.length > 0
@@ -1187,8 +1148,8 @@ export default function AutonomyRemediationPanel({
     selectedMemoryApps.map((app) => app.displayName || app.name);
 
   const contextualToolOptions = useMemo(
-    () => getContextualToolOptions(diagnosedCategory, previewResult),
-    [diagnosedCategory, previewResult],
+    () => getContextualToolOptions(actionCategory, previewResult).filter(option => option.id !== 'close_selected_app' || memoryAction),
+    [actionCategory, previewResult, memoryAction],
   );
 
   const activeToolOption = getToolOption(
@@ -1269,6 +1230,21 @@ export default function AutonomyRemediationPanel({
     setLiveSteps([]);
     setLiveProgressLine('Starting ReAct diagnostic tool investigation...');
 
+    if (memoryAction) {
+      try {
+        setMemoryApps(await getMemoryAppCandidates());
+        setPreviewResult({ rootCauseAnalysis: 'Review apps using memory. Nothing will close until you select apps and approve the action.' });
+        setActiveToolId('close_selected_app');
+        setReviewOpen(true);
+      } catch (error) {
+        setPreviewError(getBackendErrorMessage(error));
+      } finally {
+        setIsPreviewLoading(false);
+        setLiveProgressLine(null);
+      }
+      return;
+    }
+
     await startRemediationStream(
       (msg) => setLiveProgressLine(msg),
       (step) =>
@@ -1292,12 +1268,13 @@ export default function AutonomyRemediationPanel({
       setMemoryApps(apps);
       setPreviewResult(result);
 
-      const recommendedTool =
+      const memoryFinding = /memory|\bram\b/i.test(diagnosedCategory);
+      const recommendedTool = memoryFinding ? 'close_selected_app' :
         result.proposedTool?.toolName ||
         result.plan?.plannedActions?.[0]?.id ||
         (diagnosedCategory.toLowerCase().includes('memory') && apps.length > 0
           ? 'close_selected_app'
-          : 'clear_temp_files');
+          : getDiagnosisMatchedToolIds(diagnosedCategory)[0] ?? '');
 
       setActiveToolId(recommendedTool);
       setReviewOpen(true);
@@ -1346,6 +1323,7 @@ export default function AutonomyRemediationPanel({
           });
 
       setExecutionResult(result);
+      setExecutedAt(Date.now());
       setReviewOpen(false);
       setUserConsentProvided(false);
       onExecutionComplete?.(result);
@@ -1363,15 +1341,68 @@ export default function AutonomyRemediationPanel({
     previewResult?.reasoningSteps && previewResult.reasoningSteps.length > 0
       ? previewResult.reasoningSteps
       : liveSteps;
+  const observations = new Map<string, ReturnType<typeof getSnapshotReadings>>();
+  for (const step of displayedSteps) {
+    if (step.toolName && step.observationJson) {
+      const readings = getSnapshotReadings(step.toolName, step.observationJson);
+      if (readings.length) observations.set(step.toolName, readings);
+    }
+  }
+  const reviewReadings = memoryAction ? readings.filter(row => row.metric_id === 'memory_usage' || row.metric_id === 'memory_app_warning')
+    : [...observations.values()].flat();
+
+  if (requiresHardwareInspection(diagnosedCategory)) return (
+    <section aria-label="Hardware inspection recommended" className="border-l-2 border-amber-400 pl-4 py-3">
+      <div className="flex items-center gap-2 text-amber-200"><AlertTriangle size={18} /><h5 className="text-sm font-semibold">Hardware inspection recommended</h5></div>
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{hardwareInspectionNotice}</p>
+    </section>
+  );
+
+  const reviewNotice = reviewOnlyNotice(diagnosedCategory);
+  const crashContext = /crash|stability risk|stop error/i.test(diagnosedCategory) ||
+    /^(app-crashes|application-crashes|blue-screen-crash|blue-screen|bsod|system-crashes)$/i.test(check?.scenario_id ?? '');
+  const crashNotice = crashCheckNotice(originalReadings ?? readings, originalReadings === readings ? undefined : readings);
+  if (memoryDisposition === 'handoff') return (
+    <div className="space-y-4">
+      {crashContext && <section aria-label="About the crash check" className="border-l-2 border-sky-400 py-2 pl-4">
+        <h5 className="text-sm font-semibold text-sky-200">About the crash check</h5>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashNotice}</p>
+      </section>}
+      <details className="border-t border-[var(--rigmd-border)] py-3" aria-label="Separate memory finding">
+        <summary className="cursor-pointer text-sm font-semibold text-amber-200">Other findings: Memory warning needs review</summary>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-300">
+          Memory is a separate finding. Its relationship to the selected problem has not been established.
+        </p>
+        <button type="button" onClick={onOpenMemoryCheck} disabled={!onOpenMemoryCheck}
+          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-cyan-400/35 bg-cyan-400/10 px-4 py-2.5 text-xs font-bold text-cyan-200 disabled:opacity-50">
+          <ArrowRight size={14} /> Open memory check
+        </button>
+      </details>
+    </div>
+  );
+  const inactiveMemory = /memory|\bram\b/i.test(diagnosedCategory) && memoryDisposition === 'none';
+  if ((reviewNotice || inactiveMemory) && !memoryAction) return (
+    <section aria-label="Investigation recommended" className="border-l-2 border-sky-400 pl-4 py-3">
+      <h5 className="text-sm font-semibold text-sky-200">About this check</h5>
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashContext ? crashNotice : inactiveMemory
+        ? 'The latest saved readings do not show a verified memory warning. No app-closing action is available. Check current status if symptoms continue.' : reviewNotice}</p>
+      {executionResult && <div className="mt-4"><ResultCard result={executionResult} diagnosedCategory="High Memory Pressure"
+        followUpSummary={executedAt !== null && followUpCheckedAt && Date.parse(followUpCheckedAt) >= executedAt ? followUpSummary : undefined} /></div>}
+    </section>
+  );
 
   return (
     <>
+      {reviewNotice && memoryAction && <section aria-label="About the crash check" className="mb-5 border-l-2 border-sky-400 py-2 pl-4">
+        <h5 className="text-sm font-semibold text-sky-200">About the crash check</h5>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashNotice}</p>
+      </section>}
       <motion.section
         variants={cardFadeUp}
         initial="hidden"
         animate="visible"
         transition={cardTransition}
-        className="rounded-xl border border-[var(--rigmd-border)] bg-[#101821] p-4"
+        className="min-w-0 space-y-4"
       >
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-start gap-3">
@@ -1383,17 +1414,12 @@ export default function AutonomyRemediationPanel({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h5 className="text-sm font-bold text-white">
-                  Autonomous ReAct Diagnostic &amp; Remediation Agent
+                  {memoryAction ? 'Help with memory use' : 'Review a possible next step'}
                 </h5>
-                {previewResult?.engineMode && (
-                  <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] text-cyan-200">
-                    {previewResult.engineMode}
-                  </span>
-                )}
               </div>
 
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
-                Checks the related Windows readings first, previews the safest matching action, and waits for your approval before changing anything.
+                {memoryAction ? 'Review running apps and choose only ones you no longer need. Save your work first. Closing selected apps may reduce memory use; improvement must be checked afterward.' : 'No changes are made during the check. Any proposed action needs your approval.'}
               </p>
             </div>
           </div>
@@ -1411,7 +1437,7 @@ export default function AutonomyRemediationPanel({
               <SlidersHorizontal size={14} />
             )}
 
-            {isPreviewLoading ? 'Checking device readings...' : 'Run Agent & Review Action'}
+            {isPreviewLoading ? 'Checking your device...' : memoryAction ? 'Review apps using memory' : 'Check possible actions'}
           </motion.button>
         </div>
 
@@ -1419,11 +1445,11 @@ export default function AutonomyRemediationPanel({
           <div className="mt-4 space-y-2 rounded-lg border border-cyan-400/25 bg-cyan-400/5 p-3">
             <div className="flex items-center gap-2 text-xs text-cyan-200">
               <Terminal size={14} className="animate-pulse" />
-              <span className="font-mono">
-                {liveProgressLine || 'Executing Tier 0 diagnostic tools...'}
+              <span>
+                Checking your device. No changes are being made.
               </span>
             </div>
-            {liveSteps.length > 0 && <ReActTimeline steps={liveSteps} />}
+            {liveSteps.length > 0 && <TechnicalCheckDetails steps={liveSteps} />}
           </div>
         )}
 
@@ -1441,38 +1467,39 @@ export default function AutonomyRemediationPanel({
 
         {executionResult && (
           <div className="mt-4">
-            <ResultCard result={executionResult} diagnosedCategory={diagnosedCategory} />
+            <ResultCard result={executionResult} diagnosedCategory={actionCategory}
+              followUpSummary={executedAt !== null && followUpCheckedAt && Date.parse(followUpCheckedAt) >= executedAt ? followUpSummary : undefined} />
           </div>
         )}
       </motion.section>
 
-      {reviewOpen && (
+      {reviewOpen && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6">
           <motion.div
+            ref={reviewDialog}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="action-review-title"
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-5 shadow-2xl"
+            className="max-h-[92vh] w-full min-w-0 max-w-3xl overflow-y-auto rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-5 shadow-2xl [overflow-wrap:anywhere]"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                    Investigation &amp; Safe Action Preview
+                    Review before making changes
                   </p>
-                  {previewResult?.engineMode && (
-                    <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] text-cyan-200">
-                      {previewResult.engineMode}
-                    </span>
-                  )}
                 </div>
 
-                <h3 className="mt-2 text-xl font-bold text-white">
+                <h3 id="action-review-title" className="mt-2 text-xl font-bold text-white">
                   {dynamicTitle}
                 </h3>
 
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  {dynamicDescription}
+                  {actionExplanation.description}
                 </p>
               </div>
 
@@ -1494,60 +1521,29 @@ export default function AutonomyRemediationPanel({
                   {previewError || executeError}
                 </p>
               )}
-              {/* 1. Multi-Turn ReAct Trace Timeline */}
-              {displayedSteps.length > 0 && (
-                <ReActTimeline steps={displayedSteps} />
-              )}
-
-              {/* 2. Root Cause Synthesis & Live Evidence Citations */}
-              {(previewResult?.rootCauseAnalysis ||
-                previewResult?.proposedTool?.evidenceCitations?.length) && (
-                <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
-                  <div className="flex items-center gap-2">
-                    <Cpu size={15} className="text-cyan-300" />
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-200">
-                      Why RigMD picked this action
-                    </h4>
-                  </div>
-
-                  {previewResult?.rootCauseAnalysis && (
-                    <p className="mt-2 text-sm leading-relaxed text-slate-200">
-                      {previewResult.rootCauseAnalysis}
-                    </p>
-                  )}
-
-                  {previewResult?.proposedTool?.evidenceCitations &&
-                    previewResult.proposedTool.evidenceCitations.length > 0 && (
-                      <ul className="mt-3 space-y-1.5 border-t border-cyan-400/15 pt-2.5 font-mono text-xs text-cyan-100/90">
-                        {previewResult.proposedTool.evidenceCitations.map(
-                          (citation, i) => (
-                            <li key={i}>&bull; {formatCitation(citation)}</li>
-                          ),
-                        )}
-                      </ul>
-                    )}
-                </div>
-              )}
+              <DiagnosticReadings readings={reviewReadings} technicalDetails={false} />
+              {!reviewReadings.length && <p className="text-sm leading-relaxed text-slate-300">{getDiagnosticOverview(diagnosedCategory).meaning}</p>}
 
               {/* 3. Tool Selection & Live Dry-Run Impact Metrics */}
-              <div className="rounded-xl border border-[var(--rigmd-border)] bg-[#0b1118] p-4">
+              <section className="border-t border-white/10 pt-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
                     <Wrench size={15} className="text-emerald-300" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
-                      Recommended action and safety preview
+                      What will change
                     </h4>
                   </div>
 
                   <select
+                    aria-label="Action to review"
                     value={activeToolId}
                     onChange={(e) => handleToolSelectionChange(e.target.value)}
                     disabled={requestActive}
-                    className="rounded-lg border border-white/15 bg-[#101821] px-3 py-1.5 text-xs font-semibold text-white focus:border-cyan-400 focus:outline-none"
+                    className="w-full min-w-0 max-w-full rounded-lg border border-white/15 bg-[#101821] px-3 py-1.5 text-xs font-semibold text-white focus:border-cyan-400 focus:outline-none sm:w-auto sm:max-w-[65%]"
                   >
                     {contextualToolOptions.map((opt) => (
                       <option key={opt.id} value={opt.id}>
-                        {opt.label}
+                        {friendlyToolName(opt.id, opt.userLabel)}
                       </option>
                     ))}
                   </select>
@@ -1555,72 +1551,70 @@ export default function AutonomyRemediationPanel({
 
                 {effectiveDryRun && !isCloseSelectedAppMode && (
                   <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+                    <div className="min-w-0 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Items Affected
+                        {actionExplanation.itemsLabel}
                       </p>
                       <p className="mt-1 text-base font-bold text-white">
                         {effectiveDryRun.affectedItemsCount.toLocaleString()}
                       </p>
                     </div>
 
-                    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+                    <div className="min-w-0 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Estimated space or memory impact
+                        {actionExplanation.bytesLabel}
                       </p>
                       <p className="mt-1 text-base font-bold text-cyan-300">
-                        {formatBytes(effectiveDryRun.estimatedBytesAffected)}
+                        {effectiveDryRun.estimatedBytesKnown === false || activeToolId === 'run_system_file_checker' ? 'Not estimated' : formatBytes(effectiveDryRun.estimatedBytesAffected)}
                       </p>
                     </div>
 
-                    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+                    <div className="min-w-0 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                         Permission needed
                       </p>
                       <p className="mt-1 text-xs font-bold text-white">
                         {effectiveDryRun.requiresAdmin
                           ? effectiveDryRun.isRunningAsAdmin
-                            ? 'Admin Required (Elevated OK)'
-                            : 'Requires Admin Elevation'
-                          : 'Standard User Safe'}
+                            ? 'Administrator access is active'
+                            : 'Windows administrator approval needed'
+                          : 'No administrator access required'}
                       </p>
                     </div>
                   </div>
                 )}
 
-                {effectiveDryRun?.affectedTargets &&
-                  effectiveDryRun.affectedTargets.length > 0 &&
+                <p className="mt-3 text-sm leading-relaxed text-amber-100">{actionExplanation.caution}</p>
+                {effectiveDryRun &&
                   !isCloseSelectedAppMode && (
-                    <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        What this action may touch
-                      </p>
+                    <details className="mt-3 min-w-0 border-t border-white/10 pt-2 text-xs text-slate-400">
+                      <summary className="cursor-pointer py-2 font-semibold text-slate-300">Exact action details and affected locations</summary>
+                      <p className="my-2 whitespace-pre-wrap break-words leading-relaxed">{dynamicDescription}</p>
                       <ul className="mt-1.5 space-y-1 font-mono text-xs text-slate-300">
-                        {effectiveDryRun.affectedTargets.map((t, idx) => (
-                          <li key={idx}>&bull; {t}</li>
+                        {effectiveDryRun.affectedTargets?.map((t, idx) => (
+                          <li className="break-words [overflow-wrap:anywhere]" key={idx}>&bull; {t}</li>
                         ))}
                       </ul>
-                    </div>
+                    </details>
                   )}
-              </div>
+              </section>
 
               {/* 4. Safety & Warnings */}
               <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-200">
-                  Safety &amp; Pre-Execution Warnings
+                  Before you continue
                 </h4>
 
                 <ul className="mt-2.5 space-y-1.5 text-sm text-slate-300">
                   {dynamicWarnings.map((item) => (
                     <li key={item}>
-                      - {item
-                        .replace(/telemetry/gi, 'device readings')
-                        .replace(/Tier 1/gi, 'low-risk')
-                        .replace(/Tier 2/gi, 'approval-required')}
+                      - {plainDiagnosticText(item)}
                     </li>
                   ))}
                 </ul>
               </div>
+              <TechnicalCheckDetails steps={displayedSteps} engine={previewResult?.engineMode}
+                analysis={previewResult?.rootCauseAnalysis} citations={previewResult?.proposedTool?.evidenceCitations} />
             </div>
 
             {isCloseSelectedAppMode && (
@@ -1630,14 +1624,13 @@ export default function AutonomyRemediationPanel({
                 </h4>
 
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                  Pick only apps you are ready to close. RigMD strictly blocks protected Windows,
-                  Security, and RigMD system processes.
+                  Save your work first. Closing an app may lose unsaved changes. Protected Windows, security, and RigMD apps cannot be selected.
                 </p>
 
                 {memoryApps.length === 0 ? (
                   <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-3 text-xs leading-relaxed text-amber-100">
                     RigMD does not see a memory-heavy user app (&gt;100 MB) that is eligible to close
-                    right now. You can select another remediation tool above (such as Clear Temporary Files).
+                    right now. Other actions may have different effects; clearing files is not the same as closing apps.
                   </p>
                 ) : (
                   <div className="mt-3 space-y-3">
@@ -1685,9 +1678,7 @@ export default function AutonomyRemediationPanel({
                             </span>
 
                             <span className="mt-1 block text-xs leading-relaxed text-slate-500">
-                              {app.processCount} related process
-                              {app.processCount === 1 ? '' : 'es'} will be
-                              closed if Windows allows it.
+                              {app.processCount} background part{app.processCount === 1 ? '' : 's'} of this app may also close.
                             </span>
 
                             {app.detail && (
@@ -1735,9 +1726,9 @@ export default function AutonomyRemediationPanel({
               />
 
               <span>
-                I reviewed the readings and safety preview. I approve RigMD to run this action.
+                I understand what will change and approve this action.
                 <span className="mt-1 block text-xs text-amber-100/70">
-                  RigMD will not change Windows until this box is checked.
+                  This action runs only after approval and pressing the action button.
                 </span>
               </span>
             </label>
@@ -1745,7 +1736,7 @@ export default function AutonomyRemediationPanel({
             {isExecuteLoading && liveProgressLine && (
               <div className="mt-3 flex items-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 p-3 font-mono text-xs text-cyan-200">
                 <Activity size={14} className="animate-spin" />
-                <span>{liveProgressLine}</span>
+                <span>Running the approved action and checking the result...</span>
               </div>
             )}
 
@@ -1772,18 +1763,18 @@ export default function AutonomyRemediationPanel({
                 )}
 
                 {isExecuteLoading
-                  ? 'Executing & Verifying...'
+                  ? 'Running and checking...'
                   : effectiveDryRun && !effectiveDryRun.canExecute
-                    ? 'Cannot Execute (See Warnings)'
+                    ? 'Action unavailable - review warnings'
                     : isCloseSelectedAppMode && selectedProcessNames.length === 0
                       ? 'Choose at least one app'
                       : userConsentProvided
-                        ? 'Approve & Execute Tool'
-                        : 'Check the box to proceed'}
+                        ? isCloseSelectedAppMode ? 'Close selected apps' : 'Run this action'
+                        : 'Approval required'}
               </motion.button>
             </div>
           </motion.div>
-        </div>
+        </div>, document.body
       )}
     </>
   );

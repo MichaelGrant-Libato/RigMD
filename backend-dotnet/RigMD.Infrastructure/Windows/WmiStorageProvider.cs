@@ -11,16 +11,28 @@ public class WmiStorageProvider : IStorageProvider
 
     public string GetPrimaryStorageType()
     {
+        lock (_storageDrives)
+        {
         // Must be called after GetStorageDrives, or we can just run it
         if (!_storageDrives.Any())
             GetStorageDrives();
             
         return _primaryStorageType;
+        }
     }
 
     public List<StorageDriveDto> GetStorageDrives()
     {
-        if (_storageDrives.Any()) return _storageDrives;
+        lock (_storageDrives)
+        {
+            return ReadStorageDrives();
+        }
+    }
+
+    private List<StorageDriveDto> ReadStorageDrives()
+    {
+        // Refresh status on every scan; only immutable model metadata would be safe to cache.
+        _storageDrives.Clear();
 
         try
         {
@@ -30,7 +42,7 @@ public class WmiStorageProvider : IStorageProvider
                 var model = obj["Model"]?.ToString() ?? "Unknown";
                 var mediaType = obj["MediaType"]?.ToString() ?? "Unknown";
                 var interfaceType = obj["InterfaceType"]?.ToString() ?? "Unknown";
-                var status = obj["Status"]?.ToString() ?? "OK";
+                var status = obj["Status"]?.ToString() ?? "Unknown";
                 
                 var sizeGb = 0.0;
                 if (obj["Size"] != null && long.TryParse(obj["Size"].ToString(), out var sizeBytes))
@@ -55,7 +67,7 @@ public class WmiStorageProvider : IStorageProvider
                     DiskIndex = diskIndex,
                     Type = type,
                     DetectionSource = source,
-                    IsFailingSmart = !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase)
+                    IsFailingSmart = ReportsHealthWarning(status)
                 });
             }
 
@@ -74,7 +86,7 @@ public class WmiStorageProvider : IStorageProvider
             // Ignore
         }
 
-        return _storageDrives;
+        return _storageDrives.ToList();
     }
 
     public List<DiskVolumeDto> GetAllDisks()
@@ -113,6 +125,9 @@ public class WmiStorageProvider : IStorageProvider
         }
         return volumes;
     }
+
+    internal static bool ReportsHealthWarning(string? status) =>
+        status?.Trim().ToLowerInvariant() is "pred fail" or "error" or "degraded";
 
     private Dictionary<string, int> GetLogicalToPhysicalMapping()
     {

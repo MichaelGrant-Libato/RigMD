@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getCheckOverview } from '../lib/checkPresentation';
+import { getSessionCheckLabel } from '../lib/pastChecksFormatting';
+import { buildReportText, formatDate, friendlyAction, getSessionDate } from '../lib/reportFormatting';
+import { loadReportData } from '../lib/reportData';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { createPortal } from 'react-dom';
 import {
@@ -14,432 +18,12 @@ import {
 import TopHeader from '../components/TopHeader';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import { apiFetch } from '../lib/api';
-import type { DashboardSessionSummary, DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd';
+import type { DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd';
 
 interface ShareReportViewProps {
   stats: HardwareStats | null;
-  dashboard: DashboardSummary;
   hardwareUpdatedAt: Date | null;
   onStartNewDiagnosis?: () => void;
-}
-
-function formatDate(value: string | Date | null | undefined) {
-  if (!value) return 'Not available';
-
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Not available';
-
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-function cleanValue(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === '') return 'Not available';
-  if (String(value).toLowerCase() === 'unknown') return 'Not available';
-  return String(value);
-}
-
-function friendlyAction(action: string | null | undefined) {
-  const value = (action ?? '').toLowerCase();
-  if (value.includes('monitor')) return 'Keep an eye on it';
-  if (value.includes('maintain')) return 'Do simple care';
-  if (value.includes('troubleshoot')) return 'Try a safe fix';
-  if (value.includes('escalate')) return 'Get help';
-  return cleanValue(action);
-}
-
-function friendlyResult(result: string | null | undefined) {
-  if ((result ?? '').trim().toLowerCase() === 'no active issue detected') {
-    return 'No active problem found';
-  }
-
-  return cleanValue(result);
-}
-
-function getSessionDate(session: SessionSummary) {
-  return session.created_at ?? session.display_date ?? null;
-}
-
-function sortSessionsNewestFirst(sessions: SessionSummary[]) {
-  return [...sessions].sort((a, b) => {
-    const first = new Date(getSessionDate(a) ?? 0).getTime();
-    const second = new Date(getSessionDate(b) ?? 0).getTime();
-    return second - first;
-  });
-}
-
-function formatStorageSize(sizeGb: number | null | undefined) {
-  if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Not available';
-  return sizeGb >= 1000
-    ? `${(sizeGb / 1024).toFixed(1)} TB`
-    : `${Math.round(sizeGb * 10) / 10} GB`;
-}
-
-interface ResolvedDriveInfo {
-  model: string;
-  type: string;
-  size_gb: number;
-  interface?: string;
-  disk_index?: number | null;
-  used_gb?: number | null;
-  usage_percent?: number | null;
-  is_failing_smart?: boolean;
-  status?: string | null;
-  volumes?: Array<{
-    drive: string;
-    mountpoint: string;
-    fstype?: string;
-    disk_index?: number | null;
-    total_gb?: number;
-    used_gb?: number;
-    usage_percent?: number;
-  }>;
-}
-
-function resolveAllStorageDrives(stats: HardwareStats | null): ResolvedDriveInfo[] {
-  if (!stats) return [];
-
-  // 1. Primary: Use physical storage_drives if provided
-  if (stats.storage_drives && stats.storage_drives.length > 0) {
-    return stats.storage_drives.map((drive, idx) => {
-      const driveVolumes =
-        drive.volumes && drive.volumes.length > 0
-          ? drive.volumes
-          : (stats.all_disks ?? []).filter(
-              (d) => drive.disk_index != null && d.disk_index === drive.disk_index
-            );
-
-      let usedGb = drive.used_gb;
-      let usagePercent = drive.usage_percent;
-      if ((usedGb == null || usagePercent == null) && driveVolumes.length > 0) {
-        const totalVol = driveVolumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
-        const usedVol = driveVolumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
-        if (usedVol > 0) usedGb = Math.round(usedVol * 100) / 100;
-        if (totalVol > 0) usagePercent = Math.round((usedVol / totalVol) * 1000) / 10;
-      }
-
-      return {
-        model: drive.model,
-        type: drive.type || drive.media_type || stats.storage_type || 'SSD',
-        size_gb: drive.size_gb,
-        interface: drive.interface,
-        disk_index: drive.disk_index ?? idx,
-        used_gb: usedGb,
-        usage_percent: usagePercent,
-        is_failing_smart: drive.is_failing_smart,
-        status: drive.status,
-        volumes: driveVolumes,
-      };
-    });
-  }
-
-  // 2. Secondary fallback: Group all_disks by disk_index
-  if (stats.all_disks && stats.all_disks.length > 0) {
-    const byIndex = new Map<number | string, typeof stats.all_disks>();
-    stats.all_disks.forEach((disk, i) => {
-      const key = disk.disk_index != null ? disk.disk_index : `disk-${i}`;
-      const group = byIndex.get(key) ?? [];
-      group.push(disk);
-      byIndex.set(key, group);
-    });
-
-    return Array.from(byIndex.entries()).map(([key, volumes], idx) => {
-      const diskIndex = typeof key === 'number' ? key : idx;
-      const totalGb = volumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
-      const usedGb = volumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
-      const usagePercent = totalGb > 0 ? Math.round((usedGb / totalGb) * 1000) / 10 : undefined;
-      const driveLetter = volumes.map((v) => v.drive).filter(Boolean).join(', ');
-
-      return {
-        model: driveLetter ? `Storage Drive (${driveLetter})` : `Storage Drive ${idx + 1}`,
-        type: stats.storage_type || 'SSD',
-        size_gb: totalGb,
-        disk_index: diskIndex,
-        used_gb: usedGb,
-        usage_percent: usagePercent,
-        status: 'Healthy (OK)',
-        volumes,
-      };
-    });
-  }
-
-  // 3. Last fallback: Single stats.disk summary
-  if (stats.disk?.total_gb) {
-    return [
-      {
-        model: 'Primary Storage Drive',
-        type: stats.storage_type || 'SSD',
-        size_gb: stats.disk.total_gb,
-        disk_index: 0,
-        used_gb: stats.disk.used_gb,
-        usage_percent: stats.disk.usage_percent,
-        status: 'Healthy (OK)',
-        volumes: [],
-      },
-    ];
-  }
-
-  return [];
-}
-
-function padCol(val: string, width: number): string {
-  if (val.length > width) return val.slice(0, Math.max(0, width - 1)) + '…';
-  return val.padEnd(width);
-}
-
-function kv(label: string, value: string, pad = 24): string {
-  return `${label.padEnd(pad)}: ${value}`;
-}
-
-function buildReportText({
-  stats,
-  dashboard,
-  hardwareUpdatedAt,
-  sessions,
-  selectedSession,
-  historyUnavailable,
-}: {
-  stats: HardwareStats | null;
-  dashboard: DashboardSummary;
-  hardwareUpdatedAt: Date | null;
-  sessions: SessionSummary[];
-  selectedSession?: SessionSummary | DashboardSessionSummary | null;
-  historyUnavailable: boolean;
-}) {
-  const latest = selectedSession ?? sessions[0] ?? dashboard.last_saved_session ?? dashboard.last_diagnosis;
-  const isOlderSelected =
-    Boolean(selectedSession && sessions[0] && selectedSession.session_id !== sessions[0].session_id);
-  const recentSessions = sessions.slice(0, 8);
-  const drives = resolveAllStorageDrives(stats);
-
-  // Storage aggregation
-  const totalStorageGb = drives.length > 0
-    ? drives.reduce((acc, d) => acc + (d.size_gb || 0), 0)
-    : (stats?.disk?.total_gb ?? 0);
-
-  const totalUsedGb = drives.length > 0
-    ? drives.reduce((acc, d) => acc + (d.used_gb || 0), 0)
-    : (stats?.disk?.used_gb ?? 0);
-
-  const totalUsagePercent = totalStorageGb > 0
-    ? (totalUsedGb / totalStorageGb) * 100
-    : (stats?.disk?.usage_percent ?? null);
-
-  const freeStorageGb = Math.max(0, totalStorageGb - totalUsedGb);
-
-  let storagePoolSummary = formatStorageSize(totalStorageGb);
-  if (drives.length > 1) {
-    storagePoolSummary += ` across ${drives.length} drives`;
-  }
-  if (typeof totalUsagePercent === 'number' && !Number.isNaN(totalUsagePercent)) {
-    const usedPart = totalUsedGb > 0 ? ` (${formatStorageSize(totalUsedGb)} used / ${formatStorageSize(freeStorageGb)} free)` : '';
-    storagePoolSummary += ` • ${totalUsagePercent.toFixed(1)}% in use${usedPart}`;
-  }
-
-  // OS display string
-  const osString = cleanValue(stats?.os_version)
-    .replace(/^Microsoft\s+/i, '')
-    .replace(/\s*\([\d.]+\)$/, '');
-
-  // CPU display string
-  const cpuString = cleanValue(stats?.cpu?.name).replace(/\s+\d+-Core Processor$/i, '');
-
-  // RAM display string
-  let ramString = 'Not available';
-  if (stats?.ram?.total_gb) {
-    ramString = `${stats.ram.total_gb} GB total`;
-    if (typeof stats.ram.usage_percent === 'number' && !Number.isNaN(stats.ram.usage_percent)) {
-      ramString += ` (${stats.ram.usage_percent.toFixed(1)}% in use)`;
-    }
-  }
-
-  // Storage Drive block
-  const driveLines: string[] = [];
-  if (drives.length > 0) {
-    drives.forEach((disk, index) => {
-      const diskId = disk.disk_index != null ? `Disk ${disk.disk_index}` : `Disk ${index}`;
-      const diskModel = cleanValue(disk.model);
-      const diskType = cleanValue(disk.type || 'SSD');
-      const diskCapacity = formatStorageSize(disk.size_gb);
-
-      const driveLetters = (disk.volumes ?? [])
-        .map((v) => v.drive || v.mountpoint)
-        .filter(Boolean)
-        .join(', ');
-
-      const usedSpaceStr =
-        typeof disk.used_gb === 'number' ? formatStorageSize(disk.used_gb) : null;
-      const freeSpaceStr =
-        typeof disk.size_gb === 'number' && typeof disk.used_gb === 'number'
-          ? formatStorageSize(Math.max(0, disk.size_gb - disk.used_gb))
-          : null;
-      const usagePctStr =
-        typeof disk.usage_percent === 'number' && !Number.isNaN(disk.usage_percent)
-          ? `${disk.usage_percent.toFixed(1)}% in use`
-          : null;
-
-      let capUsageLine = diskCapacity;
-      if (usedSpaceStr && freeSpaceStr) {
-        capUsageLine = `${usedSpaceStr} used / ${freeSpaceStr} free (${diskCapacity} total${usagePctStr ? ` • ${usagePctStr}` : ''})`;
-      } else if (usagePctStr) {
-        capUsageLine = `${diskCapacity} (${usagePctStr})`;
-      }
-
-      const healthStatus =
-        disk.status ||
-        (disk.is_failing_smart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy (OK)');
-
-      driveLines.push(`[${index + 1}] ${diskId}: ${diskModel}`);
-      driveLines.push(kv('    Drive Type', diskType));
-      driveLines.push(kv('    Drive Letter', driveLetters || 'Unmounted / System Reserved'));
-      driveLines.push(kv('    Capacity & Usage', capUsageLine));
-      driveLines.push(kv('    Status (S.M.A.R.T.)', healthStatus));
-
-      if (disk.volumes && disk.volumes.length > 0) {
-        if (disk.volumes.length === 1) {
-          const v = disk.volumes[0];
-          const letter = v.drive || v.mountpoint || 'Volume';
-          const vTotal = formatStorageSize(v.total_gb);
-          const vUsed = typeof v.used_gb === 'number' ? `${formatStorageSize(v.used_gb)} used` : '';
-          const vFree =
-            typeof v.total_gb === 'number' && typeof v.used_gb === 'number'
-              ? `${formatStorageSize(Math.max(0, v.total_gb - v.used_gb))} free`
-              : '';
-          const vPct =
-            typeof v.usage_percent === 'number' ? `${v.usage_percent.toFixed(1)}% in use` : '';
-          const vFs = v.fstype || '';
-          const details = [vTotal, vUsed, vFree, vPct, vFs].filter(Boolean).join(', ');
-          driveLines.push(kv('    Partitions', `${letter} (${details})`));
-        } else {
-          driveLines.push('    Partitions          :');
-          disk.volumes.forEach((v) => {
-            const letter = v.drive || v.mountpoint || 'Volume';
-            const vTotal = formatStorageSize(v.total_gb);
-            const vUsed = typeof v.used_gb === 'number' ? `${formatStorageSize(v.used_gb)} used` : '';
-            const vFree =
-              typeof v.total_gb === 'number' && typeof v.used_gb === 'number'
-                ? `${formatStorageSize(Math.max(0, v.total_gb - v.used_gb))} free`
-                : '';
-            const vPct =
-              typeof v.usage_percent === 'number' ? `${v.usage_percent.toFixed(1)}% in use` : '';
-            const vFs = v.fstype || '';
-            const details = [vTotal, vUsed, vFree, vPct, vFs].filter(Boolean).join(', ');
-            driveLines.push(`      • ${letter} (${details})`);
-          });
-        }
-      }
-
-      if (index < drives.length - 1) {
-        driveLines.push('');
-      }
-    });
-  } else {
-    driveLines.push('No storage drives detected or telemetry unavailable.');
-  }
-
-  // Latest check formatting
-  const latestLines: string[] = [];
-  if (latest) {
-    const rawSymptom = latest.symptom_type?.trim();
-    const triggerText =
-      rawSymptom && rawSymptom.toLowerCase() !== 'not available' && rawSymptom.toLowerCase() !== 'unknown'
-        ? cleanValue(rawSymptom)
-        : 'Routine System Check';
-
-    latestLines.push(
-      kv('Check Date', formatDate(getSessionDate(latest))),
-      kv('Trigger / Symptom', triggerText),
-      kv('Diagnostic Finding', friendlyResult(latest.diagnosed_category)),
-      kv('Recommended Action', friendlyAction(latest.action_category)),
-      kv('Match Strength', cleanValue(latest.confidence_label))
-    );
-  } else {
-    latestLines.push(
-      kv('Check Date', 'No saved checks yet'),
-      kv('Status', 'Run a Device Check to record system triage')
-    );
-  }
-
-  // Recent history table
-  const historyTableLines: string[] = [];
-  if (recentSessions.length > 0) {
-    historyTableLines.push(
-      `  ${padCol('Date', 21)} | ${padCol('Trigger / Symptom', 23)} | ${padCol('Diagnostic Finding', 24)} | Recommended Action`,
-      '  ----------------------+-------------------------+--------------------------+-----------------------'
-    );
-    recentSessions.forEach((session) => {
-      const dateStr = formatDate(getSessionDate(session));
-      const rawSym = session.symptom_type?.trim();
-      const symStr =
-        rawSym && rawSym.toLowerCase() !== 'not available' && rawSym.toLowerCase() !== 'unknown'
-          ? cleanValue(rawSym)
-          : 'Routine System Check';
-      const findStr = friendlyResult(session.diagnosed_category);
-      const actStr = friendlyAction(session.action_category);
-
-      historyTableLines.push(
-        `  ${padCol(dateStr, 21)} | ${padCol(symStr, 23)} | ${padCol(findStr, 24)} | ${actStr}`
-      );
-    });
-  } else {
-    historyTableLines.push('  No saved checks yet.');
-  }
-
-  const divider = '='.repeat(80);
-  const sectionDivider = '-'.repeat(80);
-
-  const lines = [
-    divider,
-    '                           RigMD Device Check Report',
-    divider,
-    kv('Generated', formatDate(new Date())),
-    ...(historyUnavailable ? ['Check history could not be loaded. This report may be incomplete.'] : []),
-    kv('System Name', cleanValue(stats?.device_name)),
-    kv('Operating System', osString),
-    kv('Hardware Scan Time', formatDate(hardwareUpdatedAt)),
-    '',
-    sectionDivider,
-    'CORE HARDWARE SUMMARY',
-    sectionDivider,
-    kv('Processor (CPU)', cpuString),
-    kv('Memory (RAM)', ramString),
-    kv('Graphics (GPU)', cleanValue(stats?.gpu?.name)),
-    kv('Storage Capacity', storagePoolSummary),
-    '',
-    sectionDivider,
-    `STORAGE DRIVES (${drives.length} Detected)`,
-    sectionDivider,
-    ...driveLines,
-    '',
-    sectionDivider,
-    isOlderSelected ? 'SELECTED SYSTEM CHECK' : 'LATEST SYSTEM CHECK',
-    sectionDivider,
-    ...latestLines,
-    '',
-    sectionDivider,
-    'CHECK HISTORY & HEALTH SUMMARY',
-    sectionDivider,
-    kv('Total Saved Checks', String(dashboard.totals.total_sessions || sessions.length)),
-    kv('Checks This Month', String(dashboard.totals.this_month_count)),
-    kv('Recurring Issues', String(dashboard.recurring_issues_count)),
-    kv('Active Warnings', String(dashboard.warning_signs_active_count)),
-    kv('Escalations Needed', String(dashboard.totals.escalated_count)),
-    '',
-    'Recent Saved Checks:',
-    ...historyTableLines,
-    '',
-    divider,
-    'NOTE: RigMD provides device checkup guidance and telemetry-based triage.',
-    '      It does not replace in-person professional hardware diagnosis or repair.',
-    divider,
-  ];
-
-  return lines.join('\n');
 }
 
 function downloadTextFile(filename: string, text: string) {
@@ -456,7 +40,6 @@ function downloadTextFile(filename: string, text: string) {
 
 export default function ShareReportView({
   stats,
-  dashboard,
   hardwareUpdatedAt,
   onStartNewDiagnosis,
 }: ShareReportViewProps) {
@@ -465,47 +48,52 @@ export default function ShareReportView({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const liveSnapshot = useRef({ stats, hardwareUpdatedAt });
+  liveSnapshot.current = { stats, hardwareUpdatedAt };
+  const request = useRef<AbortController | null>(null);
+  const [snapshot, setSnapshot] = useState<{
+    stats: HardwareStats | null; dashboard: DashboardSummary; hardwareUpdatedAt: Date | null; generatedAt: Date;
+  } | null>(null);
+  const captureSnapshot = useCallback(() => {
+    setSnapshot(previous => previous ? { ...previous, ...liveSnapshot.current, generatedAt: new Date() } : previous);
+  }, []);
 
-  const fetchSessions = useCallback(async () => {
+  const refreshReport = useCallback(async () => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setIsLoading(true);
     setLoadError(null);
+    setMessage(null);
 
     try {
-      const response = await apiFetch('/api/diagnosis/sessions');
-
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      const rows = Array.isArray(data) ? data : Array.isArray(data?.sessions) ? data.sessions : [];
-      const sorted = sortSessionsNewestFirst(rows as SessionSummary[]);
-      setSessions(sorted);
+      const fresh = await loadReportData(apiFetch, controller.signal);
+      if (controller.signal.aborted) return;
+      setSessions(fresh.sessions);
       setSelectedSessionId((prev) =>
-        prev && sorted.some((s) => s.session_id === prev)
+        prev && fresh.sessions.some((s) => s.session_id === prev)
           ? prev
-          : (sorted[0]?.session_id ?? '')
+          : (fresh.sessions[0]?.session_id ?? '')
       );
+      setSnapshot({ ...liveSnapshot.current, dashboard: fresh.dashboard, generatedAt: new Date() });
     } catch {
-      setSessions([]);
-      setLoadError('Saved checks are not available right now.');
+      if (!controller.signal.aborted) setLoadError('The report could not be refreshed. Saved checks or summary totals are unavailable. Try Refresh again.');
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    void refreshReport();
+    return () => request.current?.abort();
+  }, [refreshReport]);
 
   const activeSession = useMemo(
-    () =>
-      sessions.find((s) => s.session_id === selectedSessionId) ??
-      sessions[0] ??
-      dashboard.last_saved_session ??
-      dashboard.last_diagnosis,
-    [dashboard.last_diagnosis, dashboard.last_saved_session, selectedSessionId, sessions]
+    () => sessions.find((s) => s.session_id === selectedSessionId) ?? sessions[0] ?? null,
+    [selectedSessionId, sessions]
   );
+  const canExport = snapshot !== null && !isLoading && !loadError;
+  const statusMessage = loadError ? { type: 'error', text: loadError } : message;
 
   const isLatestSelected =
     !selectedSessionId ||
@@ -514,20 +102,19 @@ export default function ShareReportView({
 
   const reportText = useMemo(
     () =>
-      buildReportText({
-        stats,
-        dashboard,
-        hardwareUpdatedAt,
+      snapshot ? buildReportText({
+        ...snapshot,
         sessions,
         selectedSession: activeSession,
-        historyUnavailable: Boolean(loadError),
-      }),
-    [activeSession, dashboard, hardwareUpdatedAt, sessions, stats, loadError]
+        historyUnavailable: false,
+      }) : '',
+    [activeSession, snapshot, sessions]
   );
 
-  const reportFileName = `RigMD-Device-Report-${new Date().toISOString().slice(0, 10)}.txt`;
+  const reportFileName = `RigMD-Device-Report-${(snapshot?.generatedAt ?? new Date()).toISOString().slice(0, 10)}.txt`;
 
   const handleCopy = async () => {
+    if (!canExport) return;
     try {
       await navigator.clipboard.writeText(reportText);
       setMessage({ type: 'success', text: 'Report copied. You can paste it into chat, email, or a support ticket.' });
@@ -537,23 +124,26 @@ export default function ShareReportView({
   };
 
   const handleDownload = () => {
+    if (!canExport) return;
     downloadTextFile(reportFileName, reportText);
-    setMessage({ type: 'success', text: 'Report downloaded as a text file.' });
+    setMessage({ type: 'success', text: 'Text file download requested.' });
   };
 
   const handleEmailDraft = () => {
+    if (!canExport) return;
     const subject = encodeURIComponent('RigMD Device Check Report');
     const body = encodeURIComponent(reportText);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
   const handlePrint = () => {
+    if (!canExport) return;
     window.print();
   };
 
   return (
     <>
-      {createPortal(<article className="rigmd-print-report" aria-label="Device check report"><h1>RigMD Device Check Report</h1><pre>{reportText.split('\n').slice(1).join('\n')}</pre></article>, document.body)}
+      {canExport && createPortal(<article className="rigmd-print-report" aria-label="Device check report"><pre>{reportText}</pre></article>, document.body)}
       <TopHeader
         title="Share Report"
         subtitle="Select a saved check, review your results, then print or share them"
@@ -565,20 +155,20 @@ export default function ShareReportView({
         animate="visible"
         exit="exit"
         transition={pageTransition}
-        className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
+        className="custom-scrollbar min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-8"
       >
-        <div className="mx-auto grid w-full max-w-[1360px] gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
-            {(loadError || message) && (
+        <div className="mx-auto grid w-full min-w-0 max-w-[1360px] gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="min-w-0 space-y-5">
+            {statusMessage && (
               <div
                 role="status"
                 className={`rounded-xl border px-4 py-3 text-sm ${
-                  message?.type === 'success'
+                  statusMessage.type === 'success'
                     ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
                     : 'border-amber-400/30 bg-amber-400/10 text-amber-200'
                 }`}
               >
-                {message?.text || loadError}
+                {statusMessage.text}
               </div>
             )}
 
@@ -597,7 +187,7 @@ export default function ShareReportView({
                 </div>
 
                 {sessions.length > 0 && (
-                  <div className="w-full lg:w-96">
+                  <div className="w-full min-w-0 lg:w-96">
                     <label
                       htmlFor="report-session-selector"
                       className="mb-1.5 block text-xs font-bold uppercase tracking-[0.14em] text-slate-400"
@@ -607,14 +197,14 @@ export default function ShareReportView({
                     <select
                       id="report-session-selector"
                       value={selectedSessionId || sessions[0]?.session_id || ''}
-                      onChange={(e) => setSelectedSessionId(e.target.value)}
-                      disabled={isLoading}
+                      onChange={(e) => { setSelectedSessionId(e.target.value); captureSnapshot(); }}
+                      disabled={!canExport}
                       className="w-full rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3.5 py-2.5 text-xs font-semibold text-white transition focus:border-cyan-400 focus:outline-none"
                     >
                       {sessions.map((s, idx) => {
                         const codePrefix = s.session_code ? `${s.session_code} • ` : '';
                         const dateLabel = formatDate(getSessionDate(s));
-                        const findingLabel = friendlyResult(s.diagnosed_category);
+                        const findingLabel = getSessionCheckLabel(s);
                         const latestTag = idx === 0 ? ' (Latest)' : '';
                         return (
                           <option key={s.session_id} value={s.session_id}>
@@ -632,17 +222,17 @@ export default function ShareReportView({
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
                     {isLatestSelected ? 'Latest result' : 'Selected result'}
                   </p>
-                  <p className="mt-2 break-words font-bold text-white">{friendlyResult(activeSession?.diagnosed_category)}</p>
+                  <p className="mt-2 break-words font-bold text-white">{canExport ? getCheckOverview(activeSession ?? {}).title : 'Not available'}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">What to do</p>
-                  <p className="mt-2 font-bold text-white">{friendlyAction(activeSession?.action_category)}</p>
+                  <p className="mt-2 font-bold text-white">{canExport ? friendlyAction(activeSession?.action_category) : 'Not available'}</p>
                 </div>
 
                 <div className="rounded-xl border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-4">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Saved checks</p>
-                  <p className="mt-2 font-bold text-white">{dashboard.totals.total_sessions || sessions.length}</p>
+                  <p className="mt-2 font-bold text-white">{canExport ? snapshot!.dashboard.totals.total_sessions : 'Not available'}</p>
                 </div>
               </div>
             </motion.section>
@@ -660,7 +250,7 @@ export default function ShareReportView({
 
                 <button
                   type="button"
-                  onClick={fetchSessions}
+                  onClick={refreshReport}
                   disabled={isLoading}
                   className="inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-70"
                 >
@@ -669,13 +259,13 @@ export default function ShareReportView({
                 </button>
               </div>
 
-              <pre tabIndex={0} aria-label="Report preview" className="font-sans max-h-[560px] overflow-auto whitespace-pre-wrap p-5 text-sm leading-relaxed text-slate-200">
-                {reportText}
+              <pre tabIndex={0} aria-label="Report preview" className="font-sans max-h-[560px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] p-5 text-sm leading-relaxed text-slate-200">
+                {isLoading ? 'Loading report...' : loadError ? 'Report unavailable. Refresh to try again.' : reportText}
               </pre>
             </motion.section>
           </div>
 
-          <aside className="space-y-4">
+          <aside className="min-w-0 space-y-4">
             <motion.section
               variants={cardFadeUp}
               transition={cardTransition}
@@ -689,7 +279,7 @@ export default function ShareReportView({
               <div className="mt-5 space-y-3">
                 <motion.button
                   type="button"
-                  disabled={isLoading}
+                  disabled={!canExport}
                   onClick={handleCopy}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-bold text-[#041014] transition hover:bg-cyan-300"
@@ -700,7 +290,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
-                  disabled={isLoading}
+                  disabled={!canExport}
                   onClick={handleDownload}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-300 transition hover:bg-cyan-400/15"
@@ -711,7 +301,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
-                  disabled={isLoading}
+                  disabled={!canExport}
                   onClick={handlePrint}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"
@@ -722,7 +312,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
-                  disabled={isLoading}
+                  disabled={!canExport}
                   onClick={handleEmailDraft}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"

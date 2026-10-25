@@ -32,7 +32,7 @@ public class QueryRecurringProblemsAndWarningsTool : IRigMdAgentTool
     public string DisplayName => "Query Repeated Problems & Active Warning Signs";
 
     public string Description =>
-        "Analyzes historical diagnostic patterns ('Repeated Problems') and observed early warning signs ('Alerts') across the PC's history to identify chronic recurring hardware/OS issues and escalation recommendations.";
+        "Summarizes repeated warning observations and reported symptoms, prioritizing potential harm before frequency. Saved history is not a confirmed root cause, a current hardware fault, or proof of separate failures.";
 
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier0_ReadOnly;
 
@@ -87,7 +87,11 @@ public class QueryRecurringProblemsAndWarningsTool : IRigMdAgentTool
             {
                 id = p.id,
                 symptom = p.symptom,
-                primaryCause = p.probable_cause,
+                recordedFinding = p.probable_cause,
+                riskLevel = p.risk_level,
+                riskReason = p.risk_reason,
+                currentCondition = p.current_condition,
+                evidenceSummary = p.evidence_summary,
                 occurrences = p.occurrence_count,
                 highestAction = p.updated_action,
                 status = p.status,
@@ -109,31 +113,31 @@ public class QueryRecurringProblemsAndWarningsTool : IRigMdAgentTool
             })
             .ToList();
 
-        var mostCommonCause = patterns.FirstOrDefault()?.primaryCause;
-        var mostRepeatedSymptom = patterns.FirstOrDefault()?.symptom;
+        var highestPriorityFinding = patterns.FirstOrDefault()?.recordedFinding;
+        var highestPrioritySymptom = patterns.FirstOrDefault()?.symptom;
         var escalationCount = recurringResponse.metrics?.action_escalated ?? 0;
 
         var payload = new
         {
-            recurringPatternsCount = patterns.Count,
+            recurringPatternsCount = recurringResponse.metrics?.recurring_issues ?? 0,
             worseningTrendsCount = recurringResponse.metrics?.worsening_trends ?? 0,
             escalationCount,
-            mostRepeatedSymptom,
-            mostCommonCause,
+            highestPrioritySymptom,
+            highestPriorityFinding,
             recurringPatterns = patterns,
             activeWarningSignsCount = activeWarnings.Count,
             activeWarningSigns = activeWarnings
         };
 
         var patternSummary = patterns.Count > 0
-            ? $"{patterns.Count} recurring pattern(s) detected (most common cause: {mostCommonCause ?? "N/A"}, escalations: {escalationCount})"
+            ? $"{patterns.Count} repeated observation pattern(s) detected (highest-priority finding: {highestPriorityFinding ?? "N/A"})"
             : "0 recurring problem patterns detected";
 
         var warningSummary = activeWarnings.Count > 0
             ? $"{activeWarnings.Count} active warning sign(s) observed ({string.Join(", ", activeWarnings.Take(3).Select(w => $"{w.warningSign} [{w.observedCount}x]"))})"
             : "0 active warning signs observed";
 
-        var summary = $"{patternSummary} | {warningSummary}.";
+        var summary = $"{patternSummary} | {warningSummary}. These are patterns in saved checks, not new measurements or a confirmed cause/current fault.";
 
         return new AgentToolExecutionResult
         {

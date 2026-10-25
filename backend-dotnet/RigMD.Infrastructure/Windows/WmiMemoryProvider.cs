@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.InteropServices;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 
@@ -6,30 +7,54 @@ namespace RigMD.Infrastructure.Windows;
 
 public class WmiMemoryProvider : IMemoryProvider
 {
+    public static MemoryStatsDto ReadUsage()
+    {
+        var dto = new MemoryStatsDto { UsageAvailable = false };
+        try
+        {
+            var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
+            if (GlobalMemoryStatusEx(ref status))
+                return FromPhysicalBytes(status.TotalPhysical, status.AvailablePhysical);
+        }
+        catch { }
+        return dto;
+    }
+
+    internal static MemoryStatsDto FromPhysicalBytes(ulong total, ulong available)
+    {
+        if (total == 0 || available > total) return new() { UsageAvailable = false };
+        return new()
+        {
+            UsageAvailable = true, TotalGb = Math.Round(total / 1073741824d, 2),
+            UsedGb = Math.Round((total - available) / 1073741824d, 2),
+            UsagePercent = Math.Round((total - available) * 100d / total, 1)
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatus
+    {
+        public uint Length;
+        public uint MemoryLoad;
+        public ulong TotalPhysical;
+        public ulong AvailablePhysical;
+        public ulong TotalPageFile;
+        public ulong AvailablePageFile;
+        public ulong TotalVirtual;
+        public ulong AvailableVirtual;
+        public ulong AvailableExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+
     public MemoryStatsDto GetMemoryStats()
     {
-        var dto = new MemoryStatsDto();
+        var dto = ReadUsage();
         
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT TotalVisibleMemorySize, FreePhysicalMemory FROM Win32_OperatingSystem");
-            foreach (var obj in searcher.Get())
-            {
-                if (long.TryParse(obj["TotalVisibleMemorySize"]?.ToString(), out var totalKb) && 
-                    long.TryParse(obj["FreePhysicalMemory"]?.ToString(), out var freeKb))
-                {
-                    var totalGb = totalKb / (1024.0 * 1024.0);
-                    var freeGb = freeKb / (1024.0 * 1024.0);
-                    var usedGb = totalGb - freeGb;
-                    
-                    dto.TotalGb = Math.Round(totalGb, 2);
-                    dto.UsedGb = Math.Round(usedGb, 2);
-                    if (totalGb > 0)
-                        dto.UsagePercent = Math.Round((usedGb / totalGb) * 100, 1);
-                }
-                break;
-            }
-
             using var memSearcher = new ManagementObjectSearcher("SELECT Speed, FormFactor, Capacity FROM Win32_PhysicalMemory");
             int slotsUsed = 0;
             double totalRawCapacity = 0;

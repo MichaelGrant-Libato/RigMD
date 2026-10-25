@@ -9,6 +9,9 @@ namespace RigMD.Infrastructure.Ai;
 
 public class OfflineAiExplainer : IAiExplainer
 {
+    public async Task<DiagnosticExplanation> GenerateExplanationWithSourceAsync(DiagnosticResult result, DiagnosticSymptomPayload symptomPayload)
+        => new(await GenerateExplanationAsync(result, symptomPayload), "local");
+
     public Task<string> GenerateExplanationAsync(DiagnosticResult result, DiagnosticSymptomPayload symptomPayload)
     {
         if (result.DiagnosedCategory.Equals("No active issue detected", StringComparison.OrdinalIgnoreCase))
@@ -19,7 +22,6 @@ public class OfflineAiExplainer : IAiExplainer
         return Task.FromResult(
             BuildPlainExplanation(
                 result.DiagnosedCategory,
-                result.ActionCategory,
                 result.ConfidenceLabel,
                 result.Evidence,
                 result.AllLiveProof));
@@ -35,14 +37,13 @@ public class OfflineAiExplainer : IAiExplainer
 
         var detail = normalItems.Any()
             ? string.Join(", ", normalItems.Take(4))
-            : "live system readings are within normal ranges";
+            : "no detailed measurements were recorded";
 
-        return $"RigMD did not find an active problem in the live scan right now ({detail}). If the symptom only happens occasionally, run another check while the issue is actively occurring or use the guided inspection below.";
+        return $"No warning was found in the readings checked at this time ({detail}). This does not establish overall hardware health or rule out an intermittent problem. Recheck if symptoms return.";
     }
 
     private string BuildPlainExplanation(
         string category,
-        string actionCategory,
         string confidenceLabel,
         List<DiagnosticEvidenceItem> evidence,
         List<DiagnosticProofItem> proof)
@@ -145,7 +146,9 @@ public class OfflineAiExplainer : IAiExplainer
         }
         else if (cat.Contains("memory pressure") || cat.Contains("high memory"))
         {
-            intro = "Active applications and browser tabs are consuming a high share of physical RAM, which can force Windows to swap data to disk and feel sluggish.";
+            intro = HasPressure("RAM usage", "Physical Memory (RAM)")
+                ? "RAM use exceeded RigMD's workload review threshold. This reading alone does not establish paging, a memory leak or faulty RAM."
+                : "An application memory warning needs review separately from the total RAM usage. This does not establish a memory leak or faulty RAM.";
         }
         else if (cat.Contains("elevated cpu"))
         {
@@ -188,6 +191,15 @@ public class OfflineAiExplainer : IAiExplainer
             intro = "RigMD evaluated the live readings for your selected check.";
         }
 
-        return $"{intro} Live scan summary: {reason} (certainty: {confidenceLabel.ToLowerInvariant()}). Follow the {actionCategory.ToLowerInvariant()} guidance below and recheck afterward.";
+        var coverage = confidenceLabel.ToLowerInvariant() switch
+        {
+            "available" => "Evidence was available for the measurements checked.",
+            "partial" => "Some evidence was unavailable; review the missing measurements separately.",
+            "unavailable" => "The required evidence was unavailable.",
+            "contextonly" => "Only contextual information was collected.",
+            "notapplicable" => "This check is not applicable to the reported hardware.",
+            _ => "The saved rating is not a validated likelihood of a cause or hardware fault."
+        };
+        return $"{intro} Scan readings: {reason}. {coverage} Review the recommended next step before approving any change.";
     }
 }

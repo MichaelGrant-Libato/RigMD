@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,27 @@ namespace RigMD.Infrastructure.Remediation.Tools.Diagnostic;
 
 public class QueryWindowsEventLogsTool : IRigMdAgentTool
 {
+    private readonly Func<ProcessStartInfo, CancellationToken, Task<(int ExitCode, string Output, string Error)>> _runQuery;
+
+    public QueryWindowsEventLogsTool() : this(RunQueryAsync) { }
+
+    public QueryWindowsEventLogsTool(
+        Func<ProcessStartInfo, CancellationToken, Task<(int ExitCode, string Output, string Error)>> runQuery)
+    {
+        _runQuery = runQuery ?? throw new ArgumentNullException(nameof(runQuery));
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunQueryAsync(
+        ProcessStartInfo startInfo, CancellationToken cancellationToken)
+    {
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Windows event query could not start.");
+        var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var error = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return (process.ExitCode, await output, await error);
+    }
+
     public string Name => "query_windows_event_logs";
 
     public string DisplayName => "Query Windows Event Logs (System & Application)";
@@ -45,6 +67,11 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                 {
                     Type = "integer",
                     Description = "Time window in hours to search backwards from now (default: 48, max: 168)."
+                },
+                ["sinceUtc"] = new()
+                {
+                    Type = "string",
+                    Description = "Optional ISO 8601 timestamp with a UTC offset. Only records written at or after this time are included."
                 },
                 ["eventFocus"] = new()
                 {
@@ -88,19 +115,41 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
             ? "Application"
             : "System";
 
+        if (string.Equals(normalizedFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)) logName = "System";
+        var sinceText = ToolArgumentHelper.GetString(arguments, "sinceUtc", "");
+        DateTimeOffset? since = null;
+        if (!string.IsNullOrWhiteSpace(sinceText))
+        {
+            if (!(sinceText.EndsWith("Z", StringComparison.OrdinalIgnoreCase) ||
+                  System.Text.RegularExpressions.Regex.IsMatch(sinceText, @"[+-]\d{2}:\d{2}$")) ||
+                !DateTimeOffset.TryParse(sinceText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
+                parsed > DateTimeOffset.UtcNow)
+                return new AgentToolExecutionResult
+                {
+                    ToolName = Name, Success = false, Summary = "The event-check start time is invalid.",
+                    DataJson = JsonSerializer.Serialize(new { logName, eventFocus = normalizedFocus, eventCount = (int?)null, warning = "Invalid start time." })
+                };
+            since = parsed.ToUniversalTime();
+        }
+
         var maxEvents = Math.Clamp(ToolArgumentHelper.GetInt(arguments, "maxEvents", 12), 1, 25);
         var hoursBack = Math.Clamp(ToolArgumentHelper.GetInt(arguments, "hoursBack", 48), 1, 168);
 
         progressReporter?.Invoke($"Querying Windows '{logName}' Event Log (focus: {eventFocus}, last {hoursBack}h, up to {maxEvents} events)...");
 
         var timeDiffMs = (long)TimeSpan.FromHours(hoursBack).TotalMilliseconds;
-        var xpathQuery = string.Equals(normalizedFocus, "BugCheck", StringComparison.OrdinalIgnoreCase)
-            ? $"*[System[(EventID=41 or EventID=1001 or EventID=6008 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
-            : string.Equals(normalizedFocus, "Boot", StringComparison.OrdinalIgnoreCase)
-                ? $"*[System[(EventID=100 or EventID=6005 or EventID=6006 or EventID=7000 or EventID=7001 or Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
-                : string.Equals(normalizedFocus, "ApplicationCrash", StringComparison.OrdinalIgnoreCase)
-                    ? $"*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1026 or EventID=1005 or Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]"
-                    : $"*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]]]";
+        var timeFilter = since.HasValue
+            ? $"TimeCreated[@SystemTime >= '{since.Value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}']"
+            : $"TimeCreated[timediff(@SystemTime) <= {timeDiffMs}]";
+        // Match the selected record family, not every error in the same channel.
+        var focusFilter = normalizedFocus.ToLowerInvariant() switch
+        {
+            "bugcheck" => "((EventID=41 and Provider[@Name='Microsoft-Windows-Kernel-Power']) or (EventID=1001 and (Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] or Provider[@Name='BugCheck'])) or (EventID=6008 and Provider[@Name='EventLog']))",
+            "applicationcrash" => "((EventID=1000 and Provider[@Name='Application Error']) or (EventID=1001 and Provider[@Name='Windows Error Reporting']) or (EventID=1002 and Provider[@Name='Application Hang']) or (EventID=1026 and Provider[@Name='.NET Runtime']))",
+            "boot" => "(EventID=100 or EventID=6005 or EventID=6006 or EventID=7000 or EventID=7001 or Level=1 or Level=2 or Level=3)",
+            _ => "(Level=1 or Level=2 or Level=3)"
+        };
+        var xpathQuery = $"*[System[{focusFilter} and {timeFilter}]]";
 
         var events = new List<object>();
         string? queryWarning = null;
@@ -117,21 +166,20 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                 CreateNoWindow = true
             };
 
-            using var process = Process.Start(psi);
-            if (process != null)
+            var response = await _runQuery(psi, cancellationToken);
+            var stdout = response.Output;
+            var stderr = response.Error;
+            if (response.ExitCode != 0 || !string.IsNullOrWhiteSpace(stderr))
+                queryWarning = string.IsNullOrWhiteSpace(stderr)
+                    ? $"Windows event query failed (exit code {response.ExitCode})." : stderr.Trim();
             {
-                var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-                var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-                await process.WaitForExitAsync(cancellationToken);
-                var stdout = await stdoutTask;
-                var stderr = await stderrTask;
-
                 if (!string.IsNullOrWhiteSpace(stdout))
                 {
                     var wrappedXml = $"<Events>{stdout}</Events>";
                     var doc = XDocument.Parse(wrappedXml);
                     XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
+                    if (doc.Root?.Elements(ns + "Event").Any() != true)
+                        queryWarning = "Windows event query returned an unrecognized response.";
 
                     foreach (var ev in doc.Root?.Elements(ns + "Event") ?? Enumerable.Empty<XElement>())
                     {
@@ -140,8 +188,23 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
 
                         var providerName = sys?.Element(ns + "Provider")?.Attribute("Name")?.Value ?? "Unknown";
                         var eventId = sys?.Element(ns + "EventID")?.Value ?? "0";
+                        if (!MatchesFocus(normalizedFocus, providerName, eventId)) continue;
                         var levelCode = sys?.Element(ns + "Level")?.Value ?? "0";
                         var timeCreated = sys?.Element(ns + "TimeCreated")?.Attribute("SystemTime")?.Value ?? "";
+                        if (since.HasValue)
+                        {
+                            if (!DateTimeOffset.TryParse(timeCreated, CultureInfo.InvariantCulture, DateTimeStyles.None, out var recordedAt))
+                            {
+                                queryWarning = "A returned event has no valid recording time.";
+                                continue;
+                            }
+                            if (recordedAt < since.Value) continue;
+                            if (recordedAt > DateTimeOffset.UtcNow)
+                            {
+                                queryWarning = "A returned event has a future recording time.";
+                                continue;
+                            }
+                        }
                         var message = renderingInfo?.Element(ns + "Message")?.Value;
 
                         if (string.IsNullOrWhiteSpace(message))
@@ -188,6 +251,7 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             queryWarning = ex.Message;
@@ -198,7 +262,9 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
             logName,
             eventFocus = normalizedFocus,
             hoursBack,
-            eventCount = events.Count,
+            sinceUtc = since?.ToString("O", CultureInfo.InvariantCulture),
+            checkedAtUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            eventCount = queryWarning == null ? (int?)events.Count : null,
             warning = queryWarning,
             events
         };
@@ -211,16 +277,33 @@ public class QueryWindowsEventLogsTool : IRigMdAgentTool
                     ? "boot/startup"
                     : "Critical/Error/Warning";
 
-        var summary =
-            $"Retrieved {events.Count} recent {focusLabel} event(s) from the Windows '{logName}' log (last {hoursBack}h).";
+        var window = since.HasValue ? $"since {since.Value:O}" : $"last {hoursBack}h";
+        var summary = queryWarning == null
+            ? $"Retrieved {events.Count} matching {focusLabel} record(s) from the Windows '{logName}' log ({window})."
+            : "Windows error records could not be checked. No absence of errors can be confirmed.";
 
         return new AgentToolExecutionResult
         {
             ToolName = Name,
-            Success = true,
+            Success = queryWarning == null,
             Summary = summary,
             DataJson = JsonSerializer.Serialize(payload, ToolArgumentHelper.JsonOptions),
             OutputLog = summary
+        };
+    }
+
+    private static bool MatchesFocus(string focus, string provider, string eventId)
+    {
+        bool Is(string name) => string.Equals(provider, name, StringComparison.OrdinalIgnoreCase);
+        return focus.ToLowerInvariant() switch
+        {
+            "applicationcrash" => (eventId == "1000" && Is("Application Error")) ||
+                (eventId == "1001" && Is("Windows Error Reporting")) ||
+                (eventId == "1002" && Is("Application Hang")) || (eventId == "1026" && Is(".NET Runtime")),
+            "bugcheck" => (eventId == "41" && Is("Microsoft-Windows-Kernel-Power")) ||
+                (eventId == "1001" && (Is("Microsoft-Windows-WER-SystemErrorReporting") || Is("BugCheck"))) ||
+                (eventId == "6008" && Is("EventLog")),
+            _ => true
         };
     }
 }

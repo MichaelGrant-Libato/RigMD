@@ -6,6 +6,7 @@ namespace RigMD.Infrastructure.Windows;
 
 public class ProcessProvider : IProcessProvider
 {
+    public AppProcessObservationDto ObserveApp(string processName) => SelectedAppObservation.Read(processName);
     private static readonly HashSet<string> BrowserNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "firefox", "brave", "opera", "opera_gx", "vivaldi"
@@ -45,11 +46,6 @@ public class ProcessProvider : IProcessProvider
                     appDto.ProcessCount++;
                     appDto.MemoryMb += memoryMb;
 
-                    if (memoryMb > 2500 && !GameHints.Contains(name) && !GameHints.Any(hint => name.Contains(hint, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        dto.MemoryLeakWarning = $"Process '{name}' is consuming an unusually high amount of memory ({Math.Round(memoryMb, 2)} MB). This may indicate a memory leak.";
-                    }
-
                     if (BrowserNames.Contains(name))
                     {
                         dto.BrowserProcessCount++;
@@ -66,6 +62,7 @@ public class ProcessProvider : IProcessProvider
                 {
                     // Ignore access denied on specific processes
                 }
+                finally { proc.Dispose(); }
             }
 
             dto.BrowserDetected = dto.BrowserProcessCount > 0;

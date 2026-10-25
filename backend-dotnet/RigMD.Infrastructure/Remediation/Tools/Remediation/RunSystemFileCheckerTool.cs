@@ -65,6 +65,7 @@ public class RunSystemFileCheckerTool : IRigMdAgentTool
             RequiresUserConfirmation = true,
             AffectedItemsCount = 1,
             EstimatedBytesAffected = 0,
+            EstimatedBytesKnown = false,
             AffectedTargets = new List<string> { "Windows System32 & Component Store (sfc.exe /scannow)" },
             Warnings = warnings,
             WhatWillHappen = isAdmin

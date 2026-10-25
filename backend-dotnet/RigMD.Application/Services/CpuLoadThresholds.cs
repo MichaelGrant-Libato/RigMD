@@ -2,9 +2,9 @@ namespace RigMD.Application.Services;
 
 internal static class CpuLoadThresholds
 {
-    // Preserve the existing diagnosis thresholds for each check's workload context.
+    // The same measurement has the same review threshold in every check.
     public const double Elevated = 80;
-    public const double Responsiveness = 65;
-    public const double Startup = 70;
-    public const double SystemStabilityRisk = 85;
+    public const double Responsiveness = Elevated;
+    public const double Startup = Elevated;
+    public const double SystemStabilityRisk = Elevated;
 }

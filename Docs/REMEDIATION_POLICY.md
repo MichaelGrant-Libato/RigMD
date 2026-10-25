@@ -36,7 +36,7 @@ Low-risk, standard-user-safe Windows maintenance actions that do not touch perso
 ### `Tier2_DestructiveOrAdmin` — Higher-Impact or Administrator Tools (Strict Guardrails + User Consent Required)
 Actions that close running user applications, clear application caches, stop/start Windows services, or require Administrator elevation.
 - **Registered Tools**:
-  1. `terminate_processes` — Gracefully closes (`CloseMainWindow`) and force-terminates (`Kill(entireProcessTree: true)` after 2s) specified user processes.
+  1. `terminate_processes` - Legacy tool identifier for reviewed normal app-close requests (`CloseMainWindow`). No force-stop fallback is permitted. Background processes can remain running; requesting closure is not confirmed exit or proof of memory relief. The user-selected `close_selected_app` route follows the same normal-close policy and binds approval to the exact selected apps.
      - **Hard Denylist Guardrail**: Strictly blocks termination of protected Windows OS, security/Defender, and RigMD processes (`lsass`, `csrss`, `svchost`, `smss`, `wininit`, `winlogon`, `dwm`, `explorer`, `msmpeng`, `mssense`, `rigmd.api`, `dotnet`, etc.) via `TerminateProcessesAction.IsProtectedProcess`.
   2. `clear_browser_cache` — Clears Chrome, Edge, and Firefox disk cache folders (`Cache` / `cache2`) while leaving passwords, cookies, bookmarks, and history untouched. Warns during dry-run if target browsers are currently running.
   3. `clear_windows_update_cache` — Stops `wuauserv`, purges `C:\Windows\SoftwareDistribution\Download`, and restarts `wuauserv`. Checks Administrator elevation during dry-run.
@@ -51,7 +51,6 @@ Actions that close running user applications, clear application caches, stop/sta
 RigMD never exposes a generic shell, PowerShell, command-line, or registry-editing tool to the LLM. Only the explicitly compiled, strongly-typed `IRigMdAgentTool` implementations registered in `Program.cs` can be invoked.
 
 ## 3. Auditability & Telemetry Proof
-Every tool execution records:
-- Full multi-turn `ReActTraceStep` history (`Thought`, `ToolCall`, `Observation`, `DryRunPreview`, `Execution`, `Verification`).
-- Paired `Tier0_ReadOnly` before and after JSON snapshots (`PostExecutionVerificationReport`).
-- Concrete `ExecutionProof` items persisted to the local SQLite `RemediationRun` history.
+Executed generic tools and selected-app requests save action attempts and available proof to local SQLite history. Selected-app requests save each app's observed outcome; original-condition verification remains unknown until the separate follow-up check. Generic tools may also return paired inspection snapshots. A returned reasoning trace is not a guarantee that every trace step is durably retained.
+
+If history saving fails after execution, the response warns that the action already ran; users must not repeat it merely to save history. A crash-history query, a high memory reading, a missing sensor and a completed system-file scan are separate facts. None alone proves a crash cause or successful repair. Rechecking remains available after a successful observation and is disabled only while a check is running.

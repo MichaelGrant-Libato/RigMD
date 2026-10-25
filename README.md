@@ -34,7 +34,7 @@ The system combines:
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Backend API | C# / ASP.NET Core (.NET 10) |
 | Desktop Shell | WPF + WebView2 (Auto-spawns and binds local API) |
-| Hardware Telemetry | 100% User-Mode Windows Telemetry (WMI, Performance Counters, ACPI, Thermal Fallback — Driver-Free) |
+| Hardware Telemetry | Windows readings through supported interfaces; unavailable sensors are disclosed, not estimated from workload |
 | Diagnostic Engine | Deterministic C# Domain layer with strict component/scenario scoping |
 | Persistence | SQLite (Local Source of Truth with WAL mode) & Supabase PostgreSQL (Optional Sync) |
 | Remediation | 3-Tier Controlled Autonomous Remediation Engine with Dry-Run Previews |
@@ -209,19 +209,19 @@ RigMD/
 
 RigMD employs a controlled, closed-loop remediation engine that executes explicitly approved actions, verifies resolutions, and safely handles rollbacks or pivots upon failure. Remediation actions are strictly classified into three safety tiers (Low-risk, Configuration-changing, and High-risk), ensuring that destructive or unverified operations require explicit user consent or remain advisory-only; see [`Docs/REMEDIATION_POLICY.md`](./Docs/REMEDIATION_POLICY.md) for full details.
 
-### Currently Implemented Autonomous Actions
+### Currently Implemented Approval-Required Actions
 
 | Action | Description | Tier |
 |---|---|---|
 | Clear User Temp Files | Removes temporary files from user TEMP folder with pre-calculation | Tier 1 |
-| Clear Browser Cache | Clears browser cache data safely | Tier 1 |
-| Clear Windows Update Cache | Clears Windows Update download cache (`SoftwareDistribution\Download`) | Tier 1 |
+| Clear Browser Cache | Reviews and clears supported disk-cache locations; not a RAM or crash repair | Tier 2 |
+| Clear Windows Update Cache | Reviews Windows Update download cache; administrator requirements apply | Tier 2 |
 | Flush DNS Cache | Resets the Windows DNS resolver cache (`ipconfig /flushdns`) | Tier 1 |
 | Restart Windows Explorer | Refreshes the Windows taskbar, system tray, and explorer shell | Tier 1 |
-| Run SFC Scan | Runs Windows System File Checker (`sfc /scannow`) in background | Tier 1 |
-| Terminate Heavy Processes | Selectively terminates high-memory processes (protected system blocklist enforced) | Tier 1 |
+| Run SFC Scan | Checks/repairs protected Windows files with administrator access; completion alone is not proof of repair | Tier 2 |
+| Close Reviewed Apps | Sends normal close requests only; apps may stay running; protected processes are blocked | Tier 2 |
 
-*Every remediation action includes a **Dry-Run Impact Preview** (showing estimated space saved or apps affected) and a post-execution **Verification Check**.*
+Write actions require an evidence-supported purpose, an impact preview, explicit approval and a single-use server-issued approval. A completed action, an app exiting and an original warning clearing are separate outcomes. Selected-app outcomes are saved in action history; the follow-up scan checks current measurements without claiming a permanent repair. Missing sensors stay unavailable. See [the consistency audit](Docs/SYSTEM_CONSISTENCY_AUDIT.md) for verified scope and remaining acceptance checks.
 
 ### Assisted (Non-Autonomous) Remediation Actions
 
@@ -241,11 +241,11 @@ RigMD employs a controlled, closed-loop remediation engine that executes explici
 
 ## 5. Hardware Telemetry Providers
 
-RigMD collects live hardware telemetry via Windows Management Instrumentation (WMI) and standard Windows Performance Counters. All telemetry is **100% user-mode and driver-free** (no `WinRing0.sys` or external kernel drivers), ensuring zero false-positive antivirus warnings.
+RigMD collects Windows-observable readings through supported Windows interfaces. Sensor availability varies by device and permissions. An unavailable temperature is never estimated from processor activity. Builds and dependencies still require security and antivirus review; no zero-false-positive guarantee is made.
 
 | Provider | Source / Method | Data Collected |
 |---|---|---|
-| `HardwareMonitorService` | ACPI thermal zones, Win32_PerfFormattedData, and thermal estimation | CPU temperature, GPU temperature, clock speed, thermal status |
+| `HardwareMonitorService` | Supported sensor sources and Windows performance readings | Available sensor readings only; unsupported CPU/GPU temperatures remain unavailable |
 | `WmiCpuProvider` | `Win32_Processor`, Performance Counters | Name, usage %, cores, threads, frequency, thermal throttling |
 | `WmiGpuProvider` | `Win32_VideoController` | Name, driver version, type (Dedicated/Integrated), VRAM |
 | `WmiMemoryProvider` | `Win32_OperatingSystem` | Total/used GB, usage % |

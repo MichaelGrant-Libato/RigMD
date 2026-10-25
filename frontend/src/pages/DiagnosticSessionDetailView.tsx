@@ -1,3 +1,9 @@
+import DiagnosticReadings from '../components/DiagnosticReadings';
+import CheckReadings from '../components/CheckReadings';
+import { canCheckCurrentStatus, getCheckOverview, getCheckStatus, getLatestCheckSummary, getCheckAdvice, getAdditionalFindingStatus, crashMetric, getCheckEvidenceLabel, getCheckCoverageNotice, getCheckPanelClassName } from '../lib/checkPresentation';
+import { getFindingChanges } from '../lib/findingChanges';
+import { explanationSourceLabel } from '../lib/diagnosticReadingVisuals';
+import { plainDiagnosticText, friendlyActionCategory, friendlyToolName, friendlyVerification } from '../lib/diagnosticLanguage';
 import {
   useCallback,
   useEffect,
@@ -11,11 +17,10 @@ import {
   CheckCircle2,
   Clock3,
   RefreshCw,
-  ShieldCheck,
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
-import AutonomyRemediationPanel from '../components/AutonomyRemediationPanel';
+import AutonomyRemediationPanel, { ProofList } from '../components/AutonomyRemediationPanel';
 
 import {
   buttonTap,
@@ -30,11 +35,16 @@ import { apiFetch } from '../lib/api';
 
 import type { AutonomyResult } from '../services/autonomyService';
 import {
-  getResolutionCategory,
   getTelemetryDeltaSummary,
+  COMPONENT_LABELS,
+  SCENARIO_LABELS,
+  parseComponentIds,
+  titleFromId,
 } from '../lib/pastChecksFormatting';
 
 interface ActionAttemptDetail {
+  execution_summary?: string | null;
+  proof?: import('../services/autonomyService').AutonomyExecutionProof[];
   action_code: string;
   verification_status?: string | null;
   created_at: string;
@@ -65,14 +75,21 @@ interface SessionDetail {
   action_category: string;
   confidence_label: string;
   ai_explanation?: string;
+  explanation_source?: string;
+  explanation_model?: string;
   recommended_next_step?: string;
   primary_result?: string;
+  proof?: SessionDetail['resolution_proof'];
   incidental_warning?: string | null;
   component_status?: string;
   resolution_status?: string;
   resolution_checked_at?: string | null;
   resolution_summary?: string;
   resolution_proof?: Array<{
+    metric_id?: string;
+    captured_at?: string | null;
+    evidence_kind?: string;
+    rule_version?: string;
     label: string;
     value: string;
     status: string;
@@ -84,253 +101,14 @@ interface SessionDetail {
 interface Props {
   sessionId: string;
   onBack: () => void;
+  onOpenMemoryCheck?: () => void;
 }
 
-function shouldShowSafeActions(session: SessionDetail) {
-  if (
-    session.resolution_status?.trim().toLowerCase() ===
-    'resolved'
-  ) {
-    return false;
-  }
 
-  const actionCategory =
-    session.action_category?.trim().toLowerCase();
 
-  if (!actionCategory) {
-    return false;
-  }
 
-  return [
-    'maintain',
-    'troubleshoot',
-    'repair',
-    'fix',
-  ].includes(actionCategory);
-}
 
-function getResolutionLabel(
-  status?: string,
-  hasCompletedAction = false,
-  proof?: SessionDetail['resolution_proof'],
-  diagnosedCategory?: string,
-) {
-  if (status === 'resolved') {
-    const category =
-      diagnosedCategory?.toLowerCase() ?? '';
 
-    if (
-      !hasCompletedAction &&
-      category.includes('crash') &&
-      proofShowsNoNewCrashes(proof)
-    ) {
-      return 'No New Crashes Observed';
-    }
-
-    return hasCompletedAction
-      ? 'Resolved'
-      : 'No Longer Detected';
-  }
-
-  if (
-    status === 'still_active'
-  ) {
-    const category =
-      diagnosedCategory?.toLowerCase() ?? '';
-
-    if (
-      category.includes('crash') &&
-      proofShowsNoNewCrashes(proof) &&
-      proofShowsMemoryRisk(proof)
-    ) {
-      return 'No New Crashes, Risk Still High';
-    }
-
-    if (proofNeedsAttention(proof)) {
-      return 'Risk Still Active';
-    }
-
-    return 'Still Active';
-  }
-
-  if (
-    status === 'needs_recheck'
-  ) {
-    return 'Needs Recheck';
-  }
-
-  return 'Open';
-}
-
-function proofNeedsAttention(
-  proof?: SessionDetail['resolution_proof'],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const status =
-        item.status?.toLowerCase() ?? '';
-      return (
-        status.includes('attention') ||
-        status.includes('active') ||
-        status.includes('high') ||
-        status.includes('elevated') ||
-        status.includes('detected')
-      );
-    }),
-  );
-}
-
-function proofShowsNoNewCrashes(
-  proof?: SessionDetail['resolution_proof'],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const label =
-        item.label?.toLowerCase() ?? '';
-      const value =
-        item.value?.toLowerCase() ?? '';
-      const status =
-        item.status?.toLowerCase() ?? '';
-
-      return (
-        label.includes('crash') &&
-        (value.includes('0') ||
-          value.includes('none') ||
-          status.includes('normal'))
-      );
-    }),
-  );
-}
-
-function proofShowsMemoryRisk(
-  proof?: SessionDetail['resolution_proof'],
-) {
-  return Boolean(
-    proof?.some((item) => {
-      const label =
-        item.label?.toLowerCase() ?? '';
-      const status =
-        item.status?.toLowerCase() ?? '';
-
-      return (
-        label.includes('memory') &&
-        (status.includes('attention') ||
-          status.includes('active') ||
-          status.includes('high') ||
-          status.includes('elevated'))
-      );
-    }),
-  );
-}
-
-function getResolutionStyle(
-  status?: string,
-) {
-  if (status === 'resolved') {
-    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
-  }
-
-  if (
-    status === 'still_active'
-  ) {
-    return 'border-red-500/40 bg-red-500/10 text-red-300';
-  }
-
-  if (
-    status === 'needs_recheck'
-  ) {
-    return 'border-orange-500/40 bg-orange-500/10 text-orange-300';
-  }
-
-  return 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300';
-}
-
-function getResolutionPanelStyle(
-  status?: string,
-) {
-  if (status === 'resolved') {
-    return 'border-emerald-500/35 bg-emerald-500/[0.06]';
-  }
-
-  if (status === 'still_active') {
-    return 'border-red-500/35 bg-red-500/[0.06]';
-  }
-
-  if (status === 'needs_recheck') {
-    return 'border-orange-500/35 bg-orange-500/[0.06]';
-  }
-
-  return 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)]';
-}
-
-function hasCompletedRemediationAction(
-  session: SessionDetail,
-) {
-  return Boolean(
-    session.remediation_history?.some(
-      (run) =>
-        run.attempts.length > 0 ||
-        [
-          'completed',
-          'resolved',
-          'succeeded',
-          'success',
-        ].includes(
-          run.status
-            ?.trim()
-            .toLowerCase(),
-        ),
-    ),
-  );
-}
-
-function getResolutionFallbackText(
-  status?: string,
-  hasCompletedAction = false,
-  proof?: SessionDetail['resolution_proof'],
-  diagnosedCategory?: string,
-) {
-  const normalized =
-    status?.trim().toLowerCase();
-
-  if (normalized === 'resolved') {
-    const category =
-      diagnosedCategory?.toLowerCase() ?? '';
-
-    if (
-      !hasCompletedAction &&
-      category.includes('crash') &&
-      proofShowsNoNewCrashes(proof)
-    ) {
-      return 'Fresh scan found no new crash events after this diagnosis. RigMD did not run a repair action for this result.';
-    }
-
-    return hasCompletedAction
-      ? 'The latest live check no longer detects the issue after a completed action.'
-      : 'The latest live check no longer detects this issue. RigMD did not run a repair action for this result.';
-  }
-
-  if (normalized === 'still_active') {
-    const category =
-      diagnosedCategory?.toLowerCase() ?? '';
-
-    if (
-      category.includes('crash') &&
-      proofShowsNoNewCrashes(proof) &&
-      proofShowsMemoryRisk(proof)
-    ) {
-      return 'No new crash events were found, but memory pressure is still high enough to increase the chance of freezes or crashes.';
-    }
-
-    return 'The latest live check still sees this issue. Review the suggested next steps or run a guided action.';
-  }
-
-  if (normalized === 'needs_recheck') {
-    return 'A safe action was recorded. Recheck the current status to confirm whether the issue improved.';
-  }
-
-  return 'Check the current status to compare this diagnosis with fresh Windows readings.';
-}
 
 function getResolutionButtonText(
   status?: string,
@@ -354,47 +132,6 @@ function getResolutionButtonText(
     : 'Check Current Status';
 }
 
-function getProofItemView(
-  status?: string,
-) {
-  const value =
-    status?.trim().toLowerCase() ?? '';
-
-  if (value.includes('normal')) {
-    return {
-      label: 'Normal Now',
-      className:
-        'border-emerald-500/35 bg-emerald-500/[0.07]',
-      badgeClassName:
-        'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-      textClassName: 'text-emerald-200',
-    };
-  }
-
-  if (
-    value.includes('attention') ||
-    value.includes('active') ||
-    value.includes('still')
-  ) {
-    return {
-      label: 'Still Needs Attention',
-      className:
-        'border-red-500/35 bg-red-500/[0.07]',
-      badgeClassName:
-        'border-red-500/40 bg-red-500/10 text-red-300',
-      textClassName: 'text-red-100',
-    };
-  }
-
-  return {
-    label: status || 'Checked',
-    className:
-      'border-[var(--rigmd-border)] bg-[var(--rigmd-bg)]',
-    badgeClassName:
-      'border-slate-500/35 bg-slate-500/10 text-slate-300',
-    textClassName: 'text-white',
-  };
-}
 
 function isNoActiveIssue(
   diagnosedCategory?: string | null,
@@ -422,64 +159,22 @@ function formatDiagnosisMode(
     return 'Automatic';
   }
 
-  return mode
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, (char) =>
-      char.toUpperCase(),
-    );
+  return ({ full: 'Whole computer', component: 'Selected parts', scenario: 'Problem check' } as Record<string, string>)[mode] ?? titleFromId(mode);
 }
 
-function formatScenario(
-  scenarioId?: string,
-) {
-  if (!scenarioId) {
-    return 'Not specified';
-  }
-
-  return scenarioId
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, (char) =>
-      char.toUpperCase(),
-    );
+function formatScenario(scenarioId?: string) {
+  return scenarioId ? SCENARIO_LABELS[scenarioId] ?? titleFromId(scenarioId) : 'Not specified';
 }
 
-function formatComponentIds(
-  value?: string,
-) {
-  if (!value) {
-    return 'Full system';
-  }
-
-  try {
-    const parsed =
-      JSON.parse(value);
-
-    if (
-      !Array.isArray(parsed) ||
-      parsed.length === 0
-    ) {
-      return 'Full system';
-    }
-
-    return parsed
-      .map((item) =>
-        String(item)
-          .replace(/-/g, ' ')
-          .replace(
-            /\b\w/g,
-            (char) =>
-              char.toUpperCase(),
-          ),
-      )
-      .join(', ');
-  } catch {
-    return value;
-  }
+function formatComponentIds(value?: string) {
+  const ids = parseComponentIds(value);
+  return ids.length ? ids.map(id => COMPONENT_LABELS[id.toLowerCase()] ?? titleFromId(id)).join(', ') : 'Full system';
 }
 
 export default function DiagnosticSessionDetailView({
   sessionId,
   onBack,
+  onOpenMemoryCheck,
 }: Props) {
   const [
     session,
@@ -588,10 +283,12 @@ export default function DiagnosticSessionDetailView({
                   resolution_status:
                     statusData.resolution_status ??
                     'needs_recheck',
+                  resolution_checked_at: undefined,
+                  resolution_proof: [],
 
                   resolution_summary:
                     statusData.last_action_summary ||
-                    'A safe action was performed. Run a follow-up check to see if the issue improved.',
+                    'The approved action finished. Its effect still needs checking.',
                 }
               : prev,
         );
@@ -694,18 +391,7 @@ export default function DiagnosticSessionDetailView({
       }
     };
 
-  const showSafeActions =
-    session
-      ? shouldShowSafeActions(
-          session,
-        )
-      : false;
-  const completedRemediationAction =
-    session
-      ? hasCompletedRemediationAction(
-          session,
-        )
-      : false;
+  const showResolutionStatus = canCheckCurrentStatus(session);
 
   useEffect(() => {
     fetchSession();
@@ -714,8 +400,8 @@ export default function DiagnosticSessionDetailView({
   return (
     <>
       <TopHeader
-        title="Diagnosis Detail"
-        subtitle="Review the saved diagnosis, evidence, and recommended next steps"
+        title="Check results"
+        subtitle="Findings, readings, and next steps"
       />
 
       <motion.div
@@ -758,12 +444,17 @@ export default function DiagnosticSessionDetailView({
                 ),
               )}
             </div>
-          ) : error ? (
-            <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5 text-red-300">
+          ) : error && !session ? (
+            <div role="alert" className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5 text-red-300">
               {error}
             </div>
           ) : session ? (
             <>
+              {error && (
+                <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+                  {error}
+                </div>
+              )}
               <motion.section
                 variants={
                   drawerSlideRight
@@ -778,6 +469,7 @@ export default function DiagnosticSessionDetailView({
               >
                 <div className="flex flex-col gap-4 border-b border-[var(--rigmd-border)] pb-5 md:flex-row md:items-start md:justify-between">
                   <div>
+                    <p className="mb-2 text-xs font-semibold text-slate-400">Original check</p>
                     <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
                       {
                         session.display_date
@@ -789,13 +481,13 @@ export default function DiagnosticSessionDetailView({
 
                     <h2 className="mt-2 text-2xl font-bold text-white">
                       {
-                        session.diagnosed_category
+                        getCheckOverview(session).title
                       }
                     </h2>
 
-                    {session.primary_result ? (
+                    {getCheckOverview(session).summary ? (
                       <p className="mt-2 text-sm leading-relaxed text-slate-200">
-                        {session.primary_result}
+                        {getCheckOverview(session).summary}
                       </p>
                     ) : session.symptom_type ? (
                       <p className="mt-2 text-sm text-slate-400">
@@ -804,33 +496,28 @@ export default function DiagnosticSessionDetailView({
                         }
                       </p>
                     ) : null}
+                    <p className="mt-2 text-sm leading-relaxed text-slate-400">{getCheckOverview(session).meaning}</p>
+                    {getCheckCoverageNotice(session) && <p className="mt-2 text-sm leading-relaxed text-amber-200">{getCheckCoverageNotice(session)}</p>}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex max-w-full flex-wrap gap-2 md:max-w-[280px]">
                     <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-bold uppercase text-emerald-400">
                       {
-                        session.action_category
+                        friendlyActionCategory(session.action_category)
                       }
                     </span>
 
                     <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-xs font-bold uppercase text-cyan-400">
                       {
-                        session.confidence_label
+                        getCheckEvidenceLabel(session)
                       }
                     </span>
 
-                    {showSafeActions && (
+                    {(showResolutionStatus || getCheckStatus(session).category === 'needs_recheck') && (
                       <span
-                        className={`rounded border px-3 py-1 text-xs font-bold uppercase ${getResolutionStyle(
-                          session.resolution_status,
-                        )}`}
+                        className={`rounded border px-3 py-1 text-xs font-bold uppercase ${getCheckStatus(session).className}`}
                       >
-                        {getResolutionLabel(
-                          session.resolution_status,
-                          completedRemediationAction,
-                          session.resolution_proof,
-                          session.diagnosed_category,
-                        )}
+                        {getCheckStatus(session).label}
                       </span>
                     )}
                   </div>
@@ -842,7 +529,7 @@ export default function DiagnosticSessionDetailView({
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Scope
+                        What was checked
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
@@ -862,7 +549,7 @@ export default function DiagnosticSessionDetailView({
 
                     <div className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Mode
+                        Check type
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
@@ -878,7 +565,7 @@ export default function DiagnosticSessionDetailView({
                       </p>
 
                       <p className="mt-1 text-sm font-semibold text-white">
-                        Local Windows Telemetry
+                        Readings from this PC
                       </p>
                     </div>
                   </div>
@@ -922,20 +609,24 @@ export default function DiagnosticSessionDetailView({
                 {session.recommended_next_step && (
                   <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.045] p-4">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                      What to do next
+                      {session.resolution_proof?.length ? 'Advice from the original check' : 'What to do next'}
                     </h3>
 
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-200">
                       {
-                        session.recommended_next_step
+                        getCheckAdvice(session)
                       }
                     </p>
                   </div>
                 )}
 
+                <div className="mt-5"><CheckReadings check={session} /></div>
+                {!session.proof?.length && <p className="mt-3 text-xs text-slate-400">The original detailed readings are not available for this saved check. The summary above is the saved result.</p>}
                 <details className="mt-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
-                  <summary className="cursor-pointer font-semibold text-slate-200">Why this result was suggested</summary>
+                  <summary className="cursor-pointer font-semibold text-slate-200">Technical result details</summary>
+                  <p className="mt-3 text-xs text-slate-400">Explanation source: {explanationSourceLabel(session.explanation_source, session.explanation_model)}</p>
 
+                  <p className="mt-2 break-words text-sm text-slate-300">{session.diagnosed_category}: {session.primary_result}</p>
                   <p className="mt-2 text-sm leading-relaxed text-slate-300">
                     {session.ai_explanation ||
                       'No explanation saved for this session.'}
@@ -943,7 +634,7 @@ export default function DiagnosticSessionDetailView({
                 </details>
               </motion.section>
 
-              {!isNoActiveIssue(session.diagnosed_category) && showSafeActions && (
+              {showResolutionStatus && (
                 <motion.section
                   variants={
                     cardFadeUp
@@ -953,24 +644,16 @@ export default function DiagnosticSessionDetailView({
                   transition={
                     cardTransition
                   }
-                  className={`rounded-2xl border p-6 ${getResolutionPanelStyle(
-                    session.resolution_status,
-                  )}`}
+                  className={`rounded-2xl border p-6 ${getCheckPanelClassName(session)}`}
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div>
                       <div className="flex items-center gap-2.5">
                         <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                          Resolution Status
+                          Latest status
                         </h3>
                         {(() => {
-                          const resInfo = getResolutionCategory(
-                            session.resolution_status,
-                            session.action_category,
-                            session.diagnosed_category,
-                            completedRemediationAction,
-                            proofShowsNoNewCrashes(session.resolution_proof),
-                          );
+                          const resInfo = getCheckStatus(session);
                           return (
                             <span
                               className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${resInfo.className}`}
@@ -982,29 +665,25 @@ export default function DiagnosticSessionDetailView({
                       </div>
 
                       <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                        {session.resolution_summary ||
-                          getResolutionFallbackText(
-                            session.resolution_status,
-                            completedRemediationAction,
-                            session.resolution_proof,
-                            session.diagnosed_category,
-                          )}
+                        {getLatestCheckSummary(session)}
                       </p>
+                      {session.resolution_checked_at && <p className="mt-1 text-xs text-slate-500">Checked {new Date(session.resolution_checked_at).toLocaleString()}</p>}
+                      {crashMetric(session) && getAdditionalFindingStatus(session.resolution_proof) && <p className="mt-2 text-sm font-semibold text-cyan-200">Additional finding: {getAdditionalFindingStatus(session.resolution_proof)}</p>}
 
-                      {session.diagnosed_category?.toLowerCase().includes('crash') ? (
+                      {crashMetric(session) ? (
                         <p className="mt-1 text-xs text-slate-500">
-                          Historical Check: Verifies whether new application crash or system stop events were logged after diagnosis.
+                          Checks whether Windows recorded another crash after the original check.
                         </p>
                       ) : (
                         <p className="mt-1 text-xs text-slate-500">
-                          Live Telemetry Check: Re-evaluates current live hardware readings against normal operational baselines.
+                          Compares a fresh device reading with this saved check.
                         </p>
                       )}
 
                       {getTelemetryDeltaSummary(session.proof, session.resolution_proof) && (
                         <div className="mt-3 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-3 text-xs text-cyan-200">
-                          <span className="font-bold text-cyan-300">What changed since last check: </span>
-                          {getTelemetryDeltaSummary(session.proof, session.resolution_proof)}
+                          <span className="font-bold text-cyan-300">Compared with the original check: </span>
+                          {plainDiagnosticText(getTelemetryDeltaSummary(session.proof, session.resolution_proof))}
                         </div>
                       )}
                     </div>
@@ -1020,7 +699,7 @@ export default function DiagnosticSessionDetailView({
                       whileTap={
                         buttonTap
                       }
-                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
                     >
                       <RefreshCw
                         size={16}
@@ -1038,63 +717,9 @@ export default function DiagnosticSessionDetailView({
                     </motion.button>
                   </div>
 
-                  {session.resolution_proof &&
-                    session
-                      .resolution_proof
-                      .length >
-                      0 && (
-                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                        {session.resolution_proof.map(
-                          (
-                            item,
-                          ) => {
-                            const proofView =
-                              getProofItemView(
-                                item.status,
-                              );
-
-                            return (
-                              <div
-                                key={
-                                  item.label
-                                }
-                                className={`rounded-xl border p-4 ${proofView.className}`}
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                    {
-                                      item.label
-                                    }
-                                  </p>
-
-                                  <span
-                                    className={`rounded border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${proofView.badgeClassName}`}
-                                  >
-                                    {
-                                      proofView.label
-                                    }
-                                  </span>
-                                </div>
-
-                                <p
-                                  className={`mt-2 text-sm font-bold ${proofView.textClassName}`}
-                                >
-                                  {
-                                    item.value
-                                  }
-                                </p>
-
-                                <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                                  {
-                                    item.meaning
-                                  }
-                                </p>
-                              </div>
-                            );
-                          },
-                        )}
-                      </div>
-                    )}
+                  {getFindingChanges(session.proof, session.resolution_proof) && <p className="mt-4 text-sm font-semibold text-cyan-200">{plainDiagnosticText(getFindingChanges(session.proof, session.resolution_proof)!.summary)}</p>}
+                  <div className="mt-4"><DiagnosticReadings readings={session.resolution_proof} title="Latest saved readings" /></div>
+                  {!session.resolution_proof?.length && <p className="mt-4 text-sm text-slate-400">Detailed follow-up readings were not saved for this check.</p>}
                 </motion.section>
               )}
 
@@ -1122,11 +747,11 @@ export default function DiagnosticSessionDetailView({
 
                       <div>
                         <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                          Remediation History
+                          Actions already tried
                         </h3>
 
                         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                          Past autonomous remediation attempts for this diagnosis.
+                          Previously recorded actions for this check.
                         </p>
                       </div>
                     </div>
@@ -1189,13 +814,11 @@ export default function DiagnosticSessionDetailView({
                                       key={
                                         idx
                                       }
-                                      className="flex items-center justify-between rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3 py-2"
+                                      className="border-t border-[var(--rigmd-border)] py-3"
                                     >
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
                                       <span className="text-xs font-semibold text-slate-300">
-                                        {attempt.action_code.replace(
-                                          /_/g,
-                                          ' ',
-                                        )}
+                                        {friendlyToolName(attempt.action_code)}
                                       </span>
 
                                       <span
@@ -1203,14 +826,16 @@ export default function DiagnosticSessionDetailView({
                                           attempt.verification_status ===
                                           'Resolved'
                                             ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                                            : attempt.verification_status
-                                              ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                                            : /^(Unresolved|Worse|Failed)$/i.test(attempt.verification_status || '')
+                                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
                                               : 'border-slate-500/30 bg-slate-500/10 text-slate-400'
                                         }`}
                                       >
-                                        {attempt.verification_status ||
-                                          'Pending'}
+                                        {friendlyVerification(attempt.verification_status || 'Pending')}
                                       </span>
+                                      </div>
+                                      {attempt.execution_summary && <p className="mt-2 text-xs leading-relaxed text-slate-300">{plainDiagnosticText(attempt.execution_summary)}</p>}
+                                      <ProofList execution={{ proof: attempt.proof }} />
                                     </div>
                                   ),
                                 )}
@@ -1233,27 +858,16 @@ export default function DiagnosticSessionDetailView({
                   transition={
                     cardTransition
                   }
-                  className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-6"
+                  className="border-t border-[var(--rigmd-border)] pt-5"
                 >
-                  <div className="flex items-start gap-3">
-                    <ShieldCheck
-                      size={20}
-                      className="mt-0.5 text-cyan-400"
-                    />
-
-                    <div>
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                        Autonomous ReAct Diagnostic &amp; Remediation Agent
-                      </h3>
-
-                      <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                        Run the multi-turn ReAct Agent to inspect live OS telemetry tools, review dry-run impact metrics, and approve safe actions.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
+                  <div className="space-y-3">
                     <AutonomyRemediationPanel
+                      check={session}
+                      originalReadings={session.proof}
+                      onOpenMemoryCheck={onOpenMemoryCheck}
+                      readings={session.resolution_proof?.length ? session.resolution_proof : session.proof}
+                      followUpSummary={getFindingChanges(session.proof, session.resolution_proof)?.summary}
+                      followUpCheckedAt={session.resolution_checked_at}
                       diagnosedCategory={
                         session.diagnosed_category
                       }
