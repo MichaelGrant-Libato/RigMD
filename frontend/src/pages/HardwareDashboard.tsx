@@ -9,6 +9,7 @@ import AppSidebar from '../components/AppSidebar';
 import TopHeader, { HeaderStatusProvider, type LiveDataStatus } from '../components/TopHeader';
 import SystemProfileView from './SystemProfileView';
 import DiagnosticHistoryView from './DiagnosticHistoryView';
+import { DEFAULT_TREND_SELECTION, type TrendSelection } from '../lib/diagnosticTrends';
 import RecurringPatternsView from './RecurringPatternsView';
 import WarningSignsView from './WarningSignsView';
 import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
@@ -537,6 +538,8 @@ export default function HardwareDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [historyView, setHistoryView] = useState<'saved' | 'trends'>('saved');
+  const [trendSelection, setTrendSelection] = useState<TrendSelection>(DEFAULT_TREND_SELECTION);
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
   const [diagnosisPreset, setDiagnosisPreset] = useState<'memory' | null>(null);
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
@@ -742,6 +745,10 @@ export default function HardwareDashboard() {
         />
       ) : (
         <DiagnosticHistoryView
+          view={historyView}
+          onViewChange={setHistoryView}
+          trendSelection={trendSelection}
+          onTrendSelectionChange={setTrendSelection}
           onViewSession={(sessionId) => setSelectedSessionId(sessionId)}
           selectedSessionId={selectedSessionId}
           onStartNewDiagnosis={() => handleSetActivePage('newDiagnosis')}

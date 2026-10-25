@@ -1,6 +1,8 @@
 import { friendlyActionCategory } from '../lib/diagnosticLanguage';
 import { getCheckOverview, getCheckStatus, getAdditionalFindingStatus, crashMetric, repeatedFindingLabel, getCheckEvidenceLabel } from '../lib/checkPresentation';
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -12,6 +14,7 @@ import { motion } from 'motion/react';
 import {
   AlertTriangle,
   CalendarDays,
+  ChartNoAxesCombined,
   Clock3,
   FileText,
   ArrowUpRight,
@@ -24,6 +27,7 @@ import {
 import TopHeader from '../components/TopHeader';
 import FilterDropdown from '../components/FilterDropdown';
 import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog';
+import type { TrendSelection } from '../lib/diagnosticTrends';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiDelete, apiFetch } from '../lib/api';
 import type { SessionSummary } from '../types/rigmd';
@@ -52,8 +56,13 @@ const ACTION_FILTER_OPTIONS = [
 
 const DEFAULT_VISIBLE_SESSIONS = 10;
 const SHOW_MORE_INCREMENT = 5;
+const DiagnosticTrends = lazy(() => import('../components/DiagnosticTrends'));
 
 interface Props {
+  view: 'saved' | 'trends';
+  onViewChange: (view: 'saved' | 'trends') => void;
+  trendSelection: TrendSelection;
+  onTrendSelectionChange: (value: TrendSelection) => void;
   onViewSession?: (sessionId: string) => void;
   selectedSessionId?: string | null;
   onStartNewDiagnosis?: () => void;
@@ -350,6 +359,10 @@ function TableRowSkeleton() {
 }
 
 export default function DiagnosticHistoryView({
+  view,
+  onViewChange: setView,
+  trendSelection,
+  onTrendSelectionChange,
   onViewSession,
   selectedSessionId,
   onStartNewDiagnosis,
@@ -360,6 +373,7 @@ export default function DiagnosticHistoryView({
 
   const [loading, setLoading] =
     useState(true);
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const [error, setError] =
     useState<string | null>(null);
@@ -399,6 +413,7 @@ export default function DiagnosticHistoryView({
         }
 
         const data = await response.json();
+        setLoadedAt(Date.now());
 
         if (Array.isArray(data)) {
           setSessions(data as SessionSummary[]);
@@ -591,6 +606,26 @@ export default function DiagnosticHistoryView({
         className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
       >
         <div className="mx-auto w-full max-w-[1512px] space-y-5">
+          <div role="tablist" aria-label="Past checks views" className="flex gap-2 border-b border-[var(--rigmd-border)] pb-3"
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 'saved' : event.key === 'End' ? 'trends' : view === 'saved' ? 'trends' : 'saved';
+              setView(next);
+              event.currentTarget.querySelector<HTMLButtonElement>(`#history-${next}-tab`)?.focus();
+            }}>
+            {(['saved', 'trends'] as const).map(tab => <button key={tab} id={`history-${tab}-tab`} role="tab" type="button"
+              aria-selected={view === tab} aria-controls={`history-${tab}-panel`} tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)}
+              className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold ${view === tab ? 'bg-cyan-400/10 text-cyan-300' : 'text-slate-400 hover:text-white'}`}>
+              {tab === 'saved' ? <FileText size={17} /> : <ChartNoAxesCombined size={17} />}{tab === 'saved' ? 'Saved checks' : 'Trends'}
+            </button>)}
+          </div>
+          {view === 'trends' ? <div id="history-trends-panel" role="tabpanel" aria-labelledby="history-trends-tab">
+            <Suspense fallback={<p role="status" className="py-12 text-center text-slate-300">Loading trends...</p>}>
+            <DiagnosticTrends sessions={sessions} loading={loading} error={error} onRefresh={fetchSessions} onViewSession={onViewSession}
+              selection={trendSelection} onSelectionChange={onTrendSelectionChange} asOf={loadedAt} />
+            </Suspense>
+          </div> : <div id="history-saved-panel" role="tabpanel" aria-labelledby="history-saved-tab" className="space-y-5">
           <motion.div
             variants={staggerContainer}
             initial="hidden"
@@ -876,6 +911,7 @@ export default function DiagnosticHistoryView({
               </div>
             </div>
           </section>
+          </div>}
         </div>
       </motion.div>
 
