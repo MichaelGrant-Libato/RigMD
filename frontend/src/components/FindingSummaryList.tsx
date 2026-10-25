@@ -4,6 +4,8 @@ import DiagnosticReadings from './DiagnosticReadings';
 import { ResultDialog } from './ResultDetails';
 import { expandDiagnosticReadings, type DiagnosticReading } from '../lib/diagnosticLanguage';
 import { getFindingDetails } from '../lib/findingDetails';
+import FindingVisual from './FindingVisual';
+import { getFindingVisual, getUsageComparison } from '../lib/findingVisuals';
 
 export default function FindingSummaryList({ readings, originalReadings, hasFollowUp, historical = false }: {
   readings: DiagnosticReading[]; originalReadings?: DiagnosticReading[]; hasFollowUp: boolean; historical?: boolean;
@@ -19,6 +21,8 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
   const close = useCallback(() => setSelected(null), []);
   const group = groups.find(item => item.id === filter)!;
   const selectedView = selected ? getFindingDetails(selected) : null;
+  const visual = selected ? getFindingVisual(selected) : null;
+  const comparison = selected && hasFollowUp && !historical ? getUsageComparison(selected, originalReadings ?? []) : null;
   const before = selected && hasFollowUp ? expandDiagnosticReadings(originalReadings ?? []).filter(row =>
     selected.metric_id ? row.metric_id === selected.metric_id : Boolean(selected.label) && row.label === selected.label) : [];
   const tones = {
@@ -44,6 +48,7 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
       {!group.rows.length ? <p className="py-4 text-sm text-slate-400">No readings in this group.</p> : <ul className="divide-y divide-[var(--rigmd-border)]">
         {group.rows.map((reading, index) => {
           const view = getFindingDetails(reading);
+          const chart = getFindingVisual(reading);
           const tone = tones[view.tone];
           const Icon = tone.icon;
           return <li key={`${reading.metric_id}-${index}`}>
@@ -51,7 +56,12 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
               className="grid w-full min-w-0 grid-cols-[20px_minmax(0,1fr)_16px] items-center gap-x-3 gap-y-1 rounded-md px-2 py-3 text-left hover:bg-white/[0.03] sm:grid-cols-[20px_minmax(0,1fr)_minmax(100px,220px)_16px]">
               <Icon size={18} className={tone.text} aria-hidden="true" />
               <span className="min-w-0 text-sm font-semibold text-slate-100 [overflow-wrap:anywhere]">{view.label}</span>
-              <span className={`col-start-2 row-start-2 min-w-0 text-sm font-semibold tabular-nums [overflow-wrap:anywhere] sm:col-start-3 sm:row-start-1 sm:text-right ${tone.text}`}>{view.valueSummary}</span>
+              <span className={`col-start-2 row-start-2 min-w-0 text-sm font-semibold tabular-nums [overflow-wrap:anywhere] sm:col-start-3 sm:row-start-1 sm:text-right ${tone.text}`}>
+                {view.valueSummary}
+                {chart.kind === 'usage' && <span aria-hidden="true" className="mt-2 block h-1.5 w-full max-w-32 overflow-hidden rounded-sm bg-white/[0.08] sm:ml-auto">
+                  <span className={`block h-full ${chart.tone === 'attention' ? 'bg-amber-400' : chart.tone === 'normal' ? 'bg-emerald-400' : 'bg-sky-400'}`} style={{ width: `${chart.percent}%` }} />
+                </span>}
+              </span>
               <ChevronRight size={16} className="col-start-3 row-start-1 text-slate-400 sm:col-start-4" aria-hidden="true" />
             </button>
           </li>;
@@ -59,20 +69,20 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
       </ul>}
     </div>
     <ResultDialog open={Boolean(selectedView)} onClose={close} title={selectedView?.label ?? 'Finding details'}>
-      {selected && selectedView && <div className="space-y-5">
+      {selected && selectedView && visual && <div className="space-y-5">
         <div>
-          <p className={`text-xs font-semibold ${tones[selectedView.tone].text}`}>{selectedView.statusLabel}</p>
-          <p className="mt-2 text-xl font-bold text-white [overflow-wrap:anywhere]">{selectedView.value}</p>
+          <FindingVisual reading={selected} originalReadings={hasFollowUp ? originalReadings : undefined} historical={historical} />
           <p className="mt-2 text-xs text-slate-400">{historical ? 'Historical reading' : hasFollowUp ? 'Latest saved reading' : 'Original saved reading'}{selected.captured_at && Number.isFinite(Date.parse(selected.captured_at)) ? ` - ${new Date(selected.captured_at).toLocaleString()}` : ' - time not recorded'}</p>
         </div>
-        <section><h3 className="text-sm font-semibold text-cyan-200">What this means</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{selectedView.explanation}</p></section>
-        <section><h3 className="text-sm font-semibold text-cyan-200">What you can do</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{historical ? 'Use the newer result to decide whether any action is still needed.' : selectedView.nextStep}</p></section>
-        {before.length > 0 && <section className="border-t border-[var(--rigmd-border)] pt-4">
+        <section><h3 className="text-sm font-semibold text-cyan-200">What this means</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{visual.summary}</p></section>
+        <section><h3 className="text-sm font-semibold text-cyan-200">What you can do</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{historical ? 'Use the newer result to decide whether any action is still needed.' : visual.nextStep}</p></section>
+        {before.length > 0 && !comparison && <section className="border-t border-[var(--rigmd-border)] pt-4">
           <h3 className="text-sm font-semibold text-slate-200">Original reading</h3>
           {before.map((row, index) => <p key={index} className="mt-2 text-sm text-slate-400">{getFindingDetails(row).value}{row.captured_at && Number.isFinite(Date.parse(row.captured_at)) ? ` - ${new Date(row.captured_at).toLocaleString()}` : ''}</p>)}
         </section>}
         <details className="border-t border-[var(--rigmd-border)] pt-3">
           <summary className="cursor-pointer py-2 text-sm font-semibold text-slate-300">Recorded evidence</summary>
+          <p className="mt-2 text-sm leading-relaxed text-slate-400">{selectedView.explanation}</p>
           <div className="mt-2"><DiagnosticReadings readings={[selected]} title="Saved reading details" /></div>
           {before.length > 0 && <DiagnosticReadings readings={before} title="Original reading details" />}
         </details>
