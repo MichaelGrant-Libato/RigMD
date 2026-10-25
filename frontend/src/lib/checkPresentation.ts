@@ -3,6 +3,7 @@ import { getResolutionCategory, getSessionCheckLabel } from './pastChecksFormatt
 import { memoryWarningLabel, type ScanScope } from './repairSupport.ts';
 import { REVIEW_THRESHOLDS } from './reviewThresholds.ts';
 import { getFindingChanges } from './findingChanges.ts';
+import { readingTone } from './diagnosticReadingVisuals.ts';
 
 export interface CheckPresentationInput extends ScanScope {
   diagnosis_mode?: string;
@@ -35,6 +36,31 @@ export function crashMetric(check: CheckPresentationInput) {
   if (['app-crashes', 'application-crashes'].includes(scenario ?? '')) return 'application_crash_history';
   if (['blue-screen-crash', 'blue-screen', 'bsod', 'system-crashes'].includes(scenario ?? '')) return 'system_crash_history';
   return null;
+}
+
+export function hasDetectedWarning(check: CheckPresentationInput) {
+  const rows = check.resolution_proof?.length ? check.resolution_proof : check.proof ?? [];
+  const metric = crashMetric(check);
+  if (metric) {
+    const primary = rows.filter(row => row.metric_id === metric);
+    return verifiedCount(primary) && primary.some(warning) && (!check.resolution_proof?.length || primary.every(row => row.window_kind === 'since_diagnosis' || /since diagnosis/i.test(row.label ?? '')));
+  }
+  return rows.some(row => readingTone(getReadingPresentation(row).status) === 'attention');
+}
+
+export function getOriginalResultStatus(check: CheckPresentationInput) {
+  if (/component not present/i.test(check.diagnosed_category ?? '')) return { label: 'Not applicable', className: 'border-slate-500/40 bg-slate-500/10 text-slate-300' };
+  const rows = check.proof ?? [];
+  const metric = crashMetric(check);
+  const missing = rows.some(row => readingTone(getReadingPresentation(row).status) === 'unknown');
+  if (metric) {
+    const primary = rows.filter(row => row.metric_id === metric);
+    const verified = verifiedCount(primary);
+    return { label: !verified ? 'Crash records not verified' : primary.some(warning) ? 'Crash records found' : 'No matching crash records',
+      className: 'border-slate-500/40 bg-slate-500/10 text-slate-300' };
+  }
+  return { label: hasDetectedWarning(check) ? 'Needs attention' : missing ? 'Partially checked' : rows.length ? 'No warning detected' : 'Readings unavailable',
+    className: hasDetectedWarning(check) || missing ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-slate-500/40 bg-slate-500/10 text-slate-300' };
 }
 
 export function getCheckOverview(check: CheckPresentationInput) {

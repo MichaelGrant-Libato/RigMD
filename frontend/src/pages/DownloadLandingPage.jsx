@@ -49,7 +49,7 @@ const features = [
   ],
   [
     'Local Windows Agent',
-    'Connects to a local Windows service after installation.',
+    'Collects supported Windows readings while the desktop app is running.',
     ShieldCheck,
   ],
 ];

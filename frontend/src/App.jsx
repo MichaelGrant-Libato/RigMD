@@ -9,6 +9,7 @@ import {
 
 import SplashScreen from './components/SplashScreen';
 import HardwareDashboard from './pages/HardwareDashboard';
+import PublicPageMetadata from './components/PublicPageMetadata';
 
 const isPublicDownloadSite =
   import.meta.env.VITE_PUBLIC_DOWNLOAD_SITE === 'true';
@@ -18,6 +19,7 @@ const DownloadLandingPage = lazy(() => import('./pages/DownloadLandingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 function DashboardApp() {
   const [showSplash, setShowSplash] = useState(true);
@@ -43,6 +45,8 @@ function DashboardApp() {
 
 function PublicDownloadRoutes() {
   return (
+    <>
+    <PublicPageMetadata />
     <Suspense fallback={<SplashScreen />}>
       <Routes>
         <Route path="/" element={<Navigate to="/register" replace />} />
@@ -57,9 +61,10 @@ function PublicDownloadRoutes() {
             </ProtectedDownloadRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/register" replace />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>
+    </>
   );
 }
 

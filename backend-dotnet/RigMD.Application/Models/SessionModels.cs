@@ -12,6 +12,9 @@ public class DiagnosticSessionDto
     [JsonPropertyName("profile_id")]
     public string ProfileId { get; set; } = string.Empty;
 
+    [JsonPropertyName("device_id")]
+    public string DeviceId { get; set; } = string.Empty;
+
     [JsonPropertyName("symptom_type")]
     public string SymptomType { get; set; } = string.Empty;
 
@@ -80,6 +83,9 @@ public class DiagnosticSessionDto
 
     [JsonPropertyName("resolution_checked_at")]
     public string? ResolutionCheckedAt { get; set; }
+
+    [JsonPropertyName("resolution_device_id")]
+    public string ResolutionDeviceId { get; set; } = string.Empty;
 
     [JsonPropertyName("resolution_summary")]
     public string ResolutionSummary { get; set; } = string.Empty;

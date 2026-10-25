@@ -129,6 +129,26 @@ public class AutonomyController : ControllerBase
         public string DiagnosedCategory { get; set; } = string.Empty;
     }
 
+    [HttpGet("{sessionId}/remediation-eligibility")]
+    public async Task<IActionResult> GetRemediationEligibility(string sessionId)
+    {
+        if (!Guid.TryParse(sessionId, out var id))
+            return BadRequest(new { message = "A valid diagnostic session ID is required." });
+        var session = await _sessionRepository.GetSessionAsync(id);
+        if (session == null)
+            return NotFound(new { message = "Diagnostic session was not found." });
+        return Ok(RemediationEligibilityPolicy.Evaluate(session, await _sessionRepository.GetSessionsAsync()));
+    }
+
+    private async Task<IActionResult?> CheckRemediationGuardAsync(Guid sessionId)
+    {
+        var session = await _sessionRepository.GetSessionAsync(sessionId);
+        var guard = session == null
+            ? new RemediationEligibility("recheck_required", "This saved check could not be verified. Run a new check on this computer.")
+            : RemediationEligibilityPolicy.Evaluate(session, await _sessionRepository.GetSessionsAsync());
+        return guard.State == "allowed" ? null : Conflict(new { message = guard.Message, remediation_guard = guard });
+    }
+
     [HttpPost("preview")]
     public async Task<IActionResult> Preview([FromBody] PreviewRequest request)
     {
@@ -151,6 +171,7 @@ public class AutonomyController : ControllerBase
             });
         }
 
+        if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
         if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
@@ -255,6 +276,7 @@ public class AutonomyController : ControllerBase
         var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
         if (diagnostic == null)
             return NotFound(new { message = "Diagnostic session was not found." });
+        if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
         if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         var names = SelectedProcessNames(request);
@@ -308,6 +330,7 @@ public class AutonomyController : ControllerBase
         var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
         if (diagnostic == null)
             return NotFound(new { message = "Diagnostic session was not found." });
+        if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
         if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         var selectedProcessNames = SelectedProcessNames(request);
@@ -494,6 +517,7 @@ public class AutonomyController : ControllerBase
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
             return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
+        if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
         if (string.IsNullOrWhiteSpace(request.ToolName))
             return BadRequest(new { message = "Select the action shown in the preview." });
         if (RepairSupportPolicy.ScopeBlockReason(diagnostic, request.ToolName) is { } scopeReason)
@@ -1099,14 +1123,15 @@ public class AutonomyController : ControllerBase
             return NotFound(new { message = $"Tool '{request.ToolName}' is not registered." });
         }
 
-        var preview = await tool.PreviewImpactAsync(request.Arguments, cancellationToken);
-        if (tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly && preview.CanExecute)
+        Guid? guardedSessionId = null;
+        if (tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly)
         {
             if (!Guid.TryParse(request.SessionId, out var sessionId))
                 return BadRequest(new { message = "A valid diagnostic session ID is required." });
             var diagnostic = await _sessionRepository.GetDiagnosticOutputAsync(sessionId);
             if (diagnostic == null)
                 return NotFound(new { message = "Diagnostic session was not found." });
+            if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
             if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
                 return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
             if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
@@ -1115,7 +1140,12 @@ public class AutonomyController : ControllerBase
                 return Conflict(new { message = mismatchReason });
             if (RepairSupportPolicy.ScopeBlockReason(diagnostic, tool.Name) is { } scopeReason)
                 return Conflict(new { message = scopeReason });
-            AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", sessionId,
+            guardedSessionId = sessionId;
+        }
+        var preview = await tool.PreviewImpactAsync(request.Arguments, cancellationToken);
+        if (guardedSessionId is { } approvedSessionId && preview.CanExecute)
+        {
+            AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", approvedSessionId,
                 tool.Name, request.Arguments.GetRawText()));
         }
         return Ok(preview);

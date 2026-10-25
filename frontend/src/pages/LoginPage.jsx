@@ -123,6 +123,8 @@ function LoginPage() {
       }
 
       navigate(redirectTo, { replace: true });
+    } catch {
+      setError('Could not connect to sign in. Check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -144,9 +146,9 @@ function LoginPage() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} aria-busy={isSubmitting} className="space-y-4">
         {error && (
-          <div className="flex gap-3 rounded-lg border border-[var(--rigmd-danger)]/35 bg-[var(--rigmd-danger-soft)] p-4 text-sm text-[var(--rigmd-text-soft)]">
+          <div role="alert" className="flex gap-3 rounded-lg border border-[var(--rigmd-danger)]/35 bg-[var(--rigmd-danger-soft)] p-4 text-sm text-[var(--rigmd-text-soft)]">
             <AlertCircle
               size={19}
               className="mt-0.5 shrink-0 text-[var(--rigmd-danger)]"

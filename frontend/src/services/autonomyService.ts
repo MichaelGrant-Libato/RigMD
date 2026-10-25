@@ -2,6 +2,18 @@ import { API_BASE_URL, apiGet, apiPost } from '../lib/api';
 import * as signalR from '@microsoft/signalr';
 import { getLocalApiToken } from '../lib/localApiSession';
 
+async function remediationPost<T>(path: string, data: unknown) {
+  try {
+    return await apiPost<T>(path, data);
+  } catch (error) {
+    const response = (error as { response?: { status?: number; data?: { remediation_guard?: unknown } } }).response;
+    if (response?.status === 409 && response.data?.remediation_guard) {
+      window.dispatchEvent(new Event('rigmd-remediation-evidence-changed'));
+    }
+    throw error;
+  }
+}
+
 export interface AutonomyActionDef {
   id?: string;
   name?: string;
@@ -200,7 +212,7 @@ export async function runAutonomyPreview({
   sessionId,
   diagnosedCategory,
 }: AutonomyRequest) {
-  const response = await apiPost<AutonomyResult>(
+  const response = await remediationPost<AutonomyResult>(
     '/api/autonomy/preview',
     {
       sessionId,
@@ -219,7 +231,7 @@ export async function runAutonomyExecution({
   toolName,
   toolArgumentsJson,
 }: AutonomyRequest) {
-  const response = await apiPost<AutonomyResult>(
+  const response = await remediationPost<AutonomyResult>(
     '/api/autonomy/execute',
     {
       approvalToken,
@@ -246,7 +258,7 @@ export async function previewAgentTool(
   args: Record<string, unknown> = {},
   sessionId?: string,
 ) {
-  const response = await apiPost<ToolDryRunPreview>(
+  const response = await remediationPost<ToolDryRunPreview>(
     '/api/autonomy/tools/preview',
     {
       toolName,
@@ -271,7 +283,7 @@ export async function closeSelectedApp({
   processNames,
   confirmed,
 }: CloseSelectedAppRequest) {
-  const response = await apiPost<AutonomyResult>(
+  const response = await remediationPost<AutonomyResult>(
     '/api/autonomy/close-selected-app',
     {
       sessionId,
@@ -285,7 +297,7 @@ export async function closeSelectedApp({
 }
 
 export async function previewCloseSelectedApp(sessionId: string, processNames: string[]) {
-  const response = await apiPost<ToolDryRunPreview>('/api/autonomy/close-selected-app/preview', {
+  const response = await remediationPost<ToolDryRunPreview>('/api/autonomy/close-selected-app/preview', {
     sessionId, processNames,
   });
   return response.data;

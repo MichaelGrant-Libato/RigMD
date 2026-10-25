@@ -26,6 +26,8 @@ import {
   cardTransition,
 } from '../lib/motion';
 import DiagnosticReadings from './DiagnosticReadings';
+import { getAppObservationPresentation } from '../lib/appObservationPresentation';
+import { getActionDecision } from '../lib/actionDecision';
 import { hardwareInspectionNotice, requiresHardwareInspection, reviewOnlyNotice, memoryActionDisposition, crashCheckNotice, type ScanScope } from '../lib/repairSupport';
 import { friendlyToolName, getActionExplanation, getDiagnosticOverview, friendlyVerification,
   getSnapshotReadings, plainDiagnosticText, type DiagnosticReading } from '../lib/diagnosticLanguage';
@@ -48,6 +50,7 @@ import {
 } from '../services/autonomyService';
 
 interface AutonomyRemediationPanelProps {
+  compact?: boolean;
   readings?: DiagnosticReading[];
   originalReadings?: DiagnosticReading[];
   check?: ScanScope;
@@ -798,7 +801,14 @@ export function ProofList({ execution }: { execution?: AutonomyExecution }) {
 
   return (
     <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
-      {execution.proof.map((item, index) => (
+      {execution.proof.some(item => getAppObservationPresentation(item.status)) && (
+        <p className="col-span-full text-xs leading-relaxed opacity-80">
+          Saved process observations after the close request, not live app status. Later memory checks do not refresh these observations.
+        </p>
+      )}
+      {execution.proof.map((item, index) => {
+        const observation = getAppObservationPresentation(item.status);
+        return (
         <div
           key={`${item.label}-${index}`}
           className="min-w-0 border-t border-current/15 py-3"
@@ -807,9 +817,9 @@ export function ProofList({ execution }: { execution?: AutonomyExecution }) {
             {item.label === 'Directory size' ? 'Temporary-file storage' : item.label === 'File count' ? 'Temporary files' : plainDiagnosticText(item.label || 'Checked')}
           </p>
 
-          {item.status && /^(App closed|App still running|App state not verified)/.test(item.status) ? (
+          {observation ? (
             <>
-              <p className="mt-1 text-sm font-semibold text-white">{item.status}</p>
+              <p className="mt-1 text-sm font-semibold text-white">{observation.status}</p>
               <details className="mt-2 text-xs leading-relaxed opacity-80">
                 <summary className="cursor-pointer">App process details</summary>
                 <p className="mt-1 break-words">{item.before} &rarr; {item.after}</p>
@@ -825,13 +835,14 @@ export function ProofList({ execution }: { execution?: AutonomyExecution }) {
             </p>
           )}
 
-          {item.meaning && (
+          {(observation?.meaning || item.meaning) && (
             <p className="mt-1 text-[11px] leading-relaxed opacity-80">
-              {plainDiagnosticText(item.meaning)}
+              {plainDiagnosticText(observation?.meaning || item.meaning)}
             </p>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1008,6 +1019,7 @@ function ResultCard({
 }
 
 export default function AutonomyRemediationPanel({
+  compact = false,
   readings = [],
   originalReadings,
   check,
@@ -1350,11 +1362,12 @@ export default function AutonomyRemediationPanel({
   }
   const reviewReadings = memoryAction ? readings.filter(row => row.metric_id === 'memory_usage' || row.metric_id === 'memory_app_warning')
     : [...observations.values()].flat();
+  const actionDecision = getActionDecision(activeToolId, reviewReadings);
 
   if (requiresHardwareInspection(diagnosedCategory)) return (
     <section aria-label="Hardware inspection recommended" className="border-l-2 border-amber-400 pl-4 py-3">
       <div className="flex items-center gap-2 text-amber-200"><AlertTriangle size={18} /><h5 className="text-sm font-semibold">Hardware inspection recommended</h5></div>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{hardwareInspectionNotice}</p>
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? 'This finding needs a physical check. No automatic repair is available.' : hardwareInspectionNotice}</p>
     </section>
   );
 
@@ -1366,7 +1379,7 @@ export default function AutonomyRemediationPanel({
     <div className="space-y-4">
       {crashContext && <section aria-label="About the crash check" className="border-l-2 border-sky-400 py-2 pl-4">
         <h5 className="text-sm font-semibold text-sky-200">About the crash check</h5>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashNotice}</p>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? 'Crash records do not confirm a cause or a repair.' : crashNotice}</p>
       </section>}
       <details className="border-t border-[var(--rigmd-border)] py-3" aria-label="Separate memory finding">
         <summary className="cursor-pointer text-sm font-semibold text-amber-200">Other findings: Memory warning needs review</summary>
@@ -1384,7 +1397,7 @@ export default function AutonomyRemediationPanel({
   if ((reviewNotice || inactiveMemory) && !memoryAction) return (
     <section aria-label="Investigation recommended" className="border-l-2 border-sky-400 pl-4 py-3">
       <h5 className="text-sm font-semibold text-sky-200">About this check</h5>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashContext ? crashNotice : inactiveMemory
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? (crashContext ? 'Crash records do not confirm a cause or a repair.' : inactiveMemory ? 'No app-closing action is available for the latest saved readings.' : 'Review the finding before making changes. No automatic repair is available.') : crashContext ? crashNotice : inactiveMemory
         ? 'The latest saved readings do not show a verified memory warning. No app-closing action is available. Check current status if symptoms continue.' : reviewNotice}</p>
       {executionResult && <div className="mt-4"><ResultCard result={executionResult} diagnosedCategory="High Memory Pressure"
         followUpSummary={executedAt !== null && followUpCheckedAt && Date.parse(followUpCheckedAt) >= executedAt ? followUpSummary : undefined} /></div>}
@@ -1395,7 +1408,7 @@ export default function AutonomyRemediationPanel({
     <>
       {reviewNotice && memoryAction && <section aria-label="About the crash check" className="mb-5 border-l-2 border-sky-400 py-2 pl-4">
         <h5 className="text-sm font-semibold text-sky-200">About the crash check</h5>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{crashNotice}</p>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? 'Crash records do not confirm a cause or a repair.' : crashNotice}</p>
       </section>}
       <motion.section
         variants={cardFadeUp}
@@ -1419,7 +1432,7 @@ export default function AutonomyRemediationPanel({
               </div>
 
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
-                {memoryAction ? 'Review running apps and choose only ones you no longer need. Save your work first. Closing selected apps may reduce memory use; improvement must be checked afterward.' : 'No changes are made during the check. Any proposed action needs your approval.'}
+                {compact ? (memoryAction ? 'Save your work before choosing apps to close.' : 'Review the proposed change before deciding.') : memoryAction ? 'Review running apps and choose only ones you no longer need. Save your work first. Closing selected apps may reduce memory use; improvement must be checked afterward.' : 'No changes are made during the check. Any proposed action needs your approval.'}
               </p>
             </div>
           </div>
@@ -1521,7 +1534,14 @@ export default function AutonomyRemediationPanel({
                   {previewError || executeError}
                 </p>
               )}
-              <DiagnosticReadings readings={reviewReadings} technicalDetails={false} />
+              <section className="border-t border-white/10 pt-4">
+                <h4 className="text-sm font-semibold text-cyan-200">Why this action?</h4>
+                <p className="mt-2 text-sm leading-relaxed text-slate-300">{actionDecision.why}</p>
+              </section>
+              {reviewReadings.length > 3 ? <details className="border-t border-white/10 pt-3">
+                <summary className="cursor-pointer py-1 text-sm font-semibold text-slate-200">Readings supporting this action</summary>
+                <div className="mt-3"><DiagnosticReadings readings={reviewReadings} technicalDetails={false} /></div>
+              </details> : <DiagnosticReadings readings={reviewReadings} technicalDetails={false} />}
               {!reviewReadings.length && <p className="text-sm leading-relaxed text-slate-300">{getDiagnosticOverview(diagnosedCategory).meaning}</p>}
 
               {/* 3. Tool Selection & Live Dry-Run Impact Metrics */}
@@ -1599,6 +1619,10 @@ export default function AutonomyRemediationPanel({
                   )}
               </section>
 
+              <section className="border-t border-white/10 pt-4">
+                <h4 className="text-sm font-semibold text-cyan-200">How will we check?</h4>
+                <p className="mt-2 text-sm leading-relaxed text-slate-300">{actionDecision.check}</p>
+              </section>
               {/* 4. Safety & Warnings */}
               <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-200">
