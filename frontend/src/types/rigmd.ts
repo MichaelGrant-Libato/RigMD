@@ -329,6 +329,8 @@ export interface HardwareStats {
 }
 
 export interface DashboardSessionSummary {
+  device_id?: string;
+  resolution_device_id?: string;
   proof?: import('../lib/diagnosticLanguage').DiagnosticReading[];
   resolution_proof?: import('../lib/diagnosticLanguage').DiagnosticReading[];
   session_id: string;
