@@ -95,6 +95,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             new() { DiagnosticSessionId = session.Id, Session = session, QuestionKey = "client_id",          AnswerValue = clientId }
         };
 
+        answers.Add(new() { DiagnosticSessionId = session.Id, Session = session,
+            QuestionKey = "device_id", AnswerValue = LocalDiagnosticDeviceIdentity.Read() });
         session.Answers = answers;
 
         // Build diagnostic output entity
@@ -305,6 +307,9 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                 }
             };
 
+        if (string.Equals(agentId, "local", StringComparison.Ordinal))
+            answers.Add(new() { DiagnosticSessionId = session.Id, Session = session,
+                QuestionKey = "device_id", AnswerValue = LocalDiagnosticDeviceIdentity.Read() });
         session.Answers =
             answers;
 
@@ -536,6 +541,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
         SetOrAddAnswer(session, "resolution_status", resolutionStatus);
         SetOrAddAnswer(session, "resolution_checked_at", resolutionCheckedAt);
+        SetOrAddAnswer(session, "resolution_device_id", LocalDiagnosticDeviceIdentity.Read());
         SetOrAddAnswer(session, "resolution_summary", resolutionSummary);
         SetOrAddAnswer(session, "resolution_proof", JsonSerializer.Serialize(resolutionProof));
 
@@ -856,6 +862,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         {
             SessionId = s.Id.ToString(),
             ProfileId = s.SystemProfileId.ToString(),
+            DeviceId = Answer("device_id"),
             SymptomType = Answer("symptom_type"),
             AffectedActivity = Answer("affected_activity"),
             Frequency = Answer("frequency"),
@@ -876,6 +883,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             ResolutionProof = ReadSavedProof(Answer("resolution_proof")),
             Proof = ReadSavedProof(Answer("proof")),
             ResolutionCheckedAt = Answer("resolution_checked_at"),
+            ResolutionDeviceId = Answer("resolution_device_id"),
             LastActionStatus = Answer("last_action_status"),
             LastActionSummary = Answer("last_action_summary"),
             DiagnosisMode = Answer("diagnosis_mode"),

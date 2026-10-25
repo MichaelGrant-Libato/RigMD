@@ -1,7 +1,7 @@
-import DiagnosticReadings from '../components/DiagnosticReadings';
 import CheckReadings from '../components/CheckReadings';
-import { canCheckCurrentStatus, getCheckOverview, getCheckStatus, getLatestCheckSummary, getCheckAdvice, getAdditionalFindingStatus, crashMetric, getCheckEvidenceLabel, getCheckCoverageNotice, getCheckPanelClassName } from '../lib/checkPresentation';
-import { plainDiagnosticText } from '../lib/diagnosticLanguage';
+import CheckNextSteps from '../components/CheckNextSteps';
+import ResultDetails from '../components/ResultDetails';
+import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
 import {
   useEffect,
   useMemo,
@@ -69,7 +69,6 @@ import type {
   AutonomyResult,
 } from '../services/autonomyService';
 
-import { getTelemetryDeltaSummary } from '../lib/pastChecksFormatting';
 import { explanationSourceLabel } from '../lib/diagnosticReadingVisuals';
 
 interface NewDiagnosisViewProps {
@@ -560,27 +559,6 @@ function getActionTone(
 
 
 
-function getResolutionButtonText(
-  status?: string,
-  checking = false,
-) {
-  const normalized =
-    status?.trim().toLowerCase();
-  const hasBeenChecked =
-    Boolean(normalized) &&
-    normalized !== 'open' &&
-    normalized !== 'not_checked';
-
-  if (checking) {
-    return hasBeenChecked
-      ? 'Rechecking...'
-      : 'Checking...';
-  }
-
-  return hasBeenChecked
-    ? 'Recheck Current Status'
-    : 'Check Current Status';
-}
 
 function getApiErrorMessage(
   err: any,
@@ -785,6 +763,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
     useState<RemediationAction[]>(
       [],
     );
+
 
   const [
     error,
@@ -2315,6 +2294,32 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                 transition={cardTransition}
                 className="space-y-5"
               >
+                <CheckNextSteps check={report} checking={checkingResolution} onCheckAgain={handleCheckResolution} onOpenSession={onDiagnosisComplete}>
+                  {!isNoActiveIssue(
+                  report,
+                ) && report.session_id && (
+                    <AutonomyRemediationPanel
+                      compact
+                      check={report}
+                      originalReadings={report.proof}
+                      onOpenMemoryCheck={onOpenMemoryCheck}
+                      readings={report.resolution_proof?.length ? report.resolution_proof : report.proof}
+                      followUpSummary={getFindingChanges(report.proof, report.resolution_proof)?.summary}
+                      followUpCheckedAt={report.resolution_checked_at}
+                      sessionId={
+                        report.session_id
+                      }
+                      diagnosedCategory={
+                        report.diagnosed_category
+                      }
+                      onExecutionComplete={
+                        handleAutonomyExecutionComplete
+                      }
+                    />
+                  )}
+                </CheckNextSteps>
+                <ResultDetails label="Original check" title="Original check">
+                <div className="space-y-5" data-testid="original-check-details">
                 <div
                   className={`rounded-2xl border p-5 ${getActionTone(report.action_category).border} ${getActionTone(report.action_category).soft}`}
                 >
@@ -2570,27 +2575,8 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                     </div>
                   )}
 
-                {!isNoActiveIssue(
-                  report,
-                ) && report.session_id && (
-                    <AutonomyRemediationPanel
-                      check={report}
-                      originalReadings={report.proof}
-                      onOpenMemoryCheck={onOpenMemoryCheck}
-                      readings={report.resolution_proof?.length ? report.resolution_proof : report.proof}
-                      followUpSummary={getFindingChanges(report.proof, report.resolution_proof)?.summary}
-                      followUpCheckedAt={report.resolution_checked_at}
-                      sessionId={
-                        report.session_id
-                      }
-                      diagnosedCategory={
-                        report.diagnosed_category
-                      }
-                      onExecutionComplete={
-                        handleAutonomyExecutionComplete
-                      }
-                    />
-                  )}
+                </div>
+                </ResultDetails>
 
                 {report.session_id && onDiagnosisComplete && (
                   <div className="flex justify-end">
@@ -2605,71 +2591,6 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                   </div>
                 )}
 
-                {canCheckCurrentStatus(report) && (
-                    <div className={`rounded-xl border p-4 ${getCheckPanelClassName(report)}`}>
-                      {(() => {
-                        const resolutionView =
-                          getCheckStatus(report);
-
-                        return (
-                          <>
-                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                              <div>
-                                <div className="mb-2 flex flex-wrap items-center gap-2">
-                                  <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-                                    Latest status
-                                  </h4>
-
-                                  <span
-                                    className={`rounded border px-2 py-1 text-xs font-bold uppercase tracking-wider ${resolutionView.className}`}
-                                  >
-                                    {
-                                      resolutionView.label
-                                    }
-                                  </span>
-                                </div>
-
-                                <p className="text-xs leading-relaxed text-gray-400">
-                                  {getLatestCheckSummary(report)}
-                                </p>
-                                {report.resolution_checked_at && <p className="mt-1 text-xs text-slate-500">Checked {new Date(report.resolution_checked_at).toLocaleString()}</p>}
-                                {crashMetric(report) && getAdditionalFindingStatus(report.resolution_proof) && <p className="mt-2 text-xs text-cyan-200">Additional finding: {getAdditionalFindingStatus(report.resolution_proof)}</p>}
-
-                                {getTelemetryDeltaSummary(report.proof, report.resolution_proof) && (
-                                  <div className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-2.5 text-xs text-cyan-200">
-                                    <span className="font-bold text-cyan-300">Compared with the original check: </span>
-                                    {plainDiagnosticText(getTelemetryDeltaSummary(report.proof, report.resolution_proof))}
-                                  </div>
-                                )}
-                              </div>
-
-                              <motion.button
-                                type="button"
-                                disabled={
-                                  checkingResolution
-                                }
-                                onClick={
-                                  handleCheckResolution
-                                }
-                                whileTap={
-                                  buttonTap
-                                }
-                                className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-4 py-2 text-xs font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {getResolutionButtonText(
-                                  report.resolution_status,
-                                  checkingResolution,
-                                )}
-                              </motion.button>
-                            </div>
-
-                            {getFindingChanges(report.proof, report.resolution_proof) && <p className="mt-3 text-sm font-semibold text-cyan-200">{plainDiagnosticText(getFindingChanges(report.proof, report.resolution_proof)!.summary)}</p>}
-                            <DiagnosticReadings readings={report.resolution_proof} title="Latest readings" />
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
               </motion.section>
             )}
           </div>

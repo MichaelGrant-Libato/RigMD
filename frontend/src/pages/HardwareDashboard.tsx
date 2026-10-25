@@ -537,6 +537,7 @@ export default function HardwareDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [newSessionId, setNewSessionId] = useState<string | null>(null);
   const [diagnosisPreset, setDiagnosisPreset] = useState<'memory' | null>(null);
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
   const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
@@ -691,7 +692,7 @@ export default function HardwareDashboard() {
   }, [activePage]);
 
   const handleSetActivePage = (page: PageKey) => {
-  if (page === 'newDiagnosis') setDiagnosisPreset(null);
+  if (page === 'newDiagnosis') { setDiagnosisPreset(null); setNewSessionId(null); }
   if (page === 'diagnosticHistory') {
     setSelectedSessionId(null);
   }
@@ -700,6 +701,7 @@ export default function HardwareDashboard() {
 };
 
   const openMemoryCheck = () => {
+    setNewSessionId(null);
     setDiagnosisPreset('memory');
     setActivePage('newDiagnosis');
   };
@@ -711,7 +713,7 @@ export default function HardwareDashboard() {
           <HomeDashboardView
             stats={stats}
             dashboard={dashboard}
-            setActivePage={setActivePage}
+            setActivePage={handleSetActivePage}
             onViewSession={(sessionId) => {
               setSelectedSessionId(sessionId);
               setActivePage('diagnosticHistory');
@@ -734,6 +736,7 @@ export default function HardwareDashboard() {
       return selectedSessionId ? (
         <DiagnosticSessionDetailView
           sessionId={selectedSessionId}
+          onOpenSession={setSelectedSessionId}
           onBack={() => setSelectedSessionId(null)}
           onOpenMemoryCheck={openMemoryCheck}
         />
@@ -751,14 +754,21 @@ export default function HardwareDashboard() {
       case 'warningSigns':
         return <WarningSignsView />;
       case 'newDiagnosis':
-        return (
+        return newSessionId ? (
+          <DiagnosticSessionDetailView
+            sessionId={newSessionId}
+            onOpenSession={setNewSessionId}
+            onBack={() => setNewSessionId(null)}
+            backLabel="Back to checks"
+            onOpenMemoryCheck={openMemoryCheck}
+          />
+        ) : (
           <NewDiagnosisView
             key={diagnosisPreset ?? 'default'}
             initialComponentIds={diagnosisPreset === 'memory' ? ['memory'] : undefined}
             onOpenMemoryCheck={openMemoryCheck}
             onDiagnosisComplete={(sessionId) => {
-              setSelectedSessionId(sessionId);
-              setActivePage('diagnosticHistory');
+              setNewSessionId(sessionId);
             }}
           />
         );
@@ -783,7 +793,7 @@ export default function HardwareDashboard() {
           <HomeDashboardView
             stats={stats}
             dashboard={dashboard}
-            setActivePage={setActivePage}
+            setActivePage={handleSetActivePage}
             onViewSession={(sessionId) => {
               setSelectedSessionId(sessionId);
               setActivePage('diagnosticHistory');
@@ -812,7 +822,7 @@ export default function HardwareDashboard() {
           onMenuClick={() => setMobileSidebarOpen(true)}
         >
           <AnimatePresence mode="wait">
-            <div key={`${activePage}-${selectedSessionId ?? 'list'}`} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div key={`${activePage}-${(activePage === 'newDiagnosis' ? newSessionId : selectedSessionId) ?? 'list'}`} className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {renderPage()}
             </div>
           </AnimatePresence>

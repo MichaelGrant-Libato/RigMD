@@ -44,7 +44,7 @@ function AuthFormShell({ title, subtitle, children, footer }) {
           initial={{ opacity: 0, x: -26 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.55, ease: 'easeOut' }}
-          className="max-w-3xl"
+          className="order-2 max-w-3xl lg:order-1"
         >
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[var(--rigmd-accent)]">
             Secure RigMD Access
@@ -98,7 +98,7 @@ function AuthFormShell({ title, subtitle, children, footer }) {
           initial={{ opacity: 0, x: 28, scale: 0.98 }}
           animate={{ opacity: 1, x: 0, scale: 1 }}
           transition={{ duration: 0.55, ease: 'easeOut' }}
-          className="rigmd-glass rounded-lg border p-6 shadow-2xl shadow-black/30 sm:p-7"
+          className="rigmd-glass order-1 rounded-lg border p-6 shadow-2xl shadow-black/30 sm:p-7 lg:order-2"
         >
           <div className="mb-6">
             <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--rigmd-accent)]">

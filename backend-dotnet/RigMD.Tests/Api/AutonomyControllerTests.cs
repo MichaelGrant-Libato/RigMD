@@ -19,6 +19,117 @@ namespace RigMD.Tests.Api;
 public class AutonomyControllerTests
 {
     [Theory]
+    [InlineData(false, "normal", "40%", "superseded")]
+    [InlineData(true, "normal", "40%", "superseded")]
+    [InlineData(true, "high", "95%", "superseded")]
+    [InlineData(false, "unknown", "Unavailable", "recheck_required")]
+    public async Task NewMatchingCheckBlocksAllRepairPreviewsAndPreviouslyIssuedApproval(
+        bool genericPreview, string status, string value, string expectedState)
+    {
+        var current = RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(0);
+        current.ComponentIds = "[\"storage\"]";
+        current.Proof = [RigMD.Tests.Application.RemediationEligibilityPolicyTests.Row("storage_usage", "high", "90%")];
+        var diagnostic = CreateDiagnostic();
+        var repo = new FakeDiagnosticSessionRepository(diagnostic) { Current = current };
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible) { CanPreviewExecute = true };
+        var orchestrator = new FakeOrchestrator { PreviewResult = new()
+        {
+            Safety = new() { IsApproved = true }, DryRunPreview = new() { CanExecute = true },
+            ProposedTool = new() { ToolName = tool.Name, ArgumentsJson = "{}" }
+        } };
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository(),
+            registry: new RigMdAgentToolRegistry(new[] { tool }), sessionRepository: repo);
+        var invocation = new AutonomyController.ToolInvocationRequest
+        {
+            SessionId = current.SessionId, ToolName = tool.Name, Arguments = JsonSerializer.SerializeToElement(new { })
+        };
+        var initial = Assert.IsType<OkObjectResult>(genericPreview
+            ? await controller.PreviewTool(invocation, CancellationToken.None)
+            : await controller.Preview(new() { SessionId = current.SessionId }));
+        var preview = genericPreview ? Assert.IsType<ToolDryRunPreview>(initial.Value)
+            : Assert.IsType<OrchestrationResult>(initial.Value).DryRunPreview!;
+        Assert.NotNull(preview.ApprovalToken);
+        var newer = RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(1);
+        newer.ComponentIds = current.ComponentIds;
+        newer.Proof = [RigMD.Tests.Application.RemediationEligibilityPolicyTests.Row("storage_usage", status, value)];
+        repo.History.Add(newer);
+        var callsBeforeBlock = orchestrator.Calls;
+        AssertGuard(await controller.Execute(new()
+        {
+            SessionId = current.SessionId, UserConsentProvided = true, ToolName = tool.Name,
+            ApprovalToken = preview.ApprovalToken, ToolArgumentsJson = "{}"
+        }), expectedState);
+        AssertGuard(await controller.Preview(new() { SessionId = current.SessionId }), expectedState);
+        AssertGuard(await controller.PreviewTool(invocation, CancellationToken.None), expectedState);
+        var eligibility = Assert.IsType<RigMD.Application.Services.RemediationEligibility>(
+            Assert.IsType<OkObjectResult>(await controller.GetRemediationEligibility(current.SessionId)).Value);
+        Assert.Equal(expectedState, eligibility.State);
+        var wire = JsonSerializer.SerializeToElement(eligibility);
+        Assert.Equal(expectedState, wire.GetProperty("state").GetString());
+        Assert.True(wire.TryGetProperty("message", out _));
+        Assert.True(wire.TryGetProperty("newer_session_id", out _));
+        Assert.True(wire.TryGetProperty("checked_at", out _));
+        Assert.Equal(callsBeforeBlock, orchestrator.Calls);
+        Assert.Equal(0, tool.ExecutionCount);
+        var bypass = Assert.IsType<ObjectResult>(await controller.ExecuteTool(invocation, CancellationToken.None));
+        Assert.Equal(403, bypass.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("normal", "40%", "superseded")]
+    [InlineData("high", "95%", "superseded")]
+    [InlineData("unknown", "Unavailable", "recheck_required")]
+    public async Task NewMatchingMemoryCheckBlocksSelectedAppPreviewAndExistingApproval(string status, string value, string state)
+    {
+        var current = RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(0);
+        var diagnostic = CreateMemoryDiagnostic();
+        var repo = new FakeDiagnosticSessionRepository(diagnostic) { Current = current };
+        var controller = CreateController(new(), diagnostic, new(), sessionRepository: repo,
+            hardware: new() { Ram = new() { UsagePercent = 90 }, ProcessInsights = new()
+            { TopMemoryApps = [new() { Name = "chrome", MemoryMb = 256, ProcessCount = 1 }] } });
+        var request = new AutonomyController.CloseSelectedAppRequest { SessionId = current.SessionId, ProcessNames = ["chrome"] };
+        var preview = Assert.IsType<ToolDryRunPreview>(Assert.IsType<OkObjectResult>(await controller.PreviewCloseSelectedApp(request)).Value);
+        repo.History.Add(RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(1, status, value));
+        AssertGuard(await controller.PreviewCloseSelectedApp(request), state);
+        request.Confirmed = true; request.ApprovalToken = preview.ApprovalToken;
+        AssertGuard(await controller.CloseSelectedApp(request), state);
+        // Both requests stop before enumerating processes or sending normal-close requests.
+    }
+
+    [Fact]
+    public async Task EligibilityRefreshHonorsLaterSameSessionFollowupAndReadOnlyToolsRemainAvailable()
+    {
+        var current = RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(0);
+        var diagnostic = CreateMemoryDiagnostic();
+        var repo = new FakeDiagnosticSessionRepository(diagnostic) { Current = current };
+        repo.History.Add(RigMD.Tests.Application.RemediationEligibilityPolicyTests.Check(1, "unknown", "Unavailable"));
+        var readOnly = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier0_ReadOnly);
+        var controller = CreateController(new(), diagnostic, new(), registry: new RigMdAgentToolRegistry(new[] { readOnly }), sessionRepository: repo);
+        var before = Assert.IsType<RigMD.Application.Services.RemediationEligibility>(
+            Assert.IsType<OkObjectResult>(await controller.GetRemediationEligibility(current.SessionId)).Value);
+        Assert.Equal("recheck_required", before.State);
+        Assert.IsType<OkObjectResult>(await controller.ExecuteTool(new()
+        {
+            SessionId = current.SessionId, ToolName = readOnly.Name, Arguments = JsonSerializer.SerializeToElement(new { })
+        }, CancellationToken.None));
+        current.ResolutionCheckedAt = RigMD.Tests.Application.RemediationEligibilityPolicyTests.At(2);
+        current.ResolutionStatus = "still_active";
+        current.ResolutionProof = [RigMD.Tests.Application.RemediationEligibilityPolicyTests.Row("memory_usage", "high", "91%")];
+        var after = Assert.IsType<RigMD.Application.Services.RemediationEligibility>(
+            Assert.IsType<OkObjectResult>(await controller.GetRemediationEligibility(current.SessionId)).Value);
+        Assert.Equal("allowed", after.State);
+    }
+
+    private static void AssertGuard(IActionResult result, string state)
+    {
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(409, conflict.StatusCode);
+        var body = JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal(state, body.GetProperty("remediation_guard").GetProperty("state").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("message").GetString()));
+    }
+
+    [Theory]
     [InlineData(0, "App closed")]
     [InlineData(6, "App still running in background")]
     [InlineData(null, "App state not verified")]
@@ -417,12 +528,13 @@ public class AutonomyControllerTests
         FakeRemediationRepository remediationRepository,
         RemediationApprovalStore? approvals = null,
         IRigMdAgentToolRegistry? registry = null,
-        HardwareProfileDto? hardware = null)
+        HardwareProfileDto? hardware = null,
+        FakeDiagnosticSessionRepository? sessionRepository = null)
     {
         return new AutonomyController(
             orchestrator,
             new FakeSystemProfileService { Hardware = hardware },
-            new FakeDiagnosticSessionRepository(
+            sessionRepository ?? new FakeDiagnosticSessionRepository(
                 diagnostic),
             remediationRepository,
             new FakeHubContext(),
@@ -538,7 +650,7 @@ public class AutonomyControllerTests
         {
             new() { QuestionKey = "diagnosis_mode", AnswerValue = "component" },
             new() { QuestionKey = "component_ids", AnswerValue = "[\"memory\"]" },
-            new() { QuestionKey = "proof", AnswerValue = "[{\"metric_id\":\"memory_usage\",\"status\":\"high\",\"value\":\"90%\"}]" }
+            new() { QuestionKey = "proof", AnswerValue = "[{\"metric_id\":\"memory_usage\",\"status\":\"high\",\"value\":\"90%\",\"evidence_kind\":\"measurement\"}]" }
         } }
     };
 
@@ -724,6 +836,9 @@ public class AutonomyControllerTests
     {
         private readonly DiagnosticOutput _diagnostic;
 
+        public DiagnosticSessionDto? Current { get; set; }
+        public List<DiagnosticSessionDto> History { get; } = new();
+
         public FakeDiagnosticSessionRepository(
             DiagnosticOutput diagnostic)
         {
@@ -774,14 +889,25 @@ public class AutonomyControllerTests
         public Task<IReadOnlyList<DiagnosticSessionDto>>
             GetSessionsAsync()
         {
-            throw new NotSupportedException();
+            return Task.FromResult<IReadOnlyList<DiagnosticSessionDto>>(History.ToArray());
         }
 
         public Task<DiagnosticSessionDto?>
             GetSessionAsync(
                 Guid sessionId)
         {
-            throw new NotSupportedException();
+            string Answer(string key) => _diagnostic.Session?.Answers.FirstOrDefault(a => a.QuestionKey == key)?.AnswerValue ?? "";
+            var rawProof = Answer("proof");
+            return Task.FromResult<DiagnosticSessionDto?>(Current ?? new()
+            {
+                SessionId = sessionId.ToString(), DeviceId = "test-device", CreatedAt = DateTimeOffset.UtcNow.ToString("o"),
+                DiagnosisMode = string.IsNullOrWhiteSpace(Answer("diagnosis_mode")) ? "full" : Answer("diagnosis_mode"),
+                ComponentIds = Answer("component_ids"), ScenarioId = Answer("scenario_id"),
+                DiagnosedCategory = _diagnostic.DiagnosedCategory,
+                Proof = string.IsNullOrWhiteSpace(rawProof)
+                    ? [new { metric_id = "cpu_usage", label = "CPU", value = "95%", status = "high", evidence_kind = "measurement" }]
+                    : JsonSerializer.Deserialize<object[]>(rawProof)!
+            });
         }
 
         public Task<bool> DeleteSessionAsync(

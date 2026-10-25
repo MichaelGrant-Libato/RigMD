@@ -1,12 +1,15 @@
-import DiagnosticReadings from '../components/DiagnosticReadings';
 import CheckReadings from '../components/CheckReadings';
-import { canCheckCurrentStatus, getCheckOverview, getCheckStatus, getLatestCheckSummary, getCheckAdvice, getAdditionalFindingStatus, crashMetric, getCheckEvidenceLabel, getCheckCoverageNotice, getCheckPanelClassName } from '../lib/checkPresentation';
+import CheckNextSteps from '../components/CheckNextSteps';
+import ResultDetails from '../components/ResultDetails';
+import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
 import { getFindingChanges } from '../lib/findingChanges';
 import { explanationSourceLabel } from '../lib/diagnosticReadingVisuals';
 import { plainDiagnosticText, friendlyActionCategory, friendlyToolName, friendlyVerification } from '../lib/diagnosticLanguage';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -16,7 +19,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock3,
-  RefreshCw,
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
@@ -35,7 +37,6 @@ import { apiFetch } from '../lib/api';
 
 import type { AutonomyResult } from '../services/autonomyService';
 import {
-  getTelemetryDeltaSummary,
   COMPONENT_LABELS,
   SCENARIO_LABELS,
   parseComponentIds,
@@ -101,7 +102,9 @@ interface SessionDetail {
 interface Props {
   sessionId: string;
   onBack: () => void;
+  backLabel?: string;
   onOpenMemoryCheck?: () => void;
+  onOpenSession?: (id: string) => void;
 }
 
 
@@ -110,27 +113,6 @@ interface Props {
 
 
 
-function getResolutionButtonText(
-  status?: string,
-  checking = false,
-) {
-  const normalized =
-    status?.trim().toLowerCase();
-  const hasBeenChecked =
-    Boolean(normalized) &&
-    normalized !== 'open' &&
-    normalized !== 'not_checked';
-
-  if (checking) {
-    return hasBeenChecked
-      ? 'Rechecking...'
-      : 'Checking...';
-  }
-
-  return hasBeenChecked
-    ? 'Recheck Current Status'
-    : 'Check Current Status';
-}
 
 
 function isNoActiveIssue(
@@ -174,7 +156,9 @@ function formatComponentIds(value?: string) {
 export default function DiagnosticSessionDetailView({
   sessionId,
   onBack,
+  backLabel = 'Back to History',
   onOpenMemoryCheck,
+  onOpenSession,
 }: Props) {
   const [
     session,
@@ -391,7 +375,13 @@ export default function DiagnosticSessionDetailView({
       }
     };
 
-  const showResolutionStatus = canCheckCurrentStatus(session);
+  const resultScroll = useRef<HTMLDivElement>(null);
+  const loadedSessionId = session?.session_id;
+  useLayoutEffect(() => {
+    if (!loadedSessionId) return;
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    resultScroll.current?.scrollTo({ top: 0, behavior: 'instant' });
+  }, [loadedSessionId]);
 
   useEffect(() => {
     fetchSession();
@@ -405,6 +395,7 @@ export default function DiagnosticSessionDetailView({
       />
 
       <motion.div
+        ref={resultScroll}
         variants={pageFade}
         initial="hidden"
         animate="visible"
@@ -423,7 +414,7 @@ export default function DiagnosticSessionDetailView({
               size={16}
             />
 
-            Back to History
+            {backLabel}
           </motion.button>
 
           {loading ? (
@@ -455,7 +446,45 @@ export default function DiagnosticSessionDetailView({
                   {error}
                 </div>
               )}
-              <motion.section
+              <CheckNextSteps check={session} checking={checking} onCheckAgain={checkResolution} onOpenSession={onOpenSession}>
+                {!isNoActiveIssue(session.diagnosed_category) && (
+                <motion.section
+                  variants={
+                    cardFadeUp
+                  }
+                  initial="hidden"
+                  animate="visible"
+                  transition={
+                    cardTransition
+                  }
+                  className="border-t border-[var(--rigmd-border)] pt-5"
+                >
+                  <div className="space-y-3">
+                    <AutonomyRemediationPanel
+                      compact
+                      check={session}
+                      originalReadings={session.proof}
+                      onOpenMemoryCheck={onOpenMemoryCheck}
+                      readings={session.resolution_proof?.length ? session.resolution_proof : session.proof}
+                      followUpSummary={getFindingChanges(session.proof, session.resolution_proof)?.summary}
+                      followUpCheckedAt={session.resolution_checked_at}
+                      diagnosedCategory={
+                        session.diagnosed_category
+                      }
+                      onExecutionComplete={
+                        handleAutonomyExecutionComplete
+                      }
+                      sessionId={
+                        sessionId
+                      }
+                    />
+                  </div>
+                </motion.section>
+              )}
+              </CheckNextSteps>
+              <ResultDetails label="Original check" title="Original check">
+              <div data-testid="original-check-details">
+                <motion.section
                 variants={
                   drawerSlideRight
                 }
@@ -513,13 +542,6 @@ export default function DiagnosticSessionDetailView({
                       }
                     </span>
 
-                    {(showResolutionStatus || getCheckStatus(session).category === 'needs_recheck') && (
-                      <span
-                        className={`rounded border px-3 py-1 text-xs font-bold uppercase ${getCheckStatus(session).className}`}
-                      >
-                        {getCheckStatus(session).label}
-                      </span>
-                    )}
                   </div>
                 </div>
 
@@ -634,100 +656,15 @@ export default function DiagnosticSessionDetailView({
                 </details>
               </motion.section>
 
-              {showResolutionStatus && (
-                <motion.section
-                  variants={
-                    cardFadeUp
-                  }
-                  initial="hidden"
-                  animate="visible"
-                  transition={
-                    cardTransition
-                  }
-                  className={`rounded-2xl border p-6 ${getCheckPanelClassName(session)}`}
-                >
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2.5">
-                        <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                          Latest status
-                        </h3>
-                        {(() => {
-                          const resInfo = getCheckStatus(session);
-                          return (
-                            <span
-                              className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${resInfo.className}`}
-                            >
-                              {resInfo.label}
-                            </span>
-                          );
-                        })()}
-                      </div>
-
-                      <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                        {getLatestCheckSummary(session)}
-                      </p>
-                      {session.resolution_checked_at && <p className="mt-1 text-xs text-slate-500">Checked {new Date(session.resolution_checked_at).toLocaleString()}</p>}
-                      {crashMetric(session) && getAdditionalFindingStatus(session.resolution_proof) && <p className="mt-2 text-sm font-semibold text-cyan-200">Additional finding: {getAdditionalFindingStatus(session.resolution_proof)}</p>}
-
-                      {crashMetric(session) ? (
-                        <p className="mt-1 text-xs text-slate-500">
-                          Checks whether Windows recorded another crash after the original check.
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-xs text-slate-500">
-                          Compares a fresh device reading with this saved check.
-                        </p>
-                      )}
-
-                      {getTelemetryDeltaSummary(session.proof, session.resolution_proof) && (
-                        <div className="mt-3 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] p-3 text-xs text-cyan-200">
-                          <span className="font-bold text-cyan-300">Compared with the original check: </span>
-                          {plainDiagnosticText(getTelemetryDeltaSummary(session.proof, session.resolution_proof))}
-                        </div>
-                      )}
-                    </div>
-
-                    <motion.button
-                      type="button"
-                      onClick={
-                        checkResolution
-                      }
-                      disabled={
-                        checking
-                      }
-                      whileTap={
-                        buttonTap
-                      }
-                      className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-4 py-2 text-sm font-bold text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        size={16}
-                        className={
-                          checking
-                            ? 'animate-spin'
-                            : ''
-                        }
-                      />
-
-                      {getResolutionButtonText(
-                        session.resolution_status,
-                        checking,
-                      )}
-                    </motion.button>
-                  </div>
-
-                  {getFindingChanges(session.proof, session.resolution_proof) && <p className="mt-4 text-sm font-semibold text-cyan-200">{plainDiagnosticText(getFindingChanges(session.proof, session.resolution_proof)!.summary)}</p>}
-                  <div className="mt-4"><DiagnosticReadings readings={session.resolution_proof} title="Latest saved readings" /></div>
-                  {!session.resolution_proof?.length && <p className="mt-4 text-sm text-slate-400">Detailed follow-up readings were not saved for this check.</p>}
-                </motion.section>
-              )}
+              </div>
+              </ResultDetails>
 
               {session.remediation_history &&
                 session
                   .remediation_history
                   .length >
                   0 && (
+                  <ResultDetails label={`Past actions (${session.remediation_history.length})`} title="Past actions" icon={Clock3}>
                   <motion.section
                     variants={
                       cardFadeUp
@@ -846,41 +783,9 @@ export default function DiagnosticSessionDetailView({
                       )}
                     </div>
                   </motion.section>
+                  </ResultDetails>
                 )}
 
-              {!isNoActiveIssue(session.diagnosed_category) && (
-                <motion.section
-                  variants={
-                    cardFadeUp
-                  }
-                  initial="hidden"
-                  animate="visible"
-                  transition={
-                    cardTransition
-                  }
-                  className="border-t border-[var(--rigmd-border)] pt-5"
-                >
-                  <div className="space-y-3">
-                    <AutonomyRemediationPanel
-                      check={session}
-                      originalReadings={session.proof}
-                      onOpenMemoryCheck={onOpenMemoryCheck}
-                      readings={session.resolution_proof?.length ? session.resolution_proof : session.proof}
-                      followUpSummary={getFindingChanges(session.proof, session.resolution_proof)?.summary}
-                      followUpCheckedAt={session.resolution_checked_at}
-                      diagnosedCategory={
-                        session.diagnosed_category
-                      }
-                      onExecutionComplete={
-                        handleAutonomyExecutionComplete
-                      }
-                      sessionId={
-                        sessionId
-                      }
-                    />
-                  </div>
-                </motion.section>
-              )}
             </>
           ) : (
             <div className="rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-6 py-16 text-center">

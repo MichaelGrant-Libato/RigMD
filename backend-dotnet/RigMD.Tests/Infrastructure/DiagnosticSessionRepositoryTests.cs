@@ -9,6 +9,30 @@ namespace RigMD.Tests.Infrastructure;
 
 public class DiagnosticSessionRepositoryTests
 {
+    [Fact]
+    public async Task DeviceIdentityIsSavedSeparatelyForNewChecksAndLegacyFollowups()
+    {
+        await using var db = GetMemoryContext();
+        var repo = CreateRepository(db);
+        var id = await repo.SaveAutomaticDiagnosisAsync(new HardwareProfileDto(), "component", ["memory"],
+            null, Guid.Empty, "local", "High Memory Pressure", "Troubleshoot", "Partial", "Saved warning.",
+            TestClientId, proof: [new() { MetricId = "memory_usage", Label = "Memory", Value = "90%", Status = "high", EvidenceKind = "measurement" }]);
+        var identity = await db.SessionAnswers.SingleAsync(a => a.DiagnosticSessionId == id && a.QuestionKey == "device_id");
+        Assert.Equal(identity.AnswerValue, (await repo.GetSessionAsync(id))!.DeviceId);
+        Assert.Matches("^([A-F0-9]{64})?$", identity.AnswerValue);
+        db.SessionAnswers.Remove(identity);
+        await db.SaveChangesAsync();
+        await repo.UpdateResolutionAsync(id, "still_active", DateTimeOffset.UtcNow.ToString("o"), "Fresh reading.",
+            [new { metric_id = "memory_usage", label = "Memory", value = "91%", status = "high", evidence_kind = "measurement" }]);
+        db.ChangeTracker.Clear();
+        var loaded = (await repo.GetSessionAsync(id))!;
+        var followupIdentity = await db.SessionAnswers.SingleAsync(a => a.DiagnosticSessionId == id && a.QuestionKey == "resolution_device_id");
+        Assert.Equal("", loaded.DeviceId);
+        Assert.Equal(followupIdentity.AnswerValue, loaded.ResolutionDeviceId);
+        Assert.Equal(loaded.ResolutionDeviceId, Assert.Single(await repo.GetSessionsAsync()).ResolutionDeviceId);
+        Assert.Equal("90%", Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(loaded.Proof)).GetProperty("value").GetString());
+    }
+
     private const string TestClientId =
         "test-client-123";
 
@@ -238,7 +262,7 @@ public class DiagnosticSessionRepositoryTests
             savedSession.Output.DiagnosedCategory);
 
         Assert.Equal(
-            9,
+            10,
             savedSession.Answers.Count);
 
         Assert.Equal(

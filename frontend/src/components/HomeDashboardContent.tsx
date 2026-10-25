@@ -9,6 +9,7 @@ import RecentDiagnosticsTimeline from './dashboard/RecentDiagnosticsTimeline';
 import AlertsSummaryCard from './dashboard/AlertsSummaryCard';
 import { REVIEW_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
 import { storageReviewStatus } from '../lib/storageTelemetry';
+import { getHomeDashboardMessage } from '../lib/homeDashboardMessage';
 
 interface Props {
   stats: HardwareStats | null;
@@ -64,7 +65,7 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
     const pct = stats.ram.usage_percent;
     pills.push({
       label: 'Memory',
-      variant: pct === null ? 'neutral' : pct >= REVIEW_THRESHOLDS.memory ? 'warning' : 'ok',
+      variant: typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100 ? 'neutral' : pct >= REVIEW_THRESHOLDS.memory ? 'warning' : 'ok',
     });
   }
   if (stats?.disk) {
@@ -74,6 +75,8 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
       variant: state === 'high' ? 'warning' : state === 'normal' ? 'ok' : 'neutral',
     });
   }
+  const cpu = stats?.cpu.usage_percent;
+  if (typeof cpu === 'number' && Number.isFinite(cpu) && cpu >= REVIEW_THRESHOLDS.cpu && cpu <= 100) pills.push({ label: 'Processor', variant: 'warning' });
   if (stats?.network) {
     const state = networkReviewStatus(stats.network);
     pills.push({ label: 'Network', variant: state === 'high' ? 'warning' : state === 'normal' ? 'ok' : 'neutral' });
@@ -85,47 +88,11 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
   return pills;
 }
 
-/* ─── Hero section headline logic (same as original) ─── */
-function getHeroContent(dashboard: DashboardSummary, hasWarnings: boolean) {
-  const latest = dashboard.last_saved_session ?? dashboard.last_diagnosis ?? dashboard.current_action_status;
-  const unavailable = Boolean(dashboard.database_warning);
-  const action = latest?.action_category?.toLowerCase();
-
-  const title = unavailable
-    ? 'Check history is unavailable'
-    : hasWarnings
-      ? 'You have warning signs to review'
-      : latest
-        ? action === 'escalate' ? 'Your latest check recommends professional inspection'
-          : action === 'maintain' || action === 'troubleshoot' ? 'Your latest check has steps to follow'
-            : 'Your latest check is ready to review'
-        : 'Ready for your first device check';
-
-  const subtitle = unavailable
-    ? 'Saved results could not be loaded. Try again shortly.'
-    : hasWarnings
-      ? 'Review the recorded warnings before continuing with troubleshooting.'
-      : latest
-        ? getRecommendedStep(action)
-        : 'Answer a few questions to investigate something that feels slow, noisy, or unusual.';
-
-  return { title, subtitle, latest, unavailable };
-}
-
-function getRecommendedStep(action: string | undefined) {
-  switch (action) {
-    case 'monitor': return 'Nothing needs to change right now. Run another check if the problem returns.';
-    case 'maintain': return 'Review the latest result and follow the recommended care steps.';
-    case 'troubleshoot': return 'Review the latest result before trying any safe fix.';
-    case 'escalate': return 'Consider asking a technician to inspect the device.';
-    default: return 'Open your latest result to review the available recommendations.';
-  }
-}
-
 export default function HomeDashboardContent({ stats, dashboard, setActivePage, onViewSession }: Props) {
   const hasWarnings = dashboard.warning_signs_active_count > 0;
   const pills = getStatusPills(stats, dashboard);
-  const { title, subtitle, latest } = getHeroContent(dashboard, hasWarnings);
+  const currentWarnings = pills.filter(pill => pill.variant === 'warning' && !pill.label.includes('Alert')).map(pill => pill.label);
+  const { title, subtitle, latest, primary } = getHomeDashboardMessage(dashboard, currentWarnings);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
@@ -136,7 +103,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
         className={`rigmd-card-surface relative overflow-hidden rounded-xl border p-6 md:p-8
-          ${hasWarnings ? 'border-amber-400/30' : ''}`}
+          ${hasWarnings || currentWarnings.length ? 'border-amber-400/30' : ''}`}
       >
         {/* Subtle gradient glow accent on left */}
         <div className="pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-xl bg-gradient-to-b from-cyan-400/60 via-cyan-400/20 to-transparent" />
@@ -162,14 +129,14 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
               <button
                 type="button"
                 onClick={() =>
-                  hasWarnings ? setActivePage('warningSigns')
-                    : latest ? onViewSession(latest.session_id)
+                  primary === 'alerts' ? setActivePage('warningSigns')
+                    : primary === 'latest' && latest ? onViewSession(latest.session_id)
                       : setActivePage('newDiagnosis')
                 }
                 className="inline-flex items-center gap-2 rounded-lg bg-[#1fb6c9] px-5 py-2.5 text-sm font-bold text-[#041014] shadow-lg shadow-cyan-400/10 transition hover:bg-[#38c7d7] hover:shadow-cyan-400/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
               >
-                {hasWarnings ? <AlertTriangle size={16} /> : latest ? <History size={16} /> : <Stethoscope size={16} />}
-                {hasWarnings ? 'Review Alerts' : latest ? 'View Latest Result' : 'Check My Device'}
+                {primary === 'alerts' ? <AlertTriangle size={16} /> : primary === 'latest' ? <History size={16} /> : <Stethoscope size={16} />}
+                {primary === 'alerts' ? 'Review Alerts' : primary === 'latest' ? 'View Latest Result' : primary === 'current' ? 'Check current readings' : 'Check My Device'}
               </button>
               {(latest || hasWarnings) && (
                 <button

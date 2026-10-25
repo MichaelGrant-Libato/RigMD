@@ -112,6 +112,12 @@ button {
   backdrop-filter: blur(16px);
 }
 
+.rigmd-app-shell {
+  height: 100dvh;
+  min-height: 0;
+  background: var(--rigmd-main-surface);
+}
+
 .rigmd-main-surface {
   background:
     linear-gradient(180deg, rgba(125, 162, 199, 0.025), transparent 18rem),
