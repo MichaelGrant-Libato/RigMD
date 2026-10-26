@@ -1,6 +1,9 @@
 import { getCheckOverview } from '../lib/checkPresentation';
 import { getSessionCheckLabel } from '../lib/pastChecksFormatting';
-import { buildReportText, formatDate, friendlyAction, getSessionDate } from '../lib/reportFormatting';
+import { buildReportDocument, buildReportFileName, reportDocumentText, formatDate, friendlyAction, getSessionDate } from '../lib/reportFormatting';
+import { getDesktopPdfBridge, saveDesktopReportPdf } from '../lib/desktopReportPdf';
+import { copyReport } from '../lib/reportExports';
+import ReportDocument from '../components/ReportDocument';
 import { loadReportData } from '../lib/reportData';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
@@ -26,8 +29,8 @@ interface ShareReportViewProps {
   onStartNewDiagnosis?: () => void;
 }
 
-function downloadTextFile(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+function downloadReportFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -35,7 +38,7 @@ function downloadTextFile(filename: string, text: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export default function ShareReportView({
@@ -45,11 +48,14 @@ export default function ShareReportView({
 }: ShareReportViewProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+  const [includeHistory, setIncludeHistory] = useState(false);
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
+  const pdfRequest = useRef<AbortController | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const liveSnapshot = useRef({ stats, hardwareUpdatedAt });
-  liveSnapshot.current = { stats, hardwareUpdatedAt };
+  useEffect(() => { liveSnapshot.current = { stats, hardwareUpdatedAt }; }, [stats, hardwareUpdatedAt]);
   const request = useRef<AbortController | null>(null);
   const [snapshot, setSnapshot] = useState<{
     stats: HardwareStats | null; dashboard: DashboardSummary; hardwareUpdatedAt: Date | null; generatedAt: Date;
@@ -85,7 +91,7 @@ export default function ShareReportView({
 
   useEffect(() => {
     void refreshReport();
-    return () => request.current?.abort();
+    return () => { request.current?.abort(); pdfRequest.current?.abort(); };
   }, [refreshReport]);
 
   const activeSession = useMemo(
@@ -100,50 +106,78 @@ export default function ShareReportView({
     !sessions.length ||
     selectedSessionId === sessions[0]?.session_id;
 
-  const reportText = useMemo(
+  const report = useMemo(
     () =>
-      snapshot ? buildReportText({
+      snapshot ? buildReportDocument({
         ...snapshot,
         sessions,
         selectedSession: activeSession,
         historyUnavailable: false,
-      }) : '',
-    [activeSession, snapshot, sessions]
+        includeHistory,
+      }) : null,
+    [activeSession, snapshot, sessions, includeHistory]
   );
+  const reportText = useMemo(() => report ? reportDocumentText(report) : '', [report]);
 
-  const reportFileName = `RigMD-Device-Report-${(snapshot?.generatedAt ?? new Date()).toISOString().slice(0, 10)}.txt`;
+  const reportFileName = snapshot ? buildReportFileName(activeSession?.session_code, snapshot.generatedAt) : '';
 
   const handleCopy = async () => {
-    if (!canExport) return;
+    if (!canExport || !report || pdfRequest.current) return;
     try {
-      await navigator.clipboard.writeText(reportText);
-      setMessage({ type: 'success', text: 'Report copied. You can paste it into chat, email, or a support ticket.' });
+      const format = await copyReport(report);
+      setMessage({ type: 'success', text: format === 'formatted'
+        ? 'Report copied with formatting. Apps that accept only text will receive a readable text version.'
+        : 'Report copied as plain text. Use Download formatted report to keep the visual layout.' });
     } catch {
       setMessage({ type: 'error', text: 'Copy did not work on this device. Download the report instead.' });
     }
   };
 
-  const handleDownload = () => {
-    if (!canExport) return;
-    downloadTextFile(reportFileName, reportText);
-    setMessage({ type: 'success', text: 'Text file download requested.' });
+  const handleDownloadText = () => {
+    if (!canExport || !report || pdfRequest.current) return;
+    downloadReportFile(`${reportFileName}.txt`, reportText, 'text/plain;charset=utf-8');
+    setMessage({ type: 'success', text: 'Plain-text report download requested.' });
+  };
+
+  const handleSavePdf = async () => {
+    if (!canExport || !report || pdfRequest.current) return;
+    const bridge = getDesktopPdfBridge();
+    if (!bridge) {
+      setMessage({ type: 'success', text: 'In the print dialog, choose Save as PDF to save your formatted report.' });
+      window.print();
+      return;
+    }
+    const controller = new AbortController();
+    pdfRequest.current = controller;
+    setIsSavingPdf(true);
+    setMessage(null);
+    try {
+      const result = await saveDesktopReportPdf(`${reportFileName}.pdf`, bridge, controller.signal);
+      if (!controller.signal.aborted) setMessage({ type: 'success', text: result === 'saved'
+        ? 'PDF report saved to the location you selected.' : 'PDF save canceled. No report was saved.' });
+    } catch {
+      if (!controller.signal.aborted) setMessage({ type: 'error', text: 'The PDF could not be saved. Try again, or use Print Report and choose Save as PDF.' });
+    } finally {
+      if (pdfRequest.current === controller) pdfRequest.current = null;
+      if (!controller.signal.aborted) setIsSavingPdf(false);
+    }
   };
 
   const handleEmailDraft = () => {
-    if (!canExport) return;
+    if (!canExport || pdfRequest.current) return;
     const subject = encodeURIComponent('RigMD Device Check Report');
     const body = encodeURIComponent(reportText);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
   const handlePrint = () => {
-    if (!canExport) return;
+    if (!canExport || pdfRequest.current) return;
     window.print();
   };
 
   return (
     <>
-      {canExport && createPortal(<article className="rigmd-print-report" aria-label="Device check report"><pre>{reportText}</pre></article>, document.body)}
+      {canExport && report && createPortal(<div className="rigmd-print-report"><ReportDocument report={report} /></div>, document.body)}
       <TopHeader
         title="Share Report"
         subtitle="Select a saved check, review your results, then print or share them"
@@ -198,7 +232,7 @@ export default function ShareReportView({
                       id="report-session-selector"
                       value={selectedSessionId || sessions[0]?.session_id || ''}
                       onChange={(e) => { setSelectedSessionId(e.target.value); captureSnapshot(); }}
-                      disabled={!canExport}
+                      disabled={!canExport || isSavingPdf}
                       className="w-full rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] px-3.5 py-2.5 text-xs font-semibold text-white transition focus:border-cyan-400 focus:outline-none"
                     >
                       {sessions.map((s, idx) => {
@@ -251,7 +285,7 @@ export default function ShareReportView({
                 <button
                   type="button"
                   onClick={refreshReport}
-                  disabled={isLoading}
+                  disabled={isLoading || isSavingPdf}
                   className="inline-flex items-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-70"
                 >
                   <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
@@ -259,9 +293,20 @@ export default function ShareReportView({
                 </button>
               </div>
 
-              <pre tabIndex={0} aria-label="Report preview" className="font-sans max-h-[560px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] p-5 text-sm leading-relaxed text-slate-200">
-                {isLoading ? 'Loading report...' : loadError ? 'Report unavailable. Refresh to try again.' : reportText}
-              </pre>
+              <div className="border-b border-[var(--rigmd-border)] px-5 py-4">
+                <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-200">
+                  <input type="checkbox" checked={includeHistory} disabled={!canExport || isSavingPdf} className="mt-1"
+                    onChange={event => { setIncludeHistory(event.target.checked); captureSnapshot(); }} />
+                  <span>Include saved history summary and up to 8 recent checks
+                    <span className="mt-1 block text-xs text-slate-400">Off by default to keep the report focused on your selected check. Applies to every share option.</span>
+                  </span>
+                </label>
+              </div>
+              <div tabIndex={0} role="region" aria-label="Report preview" className="max-h-[700px] overflow-auto">
+                {isLoading ? <p className="p-5 text-slate-200">Loading report...</p>
+                  : loadError ? <p className="p-5 text-slate-200">Report unavailable. Refresh to try again.</p>
+                    : report && <ReportDocument report={report} />}
+              </div>
             </motion.section>
           </div>
 
@@ -279,7 +324,7 @@ export default function ShareReportView({
               <div className="mt-5 space-y-3">
                 <motion.button
                   type="button"
-                  disabled={!canExport}
+                  disabled={!canExport || isSavingPdf}
                   onClick={handleCopy}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-bold text-[#041014] transition hover:bg-cyan-300"
@@ -290,18 +335,25 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
-                  disabled={!canExport}
-                  onClick={handleDownload}
+                  disabled={!canExport || isSavingPdf}
+                  onClick={handleSavePdf}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-300 transition hover:bg-cyan-400/15"
                 >
                   <Download size={16} />
-                  Download Text File
+                  {isSavingPdf ? 'Saving PDF...' : 'Download PDF report'}
                 </motion.button>
+                <button type="button" disabled={!canExport || isSavingPdf} onClick={handleDownloadText}
+                  className="w-full rounded-lg border border-[var(--rigmd-border)] px-4 py-2 text-sm font-semibold text-slate-200 disabled:opacity-50">
+                  Download plain text (.txt)
+                </button>
+                <p className="text-xs leading-relaxed text-slate-400">{getDesktopPdfBridge()
+                  ? 'Choose where to save your formatted PDF report. Nothing is sent automatically.'
+                  : 'Opens the print dialog. Choose Save as PDF to save your formatted report.'}</p>
 
                 <motion.button
                   type="button"
-                  disabled={!canExport}
+                  disabled={!canExport || isSavingPdf}
                   onClick={handlePrint}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"
@@ -312,7 +364,7 @@ export default function ShareReportView({
 
                 <motion.button
                   type="button"
-                  disabled={!canExport}
+                  disabled={!canExport || isSavingPdf}
                   onClick={handleEmailDraft}
                   whileTap={buttonTap}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-cyan-400/35 hover:text-cyan-300"

@@ -19,6 +19,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\RigMD.Desktop\DesktopZoomPolicy.cs" Link="Desktop\DesktopZoomPolicy.cs" />
+    <Compile Include="..\RigMD.Desktop\DesktopReportExportRequest.cs" Link="Desktop\DesktopReportExportRequest.cs" />
   </ItemGroup>
 
   <ItemGroup>
