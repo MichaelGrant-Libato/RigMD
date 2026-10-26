@@ -63,7 +63,7 @@ export interface TrendPoint {
   segment: number | null;
 }
 
-function timestamp(value?: string | null) {
+export function parseSavedTimestamp(value?: string | null) {
   // Undated and timezone-ambiguous legacy readings cannot establish a time series.
   if (!value) return null;
   const parts = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/i.exec(value);
@@ -76,7 +76,7 @@ function timestamp(value?: string | null) {
   return Number.isFinite(at) ? at : null;
 }
 
-function scopeKey(session: SessionSummary) {
+export function getSavedCheckScope(session: SessionSummary) {
   const mode = session.diagnosis_mode;
   if (mode === 'full') return 'full';
   if (mode === 'scenario' && /^[a-z][a-z0-9-]*$/.test(session.scenario_id ?? '')) return `scenario:${session.scenario_id}`;
@@ -93,8 +93,8 @@ export function buildTrendGroups(sessions: SessionSummary[]) {
   for (const session of sessions) counts.set(session.session_id, (counts.get(session.session_id) ?? 0) + 1);
   let excludedSessions = 0;
   for (const session of sessions) {
-    const scope = scopeKey(session);
-    const created = timestamp(session.created_at);
+    const scope = getSavedCheckScope(session);
+    const created = parseSavedTimestamp(session.created_at);
     if (!session.session_id || counts.get(session.session_id) !== 1 || !scope || created === null) {
       excludedSessions++;
       continue;
@@ -114,7 +114,7 @@ export function buildTrendGroups(sessions: SessionSummary[]) {
       added = true;
     };
     add(session.device_id, session.proof, created, 'Original check');
-    const checked = timestamp(session.resolution_checked_at);
+    const checked = parseSavedTimestamp(session.resolution_checked_at);
     if (checked !== null && checked > created) add(session.resolution_device_id, session.resolution_proof, checked, 'Latest follow-up');
     if (!added) excludedSessions++;
   }
@@ -125,7 +125,7 @@ export function buildTrendPoints(group: TrendGroup, metric: TrendMetric): TrendP
   const points = group.snapshots.map<TrendPoint>(snapshot => {
     const matches = snapshot.proof.filter(reading => reading.metric_id === metric);
     const reading = matches.length === 1 ? matches[0] : null;
-    const captured = timestamp(reading?.captured_at);
+    const captured = parseSavedTimestamp(reading?.captured_at);
     const view = reading ? getFindingVisual(reading) : null;
     const format = metric === 'cpu_usage' ? /^\d+(?:\.\d+)?%$/ : metric === 'storage_usage' ? /^\d+(?:\.\d+)?% used$/
       : /^\d+(?:\.\d+)?%(?: \(\d+(?:\.\d+)? \/ \d+(?:\.\d+)? GB\))?$/;
@@ -221,11 +221,11 @@ export function buildTrendObservations(group: TrendGroup, metric: string): Trend
     const reading = matches.length === 1 ? matches[0] : null;
     const view = reading ? getFindingDetails(reading) : null;
     const unavailable = reading ? getFindingVisual(reading).kind === 'unavailable' : true;
-    const captured = timestamp(reading?.captured_at);
+    const captured = parseSavedTimestamp(reading?.captured_at);
     const timeVerified = captured !== null && captured <= snapshot.at + 5000 && captured >= snapshot.at - 600000 &&
       (snapshot.originalAt === undefined || captured > snapshot.originalAt);
     const event = Boolean(reading && isEventReading(reading));
-    const start = timestamp(reading?.window_start), end = timestamp(reading?.window_end);
+    const start = parseSavedTimestamp(reading?.window_start), end = parseSavedTimestamp(reading?.window_end);
     const window = event && start !== null && end !== null && start <= end && timeVerified && end <= captured + 5000
       ? { start, end, sinceOriginal: reading?.window_kind === 'since_diagnosis' } : null;
     const status = matches.length > 1 ? 'Conflicting saved readings' : !reading ? 'Not recorded'

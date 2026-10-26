@@ -3,10 +3,11 @@ import { readingTone } from './diagnosticReadingVisuals.ts';
 import { canCheckCurrentStatus, crashMetric, getCheckOverview, getCheckStatus, hasDetectedWarning, type CheckPresentationInput } from './checkPresentation.ts';
 import { getSessionCheckLabel } from './pastChecksFormatting.ts';
 import { getFindingChanges } from './findingChanges.ts';
+import { getFollowUpReadings } from './followUpReadings.ts';
 
 export function getCheckNextSteps(check: CheckPresentationInput) {
   const hasFollowUp = Boolean(check.resolution_proof?.length);
-  const readings = expandDiagnosticReadings(hasFollowUp ? check.resolution_proof! : check.proof ?? []);
+  const readings = hasFollowUp ? getFollowUpReadings(check.proof, check.resolution_proof) : expandDiagnosticReadings(check.proof ?? []);
   const attention = readings.filter(row => readingTone(getReadingPresentation(row).status) === 'attention');
   const unavailable = readings.filter(row => readingTone(getReadingPresentation(row).status) === 'unknown');
   const status = getCheckStatus(check);

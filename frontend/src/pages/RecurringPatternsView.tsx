@@ -18,6 +18,9 @@ import {
 import TopHeader from '../components/TopHeader';
 import FilterDropdown from '../components/FilterDropdown';
 import DeleteConfirmationDialog from '../components/DeleteConfirmationDialog';
+import ProblemFollowUpTimeline, { type ProblemTimelineSelection } from '../components/ProblemFollowUpTimeline';
+import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
+import { getRelatedWarningTiming, parseProblemSessions } from '../lib/problemTimeline';
 import { accordionReveal, buttonTap, cardFadeUp, cardTransition, hoverLift, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiDelete, apiGet } from '../lib/api';
 import type { PageKey, SessionSummary } from '../types/rigmd';
@@ -385,6 +388,12 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
 function PatternCard({
   pattern,
   sessionTimestamps,
+  sessions,
+  timelineError,
+  asOf,
+  timelineSelection,
+  onTimelineSelectionChange,
+  onOpenSession,
   expanded,
   onToggle,
   onViewHistory,
@@ -393,6 +402,12 @@ function PatternCard({
 }: {
   pattern: RecurringPattern;
   sessionTimestamps: SessionTimestampMap;
+  sessions: SessionSummary[] | null;
+  timelineError: string | null;
+  asOf: number;
+  timelineSelection: ProblemTimelineSelection;
+  onTimelineSelectionChange: (selection: ProblemTimelineSelection) => void;
+  onOpenSession: (id: string) => void;
   expanded: boolean;
   onToggle: () => void;
   onViewHistory?: () => void;
@@ -401,6 +416,7 @@ function PatternCard({
 }) {
   const [visibleOccurrences, setVisibleOccurrences] = useState(DEFAULT_VISIBLE_OCCURRENCES);
   const occurrences = pattern.occurrences ?? [];
+  const warningTiming = getRelatedWarningTiming(occurrences, sessionTimestamps);
   const incompletePattern = isIncompletePattern(pattern);
 
   useEffect(() => {
@@ -448,12 +464,11 @@ function PatternCard({
             </div>
 
             <p className="mt-1 text-sm text-slate-400">
-              {pattern.current_condition || 'Current condition not verified'}
+              Current condition is not established by repetition alone.
             </p>
             <p className="mt-2 text-xs font-semibold text-cyan-300">
               {plainDiagnosticText(pattern.risk_reason || 'Open the related checks to review the evidence.')}
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-200">{plainDiagnosticText(getRecommendedNextStep(pattern))}</p>
           </div>
 
           <div className="flex justify-end">
@@ -478,13 +493,15 @@ function PatternCard({
         <div className="px-5 py-5">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4">
-              <section className="border-b border-[var(--rigmd-border)] pb-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                  What to do next
-                </p>
-                <p className="text-sm leading-relaxed text-white">{plainDiagnosticText(getRecommendedNextStep(pattern))}</p>
+              <ProblemFollowUpTimeline problem={pattern} sessions={sessions} error={timelineError} asOf={asOf}
+                selection={timelineSelection} onSelectionChange={onTimelineSelectionChange} onOpenSession={onOpenSession} />
+
+              <details className="border-b border-[var(--rigmd-border)] pb-4">
+                <summary className="text-sm font-semibold text-slate-200">Grouped advice</summary>
+                <p className="mt-3 text-xs text-slate-400">This grouped advice may not apply to the selected computer or check scope. It is not approval to run an action.</p>
+                <p className="mt-3 text-sm leading-relaxed text-white">{plainDiagnosticText(getRecommendedNextStep(pattern))}</p>
                 <p className="mt-3 text-sm leading-relaxed text-slate-400">{plainDiagnosticText(pattern.evidence_summary)}</p>
-              </section>
+              </details>
 
               <section className="border-b border-[var(--rigmd-border)] pb-4">
                 <div className="mb-3 flex items-center justify-between">
@@ -509,6 +526,9 @@ function PatternCard({
                             <>
                               <p className="text-sm font-bold text-white">{timestamp.date}</p>
                               <p className="text-xs text-slate-400">{timestamp.time}</p>
+                              <button type="button" onClick={() => onOpenSession(occurrence.id)}
+                                aria-label={`Open related saved check ${sessions?.find(session => session.session_id === occurrence.id)?.session_code || occurrence.display_date}`}
+                                className="mt-2 inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-cyan-300"><Eye size={13} />Open saved check</button>
                             </>
                           );
                         })()}
@@ -580,12 +600,13 @@ function PatternCard({
                   <p className="text-slate-300">{pattern.status}</p>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Repeated checks</span>
+                    <span className="text-slate-400">All related checks</span>
                     <span className="font-bold text-white">{pattern.occurrence_count}</span>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-slate-400">Latest warning</span>
-                    <span className="text-white">{pattern.latest_detected}</span>
+                    <span className="text-slate-400">{warningTiming.complete ? 'Latest related warning' : 'Latest dated related warning'}</span>
+                    <span data-testid="latest-related-warning-date" className="text-white">{warningTiming.at === null ? 'Date not verified'
+                      : formatLocalTimestamp(new Date(warningTiming.at).toISOString(), 'Date not verified', '').date}</span>
                   </div>
                 </div>
               </section>
@@ -696,7 +717,11 @@ export default function RecurringPatternsView({
   setActivePage?: (page: PageKey) => void;
 }) {
   const [data, setData] = useState<RecurringResponse>(emptyRecurring);
-  const [sessionTimestamps, setSessionTimestamps] = useState<SessionTimestampMap>({});
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState(Date.now);
+  const [timelineSelections, setTimelineSelections] = useState<Record<string, ProblemTimelineSelection>>({});
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [expandedPatternId, setExpandedPatternId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -707,44 +732,55 @@ export default function RecurringPatternsView({
     useState<RecurringPattern | null>(null);
 
   const isFetchingPatternsRef = useRef(false);
+  const patternRequestRef = useRef<AbortController | null>(null);
+  const sessionTimestamps = useMemo(() => (sessions ?? []).reduce<SessionTimestampMap>((map, session) => {
+    if (session.session_id && session.created_at) map[session.session_id] = session.created_at;
+    return map;
+  }, {}), [sessions]);
 
   const fetchPatterns = useCallback(async () => {
-    if (isFetchingPatternsRef.current) {
+    if (isFetchingPatternsRef.current && !patternRequestRef.current?.signal.aborted) {
       return;
     }
 
     isFetchingPatternsRef.current = true;
+    const controller = new AbortController();
+    patternRequestRef.current = controller;
     setIsLoading(true);
 
     try {
       const [patternResult, sessionResult] = await Promise.allSettled([
-        apiGet<RecurringResponse>('/api/recurring/patterns'),
-        apiGet<SessionSummary[] | { sessions?: SessionSummary[] }>('/api/diagnosis/sessions'),
+        apiGet<RecurringResponse>('/api/recurring/patterns', { signal: controller.signal }),
+        apiGet<unknown>('/api/diagnosis/sessions', { signal: controller.signal }),
       ]);
+
+      if (controller.signal.aborted) return;
 
       if (patternResult.status === 'rejected') {
         throw patternResult.reason;
       }
 
       setData(patternResult.value.data);
-
-      if (sessionResult.status === 'fulfilled') {
-        const payload = sessionResult.value.data;
-        const sessions = Array.isArray(payload) ? payload : payload.sessions ?? [];
-        setSessionTimestamps(sessions.reduce<SessionTimestampMap>((map, session) => {
-          if (session.session_id && session.created_at) {
-            map[session.session_id] = session.created_at;
-          }
-          return map;
-        }, {}));
+      setAsOf(Date.now());
+      try {
+        if (sessionResult.status === 'rejected') throw sessionResult.reason;
+        setSessions(parseProblemSessions(sessionResult.value.data));
+        setTimelineError(null);
+      } catch {
+        setSessions(null);
+        setTimelineError('Saved checks unavailable');
       }
       setLoadError(null);
     } catch {
+      if (controller.signal.aborted) return;
       setData(emptyRecurring);
+      setSessions(null);
       setLoadError('Repeated problem data is not available right now. Try again after RigMD finishes syncing.');
     } finally {
-      isFetchingPatternsRef.current = false;
-      setIsLoading(false);
+      if (patternRequestRef.current === controller) {
+        isFetchingPatternsRef.current = false;
+        if (!controller.signal.aborted) setIsLoading(false);
+      }
     }
   }, []);
 
@@ -758,7 +794,10 @@ export default function RecurringPatternsView({
       fetchPatterns();
     }, 15000);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      patternRequestRef.current?.abort();
+    };
   }, [fetchPatterns]);
 
   const visiblePatterns = useMemo(
@@ -839,6 +878,9 @@ export default function RecurringPatternsView({
   const recurringTone = getSummaryCardTone(visibleMetrics.recurring_issues, 'cyan');
   const occurrencesTone = getSummaryCardTone(visibleMetrics.total_occurrences, 'cyan');
 
+  if (selectedSessionId) return <DiagnosticSessionDetailView sessionId={selectedSessionId}
+    onOpenSession={setSelectedSessionId} onBack={() => setSelectedSessionId(null)} backLabel="Back to problem timeline" />;
+
   return (
     <>
       <TopHeader
@@ -883,7 +925,9 @@ export default function RecurringPatternsView({
             <div className="mb-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex flex-1 items-center gap-3">
-                  <RefreshCw size={15} className={isLoading ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
+                  <button type="button" onClick={fetchPatterns} disabled={isLoading} title="Refresh repeated problems" aria-label="Refresh repeated problems"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--rigmd-border)] text-cyan-300 disabled:opacity-50">
+                    <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} /></button>
                   <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-white">Repeated check patterns</h3>
                   <div className="h-px flex-1 bg-[var(--rigmd-border)]" />
                 </div>
@@ -967,6 +1011,12 @@ export default function RecurringPatternsView({
                     key={pattern.id}
                     pattern={pattern}
                     sessionTimestamps={sessionTimestamps}
+                    sessions={sessions}
+                    timelineError={timelineError}
+                    asOf={asOf}
+                    timelineSelection={timelineSelections[pattern.id] ?? { key: '', limit: 10 }}
+                    onTimelineSelectionChange={selection => setTimelineSelections(previous => ({ ...previous, [pattern.id]: selection }))}
+                    onOpenSession={setSelectedSessionId}
                     expanded={expandedPatternId === pattern.id}
                     onViewHistory={() => setActivePage?.('diagnosticHistory')}
                     onDeletePattern={() => setPatternPendingDelete(pattern)}

@@ -1,5 +1,6 @@
 import { getReadingPresentation, type DiagnosticReading } from './diagnosticLanguage.ts';
 import { readingPercent, readingTone } from './diagnosticReadingVisuals.ts';
+import { MISSING_FOLLOW_UP } from './followUpReadings.ts';
 
 const unassessedChecks: Record<string, { prefix: string; explanation: string }> = {
   battery_drain: { prefix: 'Charge is not capacity or drain rate.', explanation: 'This scan reads battery charge, but does not measure battery wear or how quickly it drains over time.' },
@@ -13,15 +14,19 @@ const unassessedChecks: Record<string, { prefix: string; explanation: string }> 
 
 export function getFindingDetails(reading: DiagnosticReading) {
   const view = getReadingPresentation(reading);
-  const tone = readingTone(view.status);
+  const missingFollowUp = reading.evidence_kind === MISSING_FOLLOW_UP;
+  const tone = missingFollowUp ? 'unknown' : readingTone(view.status);
   const capability = unassessedChecks[reading.metric_id ?? ''];
   const notAssessed = tone === 'unknown' && Boolean(capability && reading.meaning?.startsWith(capability.prefix));
-  const statusLabel = { attention: 'Needs attention', unknown: notAssessed ? 'Not assessed' : 'Reading unavailable', normal: 'No warning in this reading', info: 'Information only' }[tone];
+  const statusLabel = missingFollowUp ? 'Not recorded in follow-up' : { attention: 'Needs attention', unknown: notAssessed ? 'Not assessed' : 'Reading unavailable', normal: 'No warning in this reading', info: 'Information only' }[tone];
   const percent = tone === 'unknown' ? null : readingPercent(reading);
   const valueSummary = tone === 'unknown' ? statusLabel : percent === null ? (view.value.length > 80 ? statusLabel : view.value) : `${percent}%`;
   let explanation = view.meaning || 'This is a saved observation from the check, not a diagnosis of the cause.';
   let nextStep = 'Review the recorded evidence before making changes. Check again if the problem continues.';
-  if (tone === 'unknown') {
+  if (missingFollowUp) {
+    explanation = 'No reading was saved for this item in the follow-up. The original reading does not establish its current condition.';
+    nextStep = 'Take a new relevant reading before deciding whether the earlier warning is still present. Missing evidence does not justify a repair.';
+  } else if (tone === 'unknown') {
     explanation = notAssessed ? `${capability.explanation} This does not mean the part has failed.` : 'RigMD could not obtain a verified reading. This does not tell us whether this part is working normally.';
     nextStep = 'If you notice a problem with this part, use the relevant Windows or manufacturer check. Another scan may not provide an unsupported reading.';
   } else if (reading.metric_id === 'memory_usage' || reading.metric_id === 'memory_app_warning') {
@@ -50,9 +55,11 @@ export function getFindingDetails(reading: DiagnosticReading) {
 }
 
 export function getCoverageMessage(readings: DiagnosticReading[]) {
-  const missing = readings.map(getFindingDetails).filter(row => row.tone === 'unknown');
+  const omitted = readings.filter(row => row.evidence_kind === MISSING_FOLLOW_UP);
+  const missing = readings.filter(row => row.evidence_kind !== MISSING_FOLLOW_UP).map(getFindingDetails).filter(row => row.tone === 'unknown');
   const unassessed = missing.filter(row => row.notAssessed).length;
   const unavailable = missing.length - unassessed;
   return [unassessed ? `${unassessed} check${unassessed === 1 ? '' : 's'} not assessed by this scan.` : '',
-    unavailable ? `${unavailable} reading${unavailable === 1 ? '' : 's'} unavailable.` : ''].filter(Boolean).join(' ');
+    unavailable ? `${unavailable} reading${unavailable === 1 ? '' : 's'} unavailable.` : '',
+    omitted.length ? `Not recorded in this follow-up: ${[...new Set(omitted.map(row => getFindingDetails(row).label))].join(', ')}.` : ''].filter(Boolean).join(' ');
 }
