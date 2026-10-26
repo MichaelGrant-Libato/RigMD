@@ -27,7 +27,8 @@ test('normal latest memory does not inherit an old warning or hide missing readi
 test('unavailable memory cannot count as normal or as a confirmed warning', () => {
   const view = getCheckNextSteps({ ...baseline, resolution_proof: [{ ...memory('Unavailable', 'normal'), evidence_kind: 'unavailable' }] });
   assert.equal(view.attention.length, 0);
-  assert.equal(view.unavailable.length, 1);
+  assert.equal(view.unavailable.length, 2);
+  assert.deepEqual(view.unavailable.map(row => row.metric_id).sort(), ['cpu_temperature', 'memory_usage']);
   assert.doesNotMatch(view.summary, /no longer detected|fixed/i);
 });
 test('crash summary keeps event checks separate from additional memory warnings', () => {

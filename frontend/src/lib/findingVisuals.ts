@@ -2,6 +2,7 @@ import type { DiagnosticReading } from './diagnosticLanguage.ts';
 import { readingPercent } from './diagnosticReadingVisuals.ts';
 import { getFindingDetails } from './findingDetails.ts';
 import { REVIEW_THRESHOLDS } from './reviewThresholds.ts';
+import { MISSING_FOLLOW_UP } from './followUpReadings.ts';
 
 const usageMetrics: Record<string, { used: string; remaining: string; reviewAt?: number; summary: string }> = {
   memory_usage: { used: 'In use', remaining: 'Available', reviewAt: REVIEW_THRESHOLDS.memory,
@@ -21,6 +22,8 @@ export function getFindingVisual(reading: DiagnosticReading) {
   const unavailable = view.tone === 'unknown' || reading.evidence_kind === 'unavailable';
   const base = { label: view.label, value: view.value, tone: view.tone, statusLabel: view.statusLabel,
     summary: view.explanation, nextStep: view.nextStep };
+  if (reading.evidence_kind === MISSING_FOLLOW_UP) return { ...base, kind: 'unavailable' as const, tone: 'unknown' as const,
+    title: 'No follow-up reading saved', temperature, caption: 'Original value was not reused' };
   if (unavailable) return { ...base, kind: 'unavailable' as const, tone: 'unknown' as const,
     statusLabel: view.notAssessed ? 'Not assessed' : 'Reading unavailable',
     title: view.notAssessed ? 'Not tested by this scan' : 'No verified reading', temperature,

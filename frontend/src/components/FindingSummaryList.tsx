@@ -6,6 +6,7 @@ import { expandDiagnosticReadings, type DiagnosticReading } from '../lib/diagnos
 import { getFindingDetails } from '../lib/findingDetails';
 import FindingVisual from './FindingVisual';
 import { getFindingVisual, getUsageComparison } from '../lib/findingVisuals';
+import { MISSING_FOLLOW_UP } from '../lib/followUpReadings';
 
 export default function FindingSummaryList({ readings, originalReadings, hasFollowUp, historical = false }: {
   readings: DiagnosticReading[]; originalReadings?: DiagnosticReading[]; hasFollowUp: boolean; historical?: boolean;
@@ -72,7 +73,8 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
       {selected && selectedView && visual && <div className="space-y-5">
         <div>
           <FindingVisual reading={selected} originalReadings={hasFollowUp ? originalReadings : undefined} historical={historical} />
-          <p className="mt-2 text-xs text-slate-400">{historical ? 'Historical reading' : hasFollowUp ? 'Latest saved reading' : 'Original saved reading'}{selected.captured_at && Number.isFinite(Date.parse(selected.captured_at)) ? ` - ${new Date(selected.captured_at).toLocaleString()}` : ' - time not recorded'}</p>
+          <p className="mt-2 text-xs text-slate-400">{selected.evidence_kind === MISSING_FOLLOW_UP ? 'No reading saved in this follow-up.'
+            : `${historical ? 'Historical reading' : hasFollowUp ? 'Latest saved reading' : 'Original saved reading'}${selected.captured_at && Number.isFinite(Date.parse(selected.captured_at)) ? ` - ${new Date(selected.captured_at).toLocaleString()}` : ' - time not recorded'}`}</p>
         </div>
         <section><h3 className="text-sm font-semibold text-cyan-200">What this means</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{visual.summary}</p></section>
         <section><h3 className="text-sm font-semibold text-cyan-200">What you can do</h3><p className="mt-2 text-sm leading-relaxed text-slate-200">{historical ? 'Use the newer result to decide whether any action is still needed.' : visual.nextStep}</p></section>
@@ -81,9 +83,9 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
           {before.map((row, index) => <p key={index} className="mt-2 text-sm text-slate-400">{getFindingDetails(row).value}{row.captured_at && Number.isFinite(Date.parse(row.captured_at)) ? ` - ${new Date(row.captured_at).toLocaleString()}` : ''}</p>)}
         </section>}
         <details className="border-t border-[var(--rigmd-border)] pt-3">
-          <summary className="cursor-pointer py-2 text-sm font-semibold text-slate-300">Recorded evidence</summary>
+          <summary className="cursor-pointer py-2 text-sm font-semibold text-slate-300">{selected.evidence_kind === MISSING_FOLLOW_UP ? 'Evidence availability' : 'Recorded evidence'}</summary>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">{selectedView.explanation}</p>
-          <div className="mt-2"><DiagnosticReadings readings={[selected]} title="Saved reading details" /></div>
+          {selected.evidence_kind !== MISSING_FOLLOW_UP && <div className="mt-2"><DiagnosticReadings readings={[selected]} title="Saved reading details" /></div>}
           {before.length > 0 && <DiagnosticReadings readings={before} title="Original reading details" />}
         </details>
       </div>}
