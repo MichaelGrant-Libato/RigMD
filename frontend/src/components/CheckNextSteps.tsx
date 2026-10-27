@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import FindingSummaryList from './FindingSummaryList';
-import { getCheckNextSteps, getResultHeading, getShortCheckSummary } from '../lib/checkNextSteps';
-import { getCheckStatus, getOriginalResultStatus, type CheckPresentationInput } from '../lib/checkPresentation';
+import { getActionEligibilityMessage, getCheckNextSteps, getRecommendedFindingSteps, getResultHeading, getShortCheckSummary } from '../lib/checkNextSteps';
+import { crashMetric, getCheckStatus, getOriginalResultStatus, type CheckPresentationInput } from '../lib/checkPresentation';
 import { getCoverageMessage } from '../lib/findingDetails';
 import { getSessionCheckLabel } from '../lib/pastChecksFormatting';
 import { getResultActionAccess } from '../lib/remediationEligibility';
@@ -21,6 +21,10 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
   const access = getResultActionAccess(check, eligibility);
   const historical = eligibility?.state === 'superseded';
   const title = historical ? scope : getResultHeading(check);
+  const recommendedSteps = getRecommendedFindingSteps(check);
+  const crash = Boolean(crashMetric(check));
+  const showGuidance = access.remediation || crash && Boolean(check.session_id) &&
+    (eligibility?.state === 'recheck_required' || eligibility?.state === 'not_indicated');
   return <div className="min-w-0 space-y-5">
     <section aria-label="Result and next steps" data-testid="result-next-steps" className="min-w-0 space-y-4 rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 sm:p-5">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -32,7 +36,7 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
         {access.recheck && <button type="button" onClick={onCheckAgain} disabled={checking}
           title="Take new readings for this check; no repair is run" aria-busy={checking}
           className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-4 py-2 text-sm font-bold text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50">
-          <RefreshCw size={16} className={checking ? 'animate-spin' : ''} />{checking ? 'Checking...' : access.recheck === 'current' ? 'Check current status' : 'Check again'}
+          <RefreshCw size={16} className={checking ? 'animate-spin' : ''} />{checking ? 'Checking...' : crash ? 'Check for new crash records' : access.recheck === 'current' ? 'Check current status' : 'Check again'}
         </button>}
       </div>
       <div className="border-t border-[var(--rigmd-border)] pt-4">
@@ -50,11 +54,32 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
         <button type="button" onClick={refresh} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-400/40 px-4 py-2 font-bold text-cyan-200"><RefreshCw size={16} />Try again</button>
       </div>}
       {eligibility && eligibility.state !== 'allowed' && <div data-testid="historical-action-notice" className="space-y-3 border-t border-[var(--rigmd-border)] pt-4 text-sm text-slate-200">
-        <p>{eligibility.message}</p>
+        <p>{getActionEligibilityMessage(check, eligibility)}</p>
         {eligibility.newer_session_id && onOpenSession && <button type="button" onClick={() => onOpenSession(eligibility.newer_session_id!)}
           className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-400/40 px-4 py-2 font-bold text-cyan-200"><ArrowRight size={16} />View newer result</button>}
       </div>}
-      {access.remediation && children}
+      {showGuidance && <section aria-label="Recommended next steps" data-testid="recommended-next-steps"
+        className="space-y-4 border-t border-[var(--rigmd-border)] pt-4">
+        <div>
+          <h3 className="text-lg font-bold text-cyan-200">Recommended next steps</h3>
+          <p className="mt-1 text-sm text-slate-400">{access.remediation
+            ? 'Start with the guidance for the findings below. Review any proposed change before approving it.'
+            : 'These steps are investigation guidance. Software actions remain unavailable from this result.'}</p>
+        </div>
+        {recommendedSteps.length > 0 && <ol className="space-y-3">
+          {recommendedSteps.map((step, index) => <li key={`${step.label}-${index}`} className="flex min-w-0 items-start gap-3">
+            <span aria-hidden="true" className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10 text-xs font-bold text-cyan-200">{index + 1}</span>
+            <div className="min-w-0">
+              <h4 className="font-semibold text-slate-100">{step.label}</h4>
+              <p className="mt-1 text-sm leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{step.instruction}</p>
+            </div>
+          </li>)}
+        </ol>}
+        {access.remediation && children}
+        {access.remediation && access.recheck && <p className="border-t border-[var(--rigmd-border)] pt-3 text-sm leading-relaxed text-slate-400">
+          <strong className="text-slate-200">Check again afterward.</strong> After making a change, use Check again to compare new readings with this result. Completing an action alone does not confirm a repair.
+        </p>}
+      </section>}
     </section>
     <FindingSummaryList readings={view.readings} originalReadings={check.proof} hasFollowUp={view.hasFollowUp} historical={historical} />
   </div>;

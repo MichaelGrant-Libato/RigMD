@@ -4,6 +4,8 @@ import { canCheckCurrentStatus, crashMetric, getCheckOverview, getCheckStatus, h
 import { getSessionCheckLabel } from './pastChecksFormatting.ts';
 import { getFindingChanges } from './findingChanges.ts';
 import { getFollowUpReadings } from './followUpReadings.ts';
+import { getFindingVisual } from './findingVisuals.ts';
+import { memoryActionDisposition } from './repairSupport.ts';
 
 export function getCheckNextSteps(check: CheckPresentationInput) {
   const hasFollowUp = Boolean(check.resolution_proof?.length);
@@ -33,6 +35,29 @@ export function getShortCheckSummary(check: CheckPresentationInput) {
   if (view.unavailable.length === view.readings.length) return 'These readings could not be checked.';
   if (view.unavailable.length) return 'No warning in the readings collected. Some checks remain unverified.';
   return 'No warning was found in the available readings.';
+}
+
+export function getRecommendedFindingSteps(check: CheckPresentationInput) {
+  const view = getCheckNextSteps(check);
+  const crash = crashMetric(check);
+  const separateMemory = memoryActionDisposition(check, view.readings) === 'handoff';
+  const steps = view.attention.filter(reading => reading.metric_id !== crash).map(reading => {
+    const finding = getFindingVisual(reading);
+    return { label: finding.label, instruction: separateMemory && /^memory_(usage|app_warning)$/.test(reading.metric_id ?? '')
+      ? 'Run a separate memory check before considering an app-closing action. This memory warning does not establish the cause of the selected problem.'
+      : finding.nextStep };
+  });
+  if (crash) steps.unshift({ label: 'Review crash details',
+    instruction: 'If crashes continue, open Windows Reliability Monitor and review the affected app, event time and error details. Past crash records do not establish the cause. Checking for new records does not confirm a repair.' });
+  return steps;
+}
+
+export function getActionEligibilityMessage(check: CheckPresentationInput, eligibility: { state: string; message: string }) {
+  if (crashMetric(check) && eligibility.state === 'recheck_required' &&
+    eligibility.message === 'This result has no verified warning in a known check scope. Check the current status before choosing an action.') {
+    return 'This crash check does not authorize a software repair. Review the crash details and check any separate memory warning with a memory check.';
+  }
+  return eligibility.message;
 }
 
 export function canRecheckDetectedFinding(check: CheckPresentationInput & { session_id?: string | null }) {

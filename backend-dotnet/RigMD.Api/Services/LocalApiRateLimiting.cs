@@ -37,7 +37,7 @@ public static class LocalApiRateLimiting
                 // Navigation must not spend scan/action permits or prevent signing out.
                 var group = path switch
                 {
-                    "/api/cloud-ai/sign-in" when !readOnly => "sign-in",
+                    "/api/cloud-ai/sign-in" or "/api/cloud-ai/connect" when !readOnly => "sign-in",
                     "/api/cloud-ai/sign-out" when !readOnly => "sign-out",
                     "/api/autonomy/settings" when !readOnly => "settings",
                     "/api/diagnosis/local-scan" or "/api/diagnosis/submit" or "/api/diagnosis/analyze" when !readOnly => "diagnosis",

@@ -26,7 +26,11 @@ builder.Services.AddHttpClient("CloudAccount").RedactLoggedHeaders(_ => true)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<RigMD.Application.Contracts.Autonomy.ICloudAiSession>(services =>
     new RigMD.Infrastructure.Ai.CloudAiSession(services.GetRequiredService<IHttpClientFactory>().CreateClient("CloudAccount"),
-        services.GetRequiredService<IConfiguration>(), services.GetRequiredService<TimeProvider>()));
+        services.GetRequiredService<IConfiguration>(), services.GetRequiredService<TimeProvider>(),
+        new RigMD.Infrastructure.Ai.WindowsCloudAiCredentialStore(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RigMD", "cloud-account.bin"))));
+builder.Services.AddSingleton<RigMD.Api.Services.IDesktopAccountBrowser, RigMD.Api.Services.DesktopAccountBrowser>();
+builder.Services.AddSingleton<RigMD.Api.Services.DesktopAccountConnection>();
 
 builder.Services.AddLocalApiRateLimiting();
 

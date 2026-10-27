@@ -31,6 +31,7 @@ function LoginPage() {
 
   const redirectTo = useMemo(() => {
     const fromPath = location.state?.from?.pathname;
+    if (fromPath === '/desktop-connect') return { pathname: fromPath, hash: location.state.from.hash };
     return fromPath && !authRoutes.has(fromPath)
       ? fromPath
       : '/download';

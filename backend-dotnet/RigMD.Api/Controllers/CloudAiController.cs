@@ -6,7 +6,7 @@ namespace RigMD.Api.Controllers;
 
 [ApiController]
 [Route("api/cloud-ai")]
-public sealed class CloudAiController(ICloudAiSession session) : ControllerBase
+public sealed class CloudAiController(ICloudAiSession session, RigMD.Api.Services.DesktopAccountConnection connection) : ControllerBase
 {
     public sealed class SignInRequest
     {
@@ -15,7 +15,11 @@ public sealed class CloudAiController(ICloudAiSession session) : ControllerBase
     }
 
     [HttpGet("account")]
-    public IActionResult Account() => Ok(session.Status);
+    public async Task<IActionResult> Account(CancellationToken cancellationToken)
+    {
+        await session.GetAccessTokenAsync(cancellationToken);
+        return Ok(session.Status);
+    }
 
     [HttpPost("sign-in"), RequestSizeLimit(8192)]
     public async Task<IActionResult> SignIn([FromBody] SignInRequest request, CancellationToken cancellationToken)
@@ -27,6 +31,7 @@ public sealed class CloudAiController(ICloudAiSession session) : ControllerBase
     [HttpPost("sign-out")]
     public async Task<IActionResult> SignOut(CancellationToken cancellationToken)
     {
+        await connection.CancelAsync();
         await session.SignOutAsync(cancellationToken);
         return Ok(session.Status);
     }
