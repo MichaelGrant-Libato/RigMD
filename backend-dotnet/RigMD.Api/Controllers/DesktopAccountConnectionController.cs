@@ -24,14 +24,12 @@ public sealed class DesktopAccountConnectionController(DesktopAccountConnection 
     {
         Response.Headers.CacheControl = "no-store";
         Response.Headers["Referrer-Policy"] = "no-referrer";
-        Response.Headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+        Response.Headers["Content-Security-Policy"] = DesktopAccountConnectionPage.ContentSecurityPolicy;
         if (!DesktopAccountConnection.IsTrustedCallback(HttpContext) || !Request.HasFormContentType) return StatusCode(403);
         var form = await Request.ReadFormAsync(cancellationToken);
         if (form.Count != 2 || form["state"].Count != 1 || form["payload"].Count != 1) return BadRequest();
         var connected = await connection.CompleteAsync(form["state"].ToString(), form["payload"].ToString(), cancellationToken);
         Response.StatusCode = connected ? 200 : 400;
-        return Content(connected
-            ? "<!doctype html><html lang='en'><meta charset='utf-8'><title>RigMD connected</title><h1>RigMD is connected</h1><p>Return to RigMD Desktop. You can close this tab.</p></html>"
-            : "<!doctype html><html lang='en'><meta charset='utf-8'><title>Connect RigMD again</title><h1>Connection not completed</h1><p>Return to RigMD Desktop and start a fresh connection.</p></html>", "text/html");
+        return Content(DesktopAccountConnectionPage.Render(connected), "text/html");
     }
 }
