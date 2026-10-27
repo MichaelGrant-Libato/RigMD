@@ -1427,12 +1427,12 @@ export default function AutonomyRemediationPanel({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h5 className="text-sm font-bold text-white">
-                  {memoryAction ? 'Help with memory use' : 'Review a possible next step'}
+                  {memoryAction ? 'Help with memory use' : 'Review a software action'}
                 </h5>
               </div>
 
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
-                {compact ? (memoryAction ? 'Save your work before choosing apps to close.' : 'Review the proposed change before deciding.') : memoryAction ? 'Review running apps and choose only ones you no longer need. Save your work first. Closing selected apps may reduce memory use; improvement must be checked afterward.' : 'No changes are made during the check. Any proposed action needs your approval.'}
+                {compact ? (memoryAction ? 'Save your work before choosing apps to close.' : 'RigMD checks which supported options are available. You review and approve any change.') : memoryAction ? 'Review running apps and choose only ones you no longer need. Save your work first. Closing selected apps may reduce memory use; improvement must be checked afterward.' : 'No changes are made during the check. Any proposed action needs your approval.'}
               </p>
             </div>
           </div>
@@ -1450,7 +1450,7 @@ export default function AutonomyRemediationPanel({
               <SlidersHorizontal size={14} />
             )}
 
-            {isPreviewLoading ? 'Checking your device...' : memoryAction ? 'Review apps using memory' : 'Check possible actions'}
+            {isPreviewLoading ? 'Checking your device...' : memoryAction ? 'Review apps using memory' : 'Review action options'}
           </motion.button>
         </div>
 

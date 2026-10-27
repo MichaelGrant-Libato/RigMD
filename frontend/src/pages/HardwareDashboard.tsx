@@ -1,3 +1,4 @@
+import CloudAiAccountPanel from '../components/CloudAiAccountPanel';
 //HardwareDashboard.tsx
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -486,6 +487,7 @@ function HomeDashboardView({
   return (
     <>
       <TopHeader title="Home Dashboard" subtitle={`System overview and diagnostic status - ${formatTodayLabel()}`} />
+      <CloudAiAccountPanel compact />
       <motion.div
         key="home-dashboard"
         variants={pageFade}

@@ -16,9 +16,9 @@ public class CloudAiSessionTests
     private const string UserId = "89520f7c-2c44-4fef-9baa-e70f7cfa2de9";
     private static readonly IConfiguration Config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
     { ["Gemini:ProxyUrl"] = "https://www.rig-md.com/api/gemini", ["Gemini:ApiKey"] = "fake-legacy-key-must-not-be-used" }).Build();
-    private static object Tokens(string token = "fake.access.signature", string id = UserId, string? confirmed = "2026-10-01T00:00:00Z") => new
+    private static object Tokens(string token = "fake.access.signature", string id = UserId, string? confirmed = "2026-10-01T00:00:00Z", string refresh = "fake-refresh-token") => new
     {
-        access_token = token, refresh_token = "fake-refresh-token", expires_in = 300,
+        access_token = token, refresh_token = refresh, expires_in = 300,
         user = new { id, email = "user@example.com", role = "authenticated", email_confirmed_at = confirmed, is_anonymous = false }
     };
     private static HttpResponseMessage Json(object value, HttpStatusCode status = HttpStatusCode.OK) =>
@@ -236,5 +236,85 @@ public class CloudAiSessionTests
         public Task RejectAccessTokenAsync(string token) { Rejections++; return Task.CompletedTask; }
         public Task<CloudAiAccountStatus> SignInAsync(string email, string password, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task SignOutAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class Store : ICloudAiCredentialStore
+    {
+        public SavedCloudAiAccount? Value;
+        public SavedCloudAiAccount? Read() => Value;
+        public void Write(SavedCloudAiAccount account) => Value = account;
+        public void Clear() => Value = null;
+    }
+    [Fact]
+    public async Task WebsiteConnection_IsRememberedAndRestoredWithRotationAfterRestart()
+    {
+        var handler = new Handler(); var store = new Store(); var clock = new Clock();
+        var issued = 0;
+        handler.Override = request => request.RequestUri!.AbsolutePath == "/api/cloud-ai-config"
+            ? Json(new { supabaseUrl = "https://test-project.supabase.co", publishableKey = "sb_publishable_fake" })
+            : request.RequestUri.AbsolutePath == "/auth/v1/token" ? Json(Tokens(refresh: "rotated-" + ++issued)) : Json(new { });
+        var session = new CloudAiSession(new HttpClient(handler), Config, clock, store);
+        Assert.True((await session.ConnectBrowserAccountAsync("browser-handoff-refresh", Guid.Parse(UserId))).Remembered);
+        Assert.Contains("grant_type=refresh_token", handler.Calls.Last().Url);
+        Assert.DoesNotContain("password", handler.Calls.Last().Body);
+        Assert.Equal("rotated-1", store.Value?.RefreshToken);
+        var restarted = new CloudAiSession(new HttpClient(handler), Config, clock, store);
+        Assert.False(restarted.Status.SignedIn); Assert.True(restarted.Status.Reconnecting);
+        Assert.Equal("fake.access.signature", await restarted.GetAccessTokenAsync());
+        Assert.True(restarted.Status.SignedIn); Assert.True(restarted.Status.Remembered);
+        Assert.DoesNotContain("refresh", JsonSerializer.Serialize(restarted.Status));
+        Assert.Contains("rotated-1", handler.Calls.Last().Body); Assert.Equal("rotated-2", store.Value?.RefreshToken);
+        var secondRestart = new CloudAiSession(new HttpClient(handler), Config, clock, store);
+        Assert.Equal("fake.access.signature", await secondRestart.GetAccessTokenAsync());
+        Assert.Contains("rotated-2", handler.Calls.Last().Body); Assert.Equal("rotated-3", store.Value?.RefreshToken);
+        await secondRestart.SignOutAsync(); Assert.Null(store.Value);
+        Assert.Null(await new CloudAiSession(new HttpClient(handler), Config, clock, store).GetAccessTokenAsync());
+    }
+    [Fact]
+    public async Task RememberedSession_NeverSendsRefreshCredentialToADifferentProject()
+    {
+        var handler = new Handler(); var store = new Store { Value = new("https://other-project.supabase.co", Guid.Parse(UserId), "private-refresh") };
+        var session = new CloudAiSession(new HttpClient(handler), Config, new Clock(), store);
+        Assert.Null(await session.GetAccessTokenAsync()); Assert.Null(store.Value); Assert.Single(handler.Calls);
+        Assert.DoesNotContain("private-refresh", handler.Calls.Single().Body);
+    }
+    [Fact]
+    public async Task RestoreOutage_RetainsCredentialAndBacksOff_UntilRetrySucceeds()
+    {
+        var handler = new Handler(); var clock = new Clock(); var store = new Store { Value = new("https://test-project.supabase.co", Guid.Parse(UserId), "saved-refresh") };
+        handler.Override = _ => throw new HttpRequestException("offline");
+        var session = new CloudAiSession(new HttpClient(handler), Config, clock, store);
+        Assert.Null(await session.GetAccessTokenAsync()); Assert.NotNull(store.Value);
+        Assert.Null(await session.GetAccessTokenAsync()); Assert.Single(handler.Calls);
+        handler.Override = null; clock.Now = clock.Now.AddSeconds(31);
+        Assert.Equal("fake.access.signature", await session.GetAccessTokenAsync());
+    }
+    [Theory]
+    [InlineData("revoked")]
+    [InlineData("wrong-user")]
+    public async Task RestoreRejectsRevokedOrSubstitutedAccounts(string reason)
+    {
+        var handler = new Handler(); var store = new Store { Value = new("https://test-project.supabase.co", Guid.Parse(UserId), "saved-refresh") };
+        handler.Override = request => request.RequestUri!.AbsolutePath == "/api/cloud-ai-config"
+            ? Json(new { supabaseUrl = "https://test-project.supabase.co", publishableKey = "sb_publishable_fake" })
+            : reason == "revoked" ? Json(new { }, HttpStatusCode.Unauthorized) : Json(Tokens(id: Guid.NewGuid().ToString()));
+        var session = new CloudAiSession(new HttpClient(handler), Config, new Clock(), store);
+        Assert.Null(await session.GetAccessTokenAsync()); Assert.Null(store.Value); Assert.False(session.Status.SignedIn);
+    }
+    [Fact]
+    public void WindowsCredentialStorage_EncryptsAtRestAndRoundTripsAcrossInstances()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "RigMD-account-test-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "account.bin");
+        try
+        {
+            var expected = new SavedCloudAiAccount("https://test-project.supabase.co", Guid.Parse(UserId), "secret-refresh-only-for-test");
+            var store = new WindowsCloudAiCredentialStore(path); store.Write(expected);
+            Assert.DoesNotContain(expected.RefreshToken, System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+            Assert.Equal(expected, new WindowsCloudAiCredentialStore(path).Read());
+            store.Clear(); Assert.False(File.Exists(path));
+            File.WriteAllText(path, "corrupt-credential"); Assert.Null(store.Read());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
     }
 }

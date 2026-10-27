@@ -19,6 +19,7 @@ const DownloadLandingPage = lazy(() => import('./pages/DownloadLandingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
+const DesktopConnectPage = lazy(() => import('./pages/DesktopConnectPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 function DashboardApp() {
@@ -51,6 +52,7 @@ function PublicDownloadRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/register" replace />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/desktop-connect" element={<DesktopConnectPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route
