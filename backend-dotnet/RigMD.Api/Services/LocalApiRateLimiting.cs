@@ -33,7 +33,11 @@ public static class LocalApiRateLimiting
                 var clientKey = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
                     ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "local-client";
                 var readOnly = HttpMethods.IsGet(httpContext.Request.Method) || HttpMethods.IsHead(httpContext.Request.Method);
-                var metadataRead = readOnly && (path == "/api/autonomy/settings" || path == "/api/autonomy/tools");
+                // Checking saved evidence does not inspect Windows or prepare/execute an action.
+                var eligibilityRead = readOnly &&
+                    path.Split('/') is ["", "api", "autonomy", var sessionId, "remediation-eligibility"] &&
+                    Guid.TryParse(sessionId, out _);
+                var metadataRead = readOnly && (path == "/api/autonomy/settings" || path == "/api/autonomy/tools" || eligibilityRead);
                 // Navigation must not spend scan/action permits or prevent signing out.
                 var group = path switch
                 {

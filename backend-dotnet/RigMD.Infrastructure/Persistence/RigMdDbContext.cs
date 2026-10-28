@@ -13,6 +13,7 @@ public class RigMdDbContext : DbContext
 
     public DbSet<SystemProfile> SystemProfiles { get; set; } = null!;
     public DbSet<DiagnosticSession> DiagnosticSessions { get; set; } = null!;
+    public DbSet<SessionFeedback> SessionFeedback { get; set; } = null!;
     public DbSet<SessionAnswer> SessionAnswers { get; set; } = null!;
     public DbSet<DiagnosticOutput> DiagnosticOutputs { get; set; } = null!;
     public DbSet<RemediationRun> RemediationRuns { get; set; } = null!;
@@ -66,6 +67,13 @@ public class RigMdDbContext : DbContext
             .WithOne(o => o.Session)
             .HasForeignKey<DiagnosticOutput>(o => o.DiagnosticSessionId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SessionFeedback>().ToTable("SessionFeedback");
+        modelBuilder.Entity<SessionFeedback>().HasOne(f => f.Session).WithMany()
+            .HasForeignKey(f => f.DiagnosticSessionId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SessionFeedback>().Property(f => f.Outcome).HasMaxLength(32);
+        modelBuilder.Entity<SessionFeedback>().Property(f => f.Note).HasMaxLength(500);
+        modelBuilder.Entity<SessionFeedback>().HasIndex(f => new { f.DiagnosticSessionId, f.CreatedAt });
 
         // SQLite doesn't support DateTimeOffset sorting natively. We tell EF to convert them to string
         // which preserves ISO8601 formatting and allows textual sorting in SQLite.
