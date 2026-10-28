@@ -116,6 +116,72 @@ public class LocalApiRateLimitingTests
         Assert.Equal(HttpStatusCode.OK, scan.StatusCode);
     }
 
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("HEAD")]
+    public async Task OpeningSavedChecksAndSavingFeedback_DoNotSpendActionPermits(string method)
+    {
+        await using var host = await TestHost.StartAsync();
+        for (var i = 0; i < 12; i++)
+        {
+            var id = Guid.NewGuid();
+            var path = $"/api/autonomy/{id}/remediation-eligibility";
+            if (i % 2 == 0) path = path.ToUpperInvariant() + "/";
+            using var request = new HttpRequestMessage(new HttpMethod(method), path);
+            using var result = await host.Client.SendAsync(request);
+            using var feedback = await host.Client.GetAsync($"/api/diagnosis/sessions/{id}/feedback");
+            using var saved = await host.Client.PostAsync($"/api/diagnosis/sessions/{id}/feedback", null);
+            Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, feedback.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        }
+        for (var i = 0; i < 8; i++)
+        {
+            using var preview = await host.Client.PostAsync("/api/autonomy/preview", null);
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        }
+        using var rejected = await host.Client.PostAsync("/api/autonomy/preview", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+    }
+
+    [Fact]
+    public async Task EligibilityReadsRemainAvailableAfterActionLimitWithoutExemptingOtherMethodsOrInvalidIds()
+    {
+        await using var host = await TestHost.StartAsync();
+        for (var i = 0; i < 8; i++)
+        {
+            using var preview = await host.Client.PostAsync("/api/autonomy/preview", null);
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        }
+        var path = $"/api/autonomy/{Guid.NewGuid()}/remediation-eligibility";
+        using var read = await host.Client.GetAsync(path);
+        using var write = await host.Client.PostAsync(path, null);
+        using var invalid = await host.Client.GetAsync("/api/autonomy/not-a-guid/remediation-eligibility");
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, write.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, invalid.StatusCode);
+    }
+
+    [Fact]
+    public async Task EligibilityReadFloodsStayLimitedAcrossSessionIdsAndRequireAuthentication()
+    {
+        await using var host = await TestHost.StartAsync();
+        for (var i = 0; i < 45; i++)
+        {
+            using var allowed = await host.Client.GetAsync($"/api/autonomy/{Guid.NewGuid()}/remediation-eligibility");
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        }
+        var path = $"/API/AUTONOMY/{Guid.NewGuid()}/REMEDIATION-ELIGIBILITY/";
+        using var rejected = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.InRange(rejected.Headers.RetryAfter!.Delta!.Value.TotalSeconds, 1, 30);
+        using var preview = await host.Client.PostAsync("/api/autonomy/preview", null);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        host.Client.DefaultRequestHeaders.Authorization = null;
+        using var anonymous = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
     private sealed class TestHost(WebApplication app, HttpClient client) : IAsyncDisposable
     {
         public HttpClient Client { get; } = client;
@@ -133,6 +199,8 @@ public class LocalApiRateLimitingTests
             app.UseMiddleware<LocalApiAuthenticationMiddleware>();
             app.UseRateLimiter();
             // Sentinels exercise the real authentication/limiter, never Windows providers or cloud AI.
+            app.MapMethods("/api/autonomy/{sessionId}/remediation-eligibility", new[] { "GET", "HEAD", "POST" }, () => Results.Ok());
+            app.MapMethods("/api/diagnosis/sessions/{sessionId}/feedback", new[] { "GET", "POST" }, () => Results.Ok());
             foreach (var path in new[] { "/api/autonomy/settings", "/api/autonomy/tools", "/api/autonomy/memory-apps" })
                 app.MapGet(path, () => Results.Ok());
             foreach (var path in new[] { "/api/autonomy/settings", "/api/autonomy/preview", "/api/cloud-ai/sign-in",

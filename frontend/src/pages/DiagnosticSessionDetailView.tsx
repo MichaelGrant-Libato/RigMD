@@ -1,4 +1,5 @@
 import CheckReadings from '../components/CheckReadings';
+import ProblemFeedback from '../components/ProblemFeedback';
 import CheckNextSteps from '../components/CheckNextSteps';
 import ResultDetails from '../components/ResultDetails';
 import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
@@ -482,6 +483,7 @@ export default function DiagnosticSessionDetailView({
                 </motion.section>
               )}
               </CheckNextSteps>
+              <ProblemFeedback key={sessionId} sessionId={sessionId} />
               <ResultDetails label="Original check" title="Original check">
               <div data-testid="original-check-details">
                 <motion.section

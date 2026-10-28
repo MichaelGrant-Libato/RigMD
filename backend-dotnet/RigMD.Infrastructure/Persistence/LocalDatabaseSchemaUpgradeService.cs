@@ -34,7 +34,24 @@ public class LocalDatabaseSchemaUpgradeService
             ON "RemediationRuns" ("DiagnosticOutputId");
             """);
 
+        // EnsureCreated does not add tables to an existing installation.
+        // Feedback is local user input, kept apart from all diagnostic and resolution records.
+        await _db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "SessionFeedback" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SessionFeedback" PRIMARY KEY,
+                "DiagnosticSessionId" TEXT NOT NULL,
+                "Outcome" TEXT NOT NULL CHECK ("Outcome" IN ('still_happening', 'not_happening', 'not_sure')),
+                "Note" TEXT NOT NULL CHECK (length("Note") <= 500),
+                "CreatedAt" TEXT NOT NULL,
+                CONSTRAINT "FK_SessionFeedback_DiagnosticSessions_DiagnosticSessionId"
+                    FOREIGN KEY ("DiagnosticSessionId") REFERENCES "DiagnosticSessions" ("Id") ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS "IX_SessionFeedback_DiagnosticSessionId_CreatedAt"
+                ON "SessionFeedback" ("DiagnosticSessionId", "CreatedAt");
+            """);
+
         _logger.LogInformation(
-            "Local SQLite remediation-history schema compatibility check completed.");
+            "Local SQLite schema compatibility check completed.");
     }
 }

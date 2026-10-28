@@ -21,6 +21,7 @@ builder.Services.AddSingleton(new RigMD.Api.Services.LocalApiSession(
     Environment.GetEnvironmentVariable(RigMD.Api.Services.LocalApiSession.EnvironmentVariable)));
 builder.Services.AddSingleton<RigMD.Api.Services.LocalRemediationExecutionGate>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<ISessionFeedbackRepository, SessionFeedbackRepository>();
 builder.Services.AddSingleton<RigMD.Api.Services.RemediationApprovalStore>();
 builder.Services.AddHttpClient("CloudAccount").RedactLoggedHeaders(_ => true)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
