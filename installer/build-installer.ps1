@@ -274,7 +274,7 @@ if (-not $InstallerOutput -or -not (Test-Path $InstallerOutput))
     throw "RigMD setup executable was not created in output directory."
 }
 
-$VersionedInstallerOutput = Join-Path $PSScriptRoot "output\RigMD-Setup-v0.2.2.exe"
+$VersionedInstallerOutput = Join-Path $PSScriptRoot "output\RigMD-Setup-v0.2.3.exe"
 Copy-Item -Path $InstallerOutput -Destination $VersionedInstallerOutput -Force
 
 $InstallerHash = (Get-FileHash -Path $InstallerOutput -Algorithm SHA256).Hash
@@ -282,7 +282,7 @@ $InstallerSizeMb = [Math]::Round((Get-Item $InstallerOutput).Length / 1MB, 2)
 
 Write-Host ""
 Write-Host "======================================"
-Write-Host " RigMD v0.2.2 installer build succeeded."
+Write-Host " RigMD v0.2.3 installer build succeeded."
 Write-Host "======================================"
 Write-Host ""
 Write-Host "Output:"
