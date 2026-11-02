@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using RigMD.Api.Middleware;
 using RigMD.Application.Contracts.Ai;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
@@ -236,6 +237,10 @@ public class DiagnosticController : ControllerBase
                         result.RecommendedNextStep);
 
             await _sessionRepository.SaveExplanationSourceAsync(sessionId, explanationSource, explanationModel);
+            if (HttpContext != null) HttpContext.Items[PerformanceRecordingMiddleware.ContextKey] = new PerformanceContext(
+                result.Proof.Count, result.Proof.Count(p => p.EvidenceKind is "unavailable" or "not_assessed" ||
+                    p.Status is "unknown" or "unavailable" or "not_assessed" or "not_verified" or "unverified"), request.Mode,
+                explanationSource == "gemini" ? "gemini" : "local");
 
             return Ok(
                 new
@@ -325,6 +330,7 @@ public class DiagnosticController : ControllerBase
         {
             var sessions = (await _sessionRepository.GetSessionsAsync()).ToList();
             var count = sessions.Count;
+            if (HttpContext != null) HttpContext.Items[PerformanceRecordingMiddleware.ContextKey] = new PerformanceContext(count);
             for (var i = 0; i < count; i++)
             {
                 sessions[i].SessionCode = $"S-{count - i:D3}";

@@ -1,6 +1,10 @@
 using System;
 using System.ComponentModel;
 using System.IO;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
@@ -13,6 +17,7 @@ public partial class MainWindow : Window
 {
     private readonly string _localApiToken;
     private static readonly Uri LocalApiOrigin = new("http://localhost:5273");
+    private bool _startupRecorded;
     private bool _isSavingPdf;
     private bool _exitConfirmationOpen;
 
@@ -105,6 +110,13 @@ public partial class MainWindow : Window
 
     private async void Browser_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (!_startupRecorded && Browser.Source?.GetLeftPart(UriPartial.Authority) == LocalApiOrigin.GetLeftPart(UriPartial.Authority)
+            && DesktopPerformanceMessage.TryReadDashboardReady(e.Source, e.WebMessageAsJson, out var startupOutcome))
+        {
+            _startupRecorded = true;
+            await RecordPerformanceAsync("startup.desktop", App.StartupInitialMs + App.StartupWatch.Elapsed.TotalMilliseconds, startupOutcome);
+            return;
+        }
         if (!DesktopReportExportRequest.TryParse(e.Source, e.WebMessageAsJson, out var request) ||
             Browser.Source?.GetLeftPart(UriPartial.Authority) != LocalApiOrigin.GetLeftPart(UriPartial.Authority))
             return;
@@ -114,6 +126,8 @@ public partial class MainWindow : Window
         Browser.IsEnabled = false;
         ZoomToolbar.IsEnabled = false;
         string? temporaryPath = null;
+        Stopwatch? generationTimer = null;
+        var generationOutcome = "failed";
         try
         {
             // Only print when the formatted report is mounted; never export the application shell.
@@ -133,6 +147,7 @@ public partial class MainWindow : Window
             if (!string.Equals(Path.GetExtension(dialog.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The report needs a PDF filename.");
 
+            generationTimer = Stopwatch.StartNew();
             var settings = Browser.CoreWebView2.Environment.CreatePrintSettings();
             settings.ShouldPrintBackgrounds = true;
             settings.ShouldPrintHeaderAndFooter = false;
@@ -144,6 +159,7 @@ public partial class MainWindow : Window
             // Preserve any existing report until the replacement PDF has been written completely.
             File.Move(temporaryPath, dialog.FileName, overwrite: true);
             temporaryPath = null;
+            generationOutcome = "completed";
             ReplyToPdfRequest(request, "saved");
         }
         catch (Exception)
@@ -159,10 +175,24 @@ public partial class MainWindow : Window
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
+            generationTimer?.Stop();
             _isSavingPdf = false;
             Browser.IsEnabled = true;
             ZoomToolbar.IsEnabled = true;
+            if (generationTimer != null)
+                await RecordPerformanceAsync("pdf.desktop", generationTimer.Elapsed.TotalMilliseconds, generationOutcome);
         }
+    }
+
+    private async Task RecordPerformanceAsync(string operation, double durationMs, string outcome)
+    {
+        try
+        {
+            using var client = new HttpClient { BaseAddress = LocalApiOrigin, Timeout = TimeSpan.FromSeconds(3) };
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _localApiToken);
+            using var response = await client.PostAsJsonAsync("/api/performance", new { id = Guid.NewGuid(), operation, durationMs, outcome });
+        }
+        catch { /* Performance recording must never block startup or PDF use. */ }
     }
 
     private void ReplyToPdfRequest(DesktopReportExportRequest request, string status)

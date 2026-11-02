@@ -51,6 +51,19 @@ public class LocalDatabaseSchemaUpgradeService
                 ON "SessionFeedback" ("DiagnosticSessionId", "CreatedAt");
             """);
 
+        await _db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "PerformanceRecords" (
+                "Id" TEXT NOT NULL PRIMARY KEY, "CreatedAt" TEXT NOT NULL, "ClientId" TEXT NOT NULL,
+                "Operation" TEXT NOT NULL, "Outcome" TEXT NOT NULL, "DurationMs" REAL NOT NULL,
+                "RecordCount" INTEGER NULL, "UnavailableCount" INTEGER NULL, "Mode" TEXT NOT NULL, "Engine" TEXT NOT NULL,
+                "HttpStatus" INTEGER NULL, "ApiWorkingSetMb" REAL NULL, "ApiCpuTimeMs" REAL NULL,
+                "AppVersion" TEXT NOT NULL, "BuildConfiguration" TEXT NOT NULL, "DeviceKey" TEXT NOT NULL,
+                "OsVersion" TEXT NOT NULL, "Architecture" TEXT NOT NULL, "LogicalProcessors" INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_PerformanceRecords_ClientId_CreatedAt" ON "PerformanceRecords" ("ClientId", "CreatedAt");
+            """);
+
         _logger.LogInformation(
             "Local SQLite schema compatibility check completed.");
     }

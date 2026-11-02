@@ -21,6 +21,9 @@ builder.Services.AddSingleton(new RigMD.Api.Services.LocalApiSession(
     Environment.GetEnvironmentVariable(RigMD.Api.Services.LocalApiSession.EnvironmentVariable)));
 builder.Services.AddSingleton<RigMD.Api.Services.LocalRemediationExecutionGate>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<IPerformanceRecordRepository, PerformanceRecordRepository>();
+builder.Services.AddSingleton<PerformanceRecorder>();
+builder.Services.AddHostedService(services => services.GetRequiredService<PerformanceRecorder>());
 builder.Services.AddScoped<ISessionFeedbackRepository, SessionFeedbackRepository>();
 builder.Services.AddSingleton<RigMD.Api.Services.RemediationApprovalStore>();
 builder.Services.AddHttpClient("CloudAccount").RedactLoggedHeaders(_ => true)
@@ -276,6 +279,7 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.UseMiddleware<RigMD.Api.Middleware.LocalApiAuthenticationMiddleware>();
+app.UseMiddleware<RigMD.Api.Middleware.PerformanceRecordingMiddleware>();
 app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<RigMD.Api.Hubs.RemediationHub>("/hubs/remediation");

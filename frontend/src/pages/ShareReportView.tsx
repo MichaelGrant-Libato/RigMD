@@ -1,3 +1,4 @@
+import { afterScreenPaint, beginMeasurement } from '../lib/performanceRecording';
 import { getCheckOverview } from '../lib/checkPresentation';
 import { getSessionCheckLabel } from '../lib/pastChecksFormatting';
 import { buildReportDocument, buildReportFileName, reportDocumentText, formatDate, friendlyAction, getSessionDate } from '../lib/reportFormatting';
@@ -54,6 +55,7 @@ export default function ShareReportView({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const performanceRun = useRef<ReturnType<typeof beginMeasurement> | null>(null);
   const liveSnapshot = useRef({ stats, hardwareUpdatedAt });
   useEffect(() => { liveSnapshot.current = { stats, hardwareUpdatedAt }; }, [stats, hardwareUpdatedAt]);
   const request = useRef<AbortController | null>(null);
@@ -61,11 +63,15 @@ export default function ShareReportView({
     stats: HardwareStats | null; dashboard: DashboardSummary; hardwareUpdatedAt: Date | null; generatedAt: Date;
   } | null>(null);
   const captureSnapshot = useCallback(() => {
+    performanceRun.current?.finish('canceled');
+    performanceRun.current = beginMeasurement('report.ui');
     setSnapshot(previous => previous ? { ...previous, ...liveSnapshot.current, generatedAt: new Date() } : previous);
   }, []);
 
   const refreshReport = useCallback(async () => {
     request.current?.abort();
+    performanceRun.current?.finish('canceled');
+    performanceRun.current = beginMeasurement('report.ui');
     const controller = new AbortController();
     request.current = controller;
     setIsLoading(true);
@@ -83,7 +89,10 @@ export default function ShareReportView({
       );
       setSnapshot({ ...liveSnapshot.current, dashboard: fresh.dashboard, generatedAt: new Date() });
     } catch {
-      if (!controller.signal.aborted) setLoadError('The report could not be refreshed. Saved checks or summary totals are unavailable. Try Refresh again.');
+      if (!controller.signal.aborted) {
+        performanceRun.current?.finish('failed'); performanceRun.current = null;
+        setLoadError('The report could not be refreshed. Saved checks or summary totals are unavailable. Try Refresh again.');
+      }
     } finally {
       if (!controller.signal.aborted) setIsLoading(false);
     }
@@ -91,7 +100,7 @@ export default function ShareReportView({
 
   useEffect(() => {
     void refreshReport();
-    return () => { request.current?.abort(); pdfRequest.current?.abort(); };
+    return () => { request.current?.abort(); pdfRequest.current?.abort(); performanceRun.current?.finish('canceled'); performanceRun.current = null; };
   }, [refreshReport]);
 
   const activeSession = useMemo(
@@ -119,6 +128,15 @@ export default function ShareReportView({
   );
   const reportText = useMemo(() => report ? reportDocumentText(report) : '', [report]);
 
+  useEffect(() => {
+    if (!canExport || !report || !performanceRun.current) return;
+    const measurement = performanceRun.current;
+    return afterScreenPaint(() => {
+      measurement.finish(activeSession ? 'completed' : 'incomplete', { recordCount: activeSession ? 1 : 0 });
+      if (performanceRun.current === measurement) performanceRun.current = null;
+    });
+  }, [canExport, report, activeSession]);
+
   const reportFileName = snapshot ? buildReportFileName(activeSession?.session_code, snapshot.generatedAt) : '';
 
   const handleCopy = async () => {
@@ -135,7 +153,11 @@ export default function ShareReportView({
 
   const handleDownloadText = () => {
     if (!canExport || !report || pdfRequest.current) return;
-    downloadReportFile(`${reportFileName}.txt`, reportText, 'text/plain;charset=utf-8');
+    const measurement = beginMeasurement('text.ui');
+    try {
+      downloadReportFile(`${reportFileName}.txt`, reportText, 'text/plain;charset=utf-8');
+      measurement.finish(); // Browser download request only; file saving cannot be confirmed here.
+    } catch { measurement.finish('failed'); setMessage({ type: 'error', text: 'Text download could not be requested.' }); return; }
     setMessage({ type: 'success', text: 'Plain-text report download requested.' });
   };
 
@@ -147,15 +169,18 @@ export default function ShareReportView({
       window.print();
       return;
     }
+    const measurement = beginMeasurement('pdf_request.ui');
     const controller = new AbortController();
     pdfRequest.current = controller;
     setIsSavingPdf(true);
     setMessage(null);
     try {
       const result = await saveDesktopReportPdf(`${reportFileName}.pdf`, bridge, controller.signal);
+      measurement.finish(result === 'saved' ? 'completed' : 'canceled');
       if (!controller.signal.aborted) setMessage({ type: 'success', text: result === 'saved'
         ? 'PDF report saved to the location you selected.' : 'PDF save canceled. No report was saved.' });
     } catch {
+      measurement.finish(controller.signal.aborted ? 'canceled' : 'failed');
       if (!controller.signal.aborted) setMessage({ type: 'error', text: 'The PDF could not be saved. Try again, or use Print Report and choose Save as PDF.' });
     } finally {
       if (pdfRequest.current === controller) pdfRequest.current = null;

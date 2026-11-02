@@ -18,6 +18,7 @@ import HelpScopeView from './HelpScopeView';
 import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 import ShareReportView from './ShareReportView';
 import SettingsView from './SettingsView';
+import AppSpeedView from './AppSpeedView';
 
 import {
   cardTransition,
@@ -533,12 +534,14 @@ void AGENT_ID;
 void agentSnapshotToHardwareStats;
 void PlaceholderView;
 
-export default function HardwareDashboard() {
+export default function HardwareDashboard({ onStartupReady }: { onStartupReady?: (complete: boolean) => void } = {}) {
+  const [initialDashboard, setInitialDashboard] = useState<'pending' | 'completed' | 'failed'>('pending');
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
   const [error, setError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<PageKey>('home');
+  const [restoreAppSpeedFocus, setRestoreAppSpeedFocus] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [historyView, setHistoryView] = useState<'saved' | 'trends'>('saved');
   const [trendSelection, setTrendSelection] = useState<TrendSelection>(DEFAULT_TREND_SELECTION);
@@ -577,6 +580,10 @@ export default function HardwareDashboard() {
     isRefreshingHardware,
     stats,
   ]);
+
+  useEffect(() => {
+    if (initialDashboard !== 'pending' && (stats || error)) onStartupReady?.(initialDashboard === 'completed' && !error);
+  }, [initialDashboard, stats, error, onStartupReady]);
 
   const deviceName = stats?.device_name?.trim() || 'Detecting Device';
   const isFetchingHardwareRef = useRef(false);
@@ -677,8 +684,10 @@ export default function HardwareDashboard() {
         }
 
         setDashboard(normalizeDashboardSummary(response.data, sessions));
+        setInitialDashboard(previous => previous === 'pending' ? 'completed' : previous);
       } catch {
         setDashboard(emptyDashboard);
+        setInitialDashboard(previous => previous === 'pending' ? 'failed' : previous);
       } finally {
         isFetchingDashboardRef.current = false;
       }
@@ -792,7 +801,9 @@ export default function HardwareDashboard() {
         );
 
       case 'settings':
-        return <SettingsView />;
+        return <SettingsView onOpenAppSpeed={() => { setRestoreAppSpeedFocus(false); handleSetActivePage('appSpeed'); }} restoreAppSpeedFocus={restoreAppSpeedFocus} />;
+      case 'appSpeed':
+        return <AppSpeedView onBack={() => { setRestoreAppSpeedFocus(true); handleSetActivePage('settings'); }} />;
 
       case 'help':
         return <HelpScopeView />;

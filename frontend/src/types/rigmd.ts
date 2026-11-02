@@ -403,6 +403,7 @@ export type PageKey =
   | 'warningSigns'
   | 'reports'
   | 'settings'
+  | 'appSpeed'
   | 'help';
 
 // ─── ADDED MISSING DATA SCHEMAS FOR THE INTAKE/RESULT VIEWS ───

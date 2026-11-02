@@ -1,6 +1,7 @@
 import CheckReadings from '../components/CheckReadings';
 import CheckNextSteps from '../components/CheckNextSteps';
 import ResultDetails from '../components/ResultDetails';
+import { startScanMeasurement } from '../lib/performanceRecording';
 import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
 import {
   useEffect,
@@ -1187,6 +1188,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
         return;
       }
 
+      const performanceRun = startScanMeasurement(diagnosisMode);
       setDiagnosisStage(
         'requesting',
       );
@@ -1242,9 +1244,11 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
       setDiagnosisStage(
         'completed',
       );
+      performanceRun.saved(automaticReport.session_id);
       onDiagnosisComplete(automaticReport.session_id);
 
       } catch (err: any) {
+        performanceRun.failed();
         console.error(
           'One-click diagnosis error:',
           err,
