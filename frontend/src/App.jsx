@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import {
   BrowserRouter,
@@ -8,6 +8,8 @@ import {
 } from 'react-router-dom';
 
 import SplashScreen from './components/SplashScreen';
+import DisplayPreferencesProvider from './components/DisplayPreferencesProvider';
+import { afterScreenPaint, notifyDesktopDashboardReady } from './lib/performanceRecording';
 import HardwareDashboard from './pages/HardwareDashboard';
 import PublicPageMetadata from './components/PublicPageMetadata';
 
@@ -24,6 +26,18 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 function DashboardApp() {
   const [showSplash, setShowSplash] = useState(true);
+  const [startupReady, setStartupReady] = useState(null);
+  const [splashExited, setSplashExited] = useState(false);
+  const hiddenDuringStartup = useRef(document.visibilityState === 'hidden');
+  useEffect(() => {
+    const track = () => { hiddenDuringStartup.current ||= document.visibilityState === 'hidden'; };
+    document.addEventListener('visibilitychange', track);
+    return () => document.removeEventListener('visibilitychange', track);
+  }, []);
+  useEffect(() => {
+    if (!splashExited || startupReady === null) return;
+    return afterScreenPaint(() => notifyDesktopDashboardReady(startupReady && !hiddenDuringStartup.current));
+  }, [splashExited, startupReady]);
 
   useEffect(() => {
     const splashTimer = window.setTimeout(() => {
@@ -35,9 +49,9 @@ function DashboardApp() {
 
   return (
     <>
-      <HardwareDashboard />
+      <HardwareDashboard onStartupReady={setStartupReady} />
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={() => setSplashExited(true)}>
         {showSplash && <SplashScreen />}
       </AnimatePresence>
     </>
@@ -73,7 +87,7 @@ function PublicDownloadRoutes() {
 function DesktopAppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<DashboardApp />} />
+      <Route path="/" element={<DisplayPreferencesProvider><DashboardApp /></DisplayPreferencesProvider>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

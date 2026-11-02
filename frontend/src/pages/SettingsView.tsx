@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Bot,
   CheckCircle2,
   RefreshCw,
   Save,
   ShieldCheck,
+  Activity,
+  ArrowRight,
 } from 'lucide-react';
 import TopHeader from '../components/TopHeader';
 import CloudAiAccountPanel from '../components/CloudAiAccountPanel';
 import AvailableTools from '../components/AvailableTools';
+import ReadingSettings from '../components/ReadingSettings';
 import {
   getAgentSettings,
   getBackendErrorMessage,
@@ -18,7 +21,9 @@ import {
   type RegisteredAgentTool,
 } from '../services/autonomyService';
 
-export default function SettingsView() {
+export default function SettingsView({ onOpenAppSpeed, restoreAppSpeedFocus = false }: { onOpenAppSpeed: () => void; restoreAppSpeedFocus?: boolean }) {
+  const speedButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (restoreAppSpeedFocus) speedButton.current?.focus(); }, [restoreAppSpeedFocus]);
   const [settings, setSettings] = useState<AgentSettingsResponse | null>(null);
   const [tools, setTools] = useState<RegisteredAgentTool[]>([]);
   const [preferredMode, setPreferredMode] = useState<'auto' | 'local-only'>('auto');
@@ -77,11 +82,16 @@ export default function SettingsView() {
     <>
       <TopHeader
         title="Settings"
-        subtitle="Choose whether RigMD may use Gemini for explanations and guided-action reasoning"
+        subtitle="Adjust reading comfort, your account, and AI assistance"
       />
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-6 pb-10">
+          <ReadingSettings />
+          <button ref={speedButton} type="button" onClick={onOpenAppSpeed} className="flex min-w-0 flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-5 text-left hover:border-cyan-400/60 sm:p-6">
+            <span className="flex min-w-0 items-start gap-3"><Activity aria-hidden="true" className="mt-1 shrink-0 text-cyan-300" /><span><span className="block text-lg font-bold text-white">App speed</span><span className="mt-2 block text-sm leading-relaxed text-slate-300">See how quickly RigMD opens your checks and prepares reports.</span></span></span>
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200">View results<ArrowRight size={18} aria-hidden="true" /></span>
+          </button>
           <CloudAiAccountPanel onAccountChanged={() => { void getAgentSettings().then(setSettings).catch(() => setErrorMessage('Could not refresh AI status.')); }} />
           {isLoading ? (
             <div className="flex items-center gap-3 rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-6 text-sm text-slate-300">

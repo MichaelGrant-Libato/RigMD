@@ -13,6 +13,15 @@ namespace RigMD.Desktop;
 
 public partial class App : System.Windows.Application
 {
+    // Include API bootstrap and WebView initialization, not just the frontend navigation.
+    internal static readonly double StartupInitialMs = GetInitialStartupTime();
+    internal static readonly Stopwatch StartupWatch = Stopwatch.StartNew();
+    private static double GetInitialStartupTime()
+    {
+        using var process = Process.GetCurrentProcess();
+        return Math.Max(0, (DateTime.UtcNow - process.StartTime.ToUniversalTime()).TotalMilliseconds);
+    }
+
     private const string SingleInstanceMutexName = @"Local\RigMD_Desktop_SingleInstance_Mutex";
 
     private Mutex? _singleInstanceMutex;

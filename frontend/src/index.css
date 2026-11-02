@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
+/* Desktop reading preferences also reach dialogs rendered through portals. */
+html[data-rigmd-text-size="standard"] { font-size: 100%; }
+html[data-rigmd-text-size="larger"] { font-size: 112.5%; }
+html[data-rigmd-text-size="largest"] { font-size: 125%; }
+
+html[data-rigmd-motion="reduced"] *,
+html[data-rigmd-motion="reduced"] *::before,
+html[data-rigmd-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media print {
+  html[data-rigmd-text-size] { font-size: 100% !important; }
+}
+
 :root {
   /* Main layout */
   --rigmd-bg: #070c12;

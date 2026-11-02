@@ -182,6 +182,26 @@ public class LocalApiRateLimitingTests
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
     }
 
+    [Fact]
+    public async Task PerformanceWritesHaveTheirOwnBoundedAllowanceAndStillRequireAuthentication()
+    {
+        await using var host = await TestHost.StartAsync();
+        for (var i = 0; i < 120; i++)
+        {
+            using var response = await host.Client.PostAsync("/api/performance", null);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        using var limited = await host.Client.PostAsync("/api/performance", null);
+        using var scan = await host.Client.PostAsync("/api/diagnosis/local-scan", null);
+        using var action = await host.Client.PostAsync("/api/autonomy/preview", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, scan.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, action.StatusCode);
+        host.Client.DefaultRequestHeaders.Authorization = null;
+        using var anonymous = await host.Client.PostAsync("/api/performance", null);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
     private sealed class TestHost(WebApplication app, HttpClient client) : IAsyncDisposable
     {
         public HttpClient Client { get; } = client;
@@ -205,7 +225,7 @@ public class LocalApiRateLimitingTests
                 app.MapGet(path, () => Results.Ok());
             foreach (var path in new[] { "/api/autonomy/settings", "/api/autonomy/preview", "/api/cloud-ai/sign-in",
                 "/api/cloud-ai/sign-out", "/api/diagnosis/local-scan", "/api/diagnosis/submit", "/api/diagnosis/analyze",
-                "/api/remediation/open-target" })
+                "/api/remediation/open-target", "/api/performance" })
                 app.MapPost(path, () => Results.Ok());
             try
             {

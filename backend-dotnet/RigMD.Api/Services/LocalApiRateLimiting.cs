@@ -46,6 +46,7 @@ public static class LocalApiRateLimiting
                     "/api/autonomy/settings" when !readOnly => "settings",
                     "/api/diagnosis/local-scan" or "/api/diagnosis/submit" or "/api/diagnosis/analyze" when !readOnly => "diagnosis",
                     _ when !readOnly && path.StartsWith("/api/diagnosis/") && path.EndsWith("/check-resolution") => "diagnosis",
+                    "/api/performance" when !readOnly => "performance",
                     _ when path.StartsWith("/api/autonomy/") && !metadataRead => "autonomy",
                     _ when path.StartsWith("/api/remediation/") => "autonomy",
                     _ => "standard"
@@ -54,8 +55,8 @@ public static class LocalApiRateLimiting
                 return RateLimitPartition.GetFixedWindowLimiter($"{group}:{clientKey}",
                     _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = heavy ? 8 : 45,
-                        Window = TimeSpan.FromSeconds(heavy ? 30 : 15),
+                        PermitLimit = group == "performance" ? 120 : heavy ? 8 : 45,
+                        Window = TimeSpan.FromSeconds(group == "performance" ? 60 : heavy ? 30 : 15),
                         QueueLimit = 0,
                         AutoReplenishment = true
                     });

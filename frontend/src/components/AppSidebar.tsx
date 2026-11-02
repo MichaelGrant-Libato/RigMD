@@ -338,7 +338,7 @@ export default function AppSidebar({
             icon={Settings}
             label="Settings"
             collapsed={collapsed}
-            active={activePage === 'settings'}
+            active={activePage === 'settings' || activePage === 'appSpeed'}
             onClick={() => navigate('settings')}
           />
 

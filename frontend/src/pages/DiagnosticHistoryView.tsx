@@ -1,3 +1,4 @@
+import { afterScreenPaint, beginMeasurement } from '../lib/performanceRecording';
 import { friendlyActionCategory } from '../lib/diagnosticLanguage';
 import { getCheckOverview, getCheckStatus, getAdditionalFindingStatus, crashMetric, repeatedFindingLabel, getCheckEvidenceLabel } from '../lib/checkPresentation';
 import {
@@ -6,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -339,7 +341,6 @@ function SessionRow({
           aria-label="Delete this saved check"
         >
           <Trash2 size={13} />
-          <span className="sr-only">Delete</span>
         </motion.button>
       </div>
     </motion.div>
@@ -396,14 +397,25 @@ export default function DiagnosticHistoryView({
   const [sessionPendingDelete, setSessionPendingDelete] =
     useState<SessionSummary | null>(null);
 
+  const performanceRun = useRef<ReturnType<typeof beginMeasurement> | null>(null);
+  const fetchSequence = useRef(0);
+  const historyRequest = useRef<AbortController | null>(null);
+  const [performanceRevision, setPerformanceRevision] = useState(0);
+
   const fetchSessions =
-    useCallback(async () => {
+    useCallback(async (mode: unknown = 'normal') => {
+      const sequence = ++fetchSequence.current;
+      historyRequest.current?.abort();
+      const controller = new AbortController();
+      historyRequest.current = controller;
+      performanceRun.current?.finish('canceled');
+      performanceRun.current = beginMeasurement('history.ui', { mode: mode === 'history_50' ? 'history_50' : 'normal' });
       setLoading(true);
       setError(null);
 
       try {
         const response = await apiFetch(
-          '/api/diagnosis/sessions'
+          '/api/diagnosis/sessions', { signal: controller.signal }
         );
 
         if (!response.ok) {
@@ -413,6 +425,7 @@ export default function DiagnosticHistoryView({
         }
 
         const data = await response.json();
+        if (sequence !== fetchSequence.current) return;
         setLoadedAt(Date.now());
 
         if (Array.isArray(data)) {
@@ -420,14 +433,12 @@ export default function DiagnosticHistoryView({
         } else if (Array.isArray(data?.sessions)) {
           setSessions(data.sessions as SessionSummary[]);
         } else {
-          console.warn(
-            'Unexpected diagnostic sessions response:',
-            data
-          );
-
-          setSessions([]);
+          throw new Error('Invalid history response');
         }
       } catch (error) {
+        if (sequence !== fetchSequence.current) return;
+        performanceRun.current?.finish('failed');
+        performanceRun.current = null;
         console.error(
           'Failed to load diagnostic sessions:',
           error
@@ -439,13 +450,20 @@ export default function DiagnosticHistoryView({
 
         setSessions([]);
       } finally {
-        setLoading(false);
+        if (sequence === fetchSequence.current) { setLoading(false); setPerformanceRevision(value => value + 1); }
       }
     }, []);
 
+  const cancelHistoryLoad = useCallback(() => {
+    fetchSequence.current++;
+    historyRequest.current?.abort();
+    performanceRun.current?.finish('canceled');
+    performanceRun.current = null;
+  }, []);
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    void fetchSessions();
+    return cancelHistoryLoad;
+  }, [fetchSessions, cancelHistoryLoad]);
 
   useEffect(() => {
     setVisibleCount(
@@ -529,6 +547,15 @@ export default function DiagnosticHistoryView({
       ]
     );
 
+  useEffect(() => {
+    if (loading || !performanceRun.current) return;
+    const measurement = performanceRun.current;
+    return afterScreenPaint(() => {
+      measurement.finish(error ? 'failed' : view === 'saved' ? 'completed' : 'incomplete', { recordCount: view === 'saved' ? visibleSessions.length : 0 });
+      if (performanceRun.current === measurement) performanceRun.current = null;
+    });
+  }, [loading, error, view, visibleSessions, performanceRevision]);
+
   const totalSessions =
     sessions.length;
 
@@ -603,7 +630,7 @@ export default function DiagnosticHistoryView({
         animate="visible"
         exit="exit"
         transition={pageTransition}
-        className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6 lg:px-8"
+        className="custom-scrollbar relative min-h-0 flex-1 overflow-y-auto px-6 py-6 lg:px-8"
       >
         <div className="mx-auto w-full max-w-[1512px] space-y-5">
           <div role="tablist" aria-label="Past checks views" className="flex gap-2 border-b border-[var(--rigmd-border)] pb-3"
@@ -737,6 +764,12 @@ export default function DiagnosticHistoryView({
 
                   Refresh
                 </motion.button>
+                <button type="button" disabled={loading || hasActiveFilters || sessions.length < 50}
+                  onClick={() => { setVisibleCount(50); void fetchSessions('history_50'); }}
+                  title="Refresh and display 50 saved checks. Clear filters first."
+                  className="min-h-10 rounded-lg border border-slate-600 px-3 text-xs font-semibold text-slate-300 disabled:opacity-40">
+                  Show 50 checks
+                </button>
               </div>
             </div>
           </section>

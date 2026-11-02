@@ -1,3 +1,5 @@
+import { afterScreenPaint, finishScanMeasurement } from '../lib/performanceRecording';
+import { unavailableReadingCount } from '../lib/performanceMetrics';
 import CheckReadings from '../components/CheckReadings';
 import ProblemFeedback from '../components/ProblemFeedback';
 import CheckNextSteps from '../components/CheckNextSteps';
@@ -188,6 +190,11 @@ export default function DiagnosticSessionDetailView({
     useState<string | null>(
       null,
     );
+
+  useEffect(() => {
+    if (loading) return;
+    return afterScreenPaint(() => finishScanMeasurement(sessionId, unavailableReadingCount(session?.proof), !session || !!error));
+  }, [loading, session, error, sessionId]);
 
   const fetchSession =
     useCallback(async () => {
