@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizePerformance, targetFor, performanceExport, unavailableReadingCount } from '../src/lib/performanceMetrics.ts';
+import { summarizePerformance, targetFor, performanceExport, unavailableReadingCount, operationLabels } from '../src/lib/performanceMetrics.ts';
 
 const record = (overrides = {}) => ({ id: 'id', createdAt: '2026-11-01T00:00:00Z', operation: 'history.ui', outcome: 'completed', durationMs: 3000,
   recordCount: 50, unavailableCount: null, mode: 'normal', engine: 'unknown', appVersion: '0.2.3', buildConfiguration: 'Release', deviceKey: 'pc-one', osVersion: 'Windows', architecture: 'X64', logicalProcessors: 8, ...overrides });
+
+test('startup stages remain separate from the total and have no individual SRS target', () => {
+  const operations = ['startup.api_start.desktop', 'startup.api_ready.desktop', 'startup.webview.desktop', 'startup.dashboard.desktop'];
+  for (const operation of operations) {
+    assert.match(operationLabels[operation], /^Startup/);
+    assert.equal(targetFor(record({ operation })), null);
+  }
+  const summaries = summarizePerformance([...operations, 'startup.desktop'].map(operation => record({ operation })));
+  assert.equal(summaries.length, 5);
+  assert.equal(summaries.find(row => row.operation === 'startup.desktop').eligible, 1);
+  assert.ok(summaries.filter(row => row.operation !== 'startup.desktop').every(row => row.eligible === 0));
+});
 
 test('SRS boundaries are inclusive and history needs 50 displayed records', () => {
   assert.equal(targetFor(record()), 3000);

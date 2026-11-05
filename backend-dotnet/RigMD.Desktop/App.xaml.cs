@@ -16,6 +16,8 @@ public partial class App : System.Windows.Application
     // Include API bootstrap and WebView initialization, not just the frontend navigation.
     internal static readonly double StartupInitialMs = GetInitialStartupTime();
     internal static readonly Stopwatch StartupWatch = Stopwatch.StartNew();
+    internal static double ApiStartDurationMs { get; private set; }
+    internal static double ApiReadyDurationMs { get; private set; }
     private static double GetInitialStartupTime()
     {
         using var process = Process.GetCurrentProcess();
@@ -62,9 +64,13 @@ public partial class App : System.Windows.Application
 
         try
         {
+            var phaseWatch = Stopwatch.StartNew();
             StartApiProcess();
+            ApiStartDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
 
+            phaseWatch.Restart();
             await WaitForApiReady();
+            ApiReadyDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
 
             var window = new MainWindow(_localApiToken);
             MainWindow = window;
@@ -84,46 +90,10 @@ public partial class App : System.Windows.Application
 
     private void StartApiProcess()
     {
+        var apiExe = DesktopApiLocation.Resolve(AppDomain.CurrentDomain.BaseDirectory);
+        var apiDirectory = Path.GetDirectoryName(apiExe)!;
+
         KillStaleApiProcesses();
-
-        var desktopDirectory =
-            AppDomain.CurrentDomain.BaseDirectory;
-
-        string apiDirectory;
-
-#if DEBUG
-        apiDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "..", "..", "..", "RigMD.Api", "bin", "Debug", "net10.0-windows"));
-#else
-        var rigMdDirectory =
-            Directory.GetParent(
-                desktopDirectory.TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar))
-            ?.FullName;
-
-        if (string.IsNullOrWhiteSpace(rigMdDirectory))
-        {
-            throw new DirectoryNotFoundException(
-                "The RigMD installation directory could not be determined.");
-        }
-
-        apiDirectory =
-            Path.Combine(
-                rigMdDirectory,
-                "Api");
-#endif
-
-        var apiExe =
-            Path.Combine(
-                apiDirectory,
-                "RigMD.Api.exe");
-
-        if (!File.Exists(apiExe))
-        {
-            throw new FileNotFoundException(
-                "The local API executable was not found.",
-                apiExe);
-        }
 
         _apiProcess = new Process
         {

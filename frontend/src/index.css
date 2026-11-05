@@ -131,8 +131,11 @@ button {
 }
 
 .rigmd-app-shell {
+  position: fixed;
+  inset: 0;
   height: 100dvh;
   min-height: 0;
+  overflow: hidden;
   background: var(--rigmd-main-surface);
 }
 

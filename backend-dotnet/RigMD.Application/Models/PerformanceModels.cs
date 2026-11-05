@@ -9,7 +9,9 @@ public static class PerformanceRules
 {
     public const int RetainedRecords = 2000;
     public static bool IsClientOperation(string operation) => operation is
-        "startup.desktop" or "scan.ui" or "history.ui" or "report.ui" or "pdf.desktop" or "pdf_request.ui" or "text.ui";
+        "startup.desktop" or "startup.api_start.desktop" or "startup.api_ready.desktop" or
+        "startup.webview.desktop" or "startup.dashboard.desktop" or
+        "scan.ui" or "history.ui" or "report.ui" or "pdf.desktop" or "pdf_request.ui" or "text.ui";
     public static bool IsOperation(string operation) => IsClientOperation(operation) || operation is
         "scan.backend" or "history.backend" or "recheck.backend" or "action_request.backend";
     public static bool IsValid(PerformanceSample sample) => sample.Id != Guid.Empty && IsOperation(sample.Operation)
