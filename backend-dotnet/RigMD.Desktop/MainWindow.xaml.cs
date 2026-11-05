@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private readonly string _localApiToken;
     private static readonly Uri LocalApiOrigin = new("http://localhost:5273");
     private bool _startupRecorded;
+    private readonly Stopwatch _navigationWatch = new();
+    private double _webViewDurationMs;
     private bool _isSavingPdf;
     private bool _exitConfirmationOpen;
 
@@ -31,6 +33,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        var phaseWatch = Stopwatch.StartNew();
         try
         {
             var userDataFolder = Path.Combine(
@@ -76,6 +79,8 @@ public partial class MainWindow : Window
             Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
 #endif
 
+            _webViewDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
+            _navigationWatch.Restart();
             Browser.Source = new Uri(
                 "http" + Uri.SchemeDelimiter + "localhost:5273");
 
@@ -114,7 +119,14 @@ public partial class MainWindow : Window
             && DesktopPerformanceMessage.TryReadDashboardReady(e.Source, e.WebMessageAsJson, out var startupOutcome))
         {
             _startupRecorded = true;
-            await RecordPerformanceAsync("startup.desktop", App.StartupInitialMs + App.StartupWatch.Elapsed.TotalMilliseconds, startupOutcome);
+            // Capture every duration before recording; logging must not inflate another phase.
+            var totalMs = App.StartupInitialMs + App.StartupWatch.Elapsed.TotalMilliseconds;
+            var dashboardMs = _navigationWatch.Elapsed.TotalMilliseconds;
+            await RecordPerformanceAsync("startup.desktop", totalMs, startupOutcome);
+            await RecordPerformanceAsync("startup.api_start.desktop", App.ApiStartDurationMs, "completed");
+            await RecordPerformanceAsync("startup.api_ready.desktop", App.ApiReadyDurationMs, "completed");
+            await RecordPerformanceAsync("startup.webview.desktop", _webViewDurationMs, "completed");
+            await RecordPerformanceAsync("startup.dashboard.desktop", dashboardMs, startupOutcome);
             return;
         }
         if (!DesktopReportExportRequest.TryParse(e.Source, e.WebMessageAsJson, out var request) ||

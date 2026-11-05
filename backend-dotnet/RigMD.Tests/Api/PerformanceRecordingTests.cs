@@ -16,6 +16,18 @@ namespace RigMD.Tests.Api;
 
 public sealed class PerformanceRecordingTests
 {
+    [Theory]
+    [InlineData("startup.api_start.desktop", true)]
+    [InlineData("startup.api_ready.desktop", true)]
+    [InlineData("startup.webview.desktop", true)]
+    [InlineData("startup.dashboard.desktop", true)]
+    [InlineData("startup.unknown.desktop", false)]
+    public void StartupStagesUseAnExplicitAllowlist(string operation, bool expected)
+    {
+        Assert.Equal(expected, PerformanceRules.IsClientOperation(operation));
+        Assert.Equal(expected, PerformanceRules.IsValid(new PerformanceSample(Guid.NewGuid(), operation, "completed", 100)));
+    }
+
     private sealed class Client : ICurrentClientProvider { public string GetCurrentClientId() => "local-owner"; }
     private sealed class Records : IPerformanceRecordRepository
     {

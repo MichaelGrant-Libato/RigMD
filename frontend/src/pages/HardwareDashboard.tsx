@@ -495,7 +495,7 @@ function HomeDashboardView({
         initial="hidden"
         animate="visible"
         transition={cardTransition}
-        className="custom-scrollbar flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8"
+        className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 lg:px-8"
       >
         <HomeDashboardContent
           stats={stats}
@@ -835,7 +835,7 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
-      <main className="rigmd-main-surface flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <main className="rigmd-main-surface flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <HeaderStatusProvider
           deviceName={deviceName}
           liveStatus={liveStatus}

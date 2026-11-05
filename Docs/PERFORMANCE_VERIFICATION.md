@@ -16,6 +16,21 @@ This recorder supports repeatable performance verification. It does not establis
 
 Screen-ready is a rendering proxy, not a human usability measurement. Frontend timers use `performance.now`; native/backend timers use `Stopwatch`. A hidden page at any point makes an otherwise completed frontend run incomplete. Timings over 24 hours and malformed metadata are rejected. PDF and text contents are unchanged.
 
+## Startup stage measurements
+
+New desktop builds also record four stages under **Technical details for testing**:
+
+| Stage | Measurement boundary |
+| --- | --- |
+| Starting the local service | The call that cleans up stale API processes and starts the API process. |
+| Waiting for the local service | The readiness checks after process launch, until the local API and frontend assets are available. |
+| Preparing the app window | The window Loaded handler through WebView initialization and setup, before navigation. |
+| Loading the Home screen | Navigation through dashboard readiness, including initial data loading, splash completion and rendering frames. |
+
+The existing process-start-to-dashboard-ready measurement and its five-second SRS target are unchanged. These stages identify where time is spent; they have no individual SRS targets and must not be added together as a replacement for the total because other startup work occurs between their boundaries. Durations are captured before recording so record writes do not inflate another stage.
+
+Older startup records have no stage breakdown. Test a newly built desktop host and inspect its build context separately from the installed release. A launch that never reaches dashboard readiness can still leave no stage records. Adding these measurements does not itself make startup faster or prove the cause of a delay.
+
 ## Using Settings
 
 1. Run a build containing both the updated API/frontend and updated desktop host. An older installed host cannot provide startup or native PDF timings.
