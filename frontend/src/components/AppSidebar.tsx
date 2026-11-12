@@ -134,7 +134,7 @@ function getStatusCopy(status: LiveDataStatus) {
 
   return {
     title: 'System Status',
-    label: 'Live Scan Active',
+    label: 'Readings available',
       dotClassName: 'bg-emerald-400',
       textClassName: 'text-emerald-300',
   };
@@ -142,7 +142,7 @@ function getStatusCopy(status: LiveDataStatus) {
 
 function formatRelativeUpdate(value: Date | null | undefined) {
   if (!value) {
-    return 'Waiting for first scan';
+    return 'Waiting for readings';
   }
 
   const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));

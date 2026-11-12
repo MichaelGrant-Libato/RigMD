@@ -6,6 +6,8 @@ using RigMD.Application.Models;
 
 namespace RigMD.Infrastructure.Windows;
 
+public sealed record NativeCpuActivity(double? UsagePercent, string State, DateTimeOffset? CapturedAt, double? WindowSeconds);
+
 public class WmiCpuProvider : ICpuProvider
 {
     private static PerformanceCounter? _usageCounter;
@@ -46,6 +48,13 @@ public class WmiCpuProvider : ICpuProvider
     {
         var utility = !_utilityUnavailable || DateTimeOffset.UtcNow >= _retryUtilityAt ? UsageSampler.Read() : null;
         return _utilityUnavailable ? NativeSampler.Read() : utility;
+    }
+
+    public static NativeCpuActivity ReadNativeActivity()
+    {
+        var observation = NativeSampler.ReadObservation();
+        return new(observation.Value, observation.Value.HasValue ? "measured" : observation.Primed ? "warming" : "unavailable",
+            observation.CapturedAt, observation.WindowSeconds);
     }
 
     public static string UsageSource => _utilityUnavailable ? "Windows processor busy time (fallback)" : "Windows processor busy time";

@@ -1,6 +1,8 @@
 import CheckReadings from '../components/CheckReadings';
+import { getApiErrorMessage } from '../lib/apiErrorMessage';
 import CheckNextSteps from '../components/CheckNextSteps';
 import ResultDetails from '../components/ResultDetails';
+import WindowsToolGuide from '../components/WindowsToolGuide';
 import { startScanMeasurement } from '../lib/performanceRecording';
 import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
 import {
@@ -560,63 +562,6 @@ function getActionTone(
 
 
 
-
-function getApiErrorMessage(
-  err: any,
-  fallback: string,
-) {
-  const detail =
-    err?.response?.data?.detail;
-
-  const message = (() => {
-    if (
-      typeof detail ===
-      'string'
-    ) {
-      return detail;
-    }
-
-    if (
-      Array.isArray(detail)
-    ) {
-      return detail
-        .map(
-          (item) =>
-            item?.msg ||
-            item?.message ||
-            JSON.stringify(item),
-        )
-        .join(' ');
-    }
-
-    if (
-      detail &&
-      typeof detail ===
-        'object'
-    ) {
-      return (
-        detail.msg ||
-        detail.message ||
-        JSON.stringify(detail)
-      );
-    }
-
-    return (
-      err?.message ||
-      fallback
-    );
-  })();
-
-  if (
-    /at\s+\S+\s+\(|Traceback|System\./.test(
-      message,
-    )
-  ) {
-    return fallback;
-  }
-
-  return message;
-}
 
 function getActionPreview(
   action: RemediationAction,
@@ -1247,7 +1192,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
       performanceRun.saved(automaticReport.session_id);
       onDiagnosisComplete(automaticReport.session_id);
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         performanceRun.failed();
         console.error(
           'One-click diagnosis error:',
@@ -1281,7 +1226,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
 
       try {
         const response =
-          await apiPost<any>(
+          await apiPost<Pick<DiagnosticReport, 'resolution_status' | 'resolution_checked_at' | 'resolution_summary' | 'resolution_proof'>>(
             `/api/diagnosis/${report.session_id}/check-resolution`,
           );
 
@@ -1461,13 +1406,14 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                       ? 'task_manager'
                       : 'reliability_monitor');
 
-        await apiPost(
+        const { data } = await apiPost<{ success: boolean; summary?: string }>(
           '/api/remediation/open-target',
           {
             target:
               targetParam,
           },
         );
+        if (data.success !== true) throw new Error(data.summary || 'Windows could not open this tool.');
       } catch (err) {
         console.error(
           'Inspection error:',
@@ -1565,12 +1511,13 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
       setInspecting(true);
 
       try {
-        await apiPost(
+        const { data } = await apiPost<{ success: boolean; summary?: string }>(
           '/api/remediation/open-target',
           {
             target,
           },
         );
+        if (data.success !== true) throw new Error(data.summary || 'Windows could not open this tool.');
       } catch (err) {
         console.error(
           'Post-execution inspection error:',
@@ -2453,22 +2400,8 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                         </p>
                       </div>
 
-                      <motion.button
-                        type="button"
-                        disabled={inspecting}
-                        onClick={
-                          handleVerifyLocation
-                        }
-                        whileTap={
-                          buttonTap
-                        }
-                        className="w-full shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-center text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
-                      >
-                        {inspecting
-                          ? 'Opening...'
-                          : 'Open tool'}
-                      </motion.button>
                     </div>
+                    <div className="mt-3"><WindowsToolGuide target={report.verification_target?.target || getVerificationTarget()} onOpen={handleVerifyLocation} busy={inspecting} /></div>
                   </div>
                 )}
 
@@ -2550,25 +2483,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                   </p>
 
                                   {preview.postTarget && (
-                                    <motion.button
-                                      type="button"
-                                      disabled={
-                                        inspecting
-                                      }
-                                      onClick={() =>
-                                        handlePostExecutionInspect(
-                                          action,
-                                        )
-                                      }
-                                      whileTap={
-                                        buttonTap
-                                      }
-                                      className="mt-4 w-fit rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs font-bold text-cyan-400 transition-colors hover:bg-cyan-500/10 disabled:opacity-50"
-                                    >
-                                      {inspecting
-                                        ? 'Opening...'
-                                        : 'Open Related Tool'}
-                                    </motion.button>
+                                    <div className="mt-4"><WindowsToolGuide target={preview.postTarget} onOpen={() => handlePostExecutionInspect(action)} busy={inspecting} /></div>
                                   )}
                                 </div>
                               </motion.div>

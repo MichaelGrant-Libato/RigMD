@@ -1,8 +1,25 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Services;
 using RigMD.Infrastructure.Persistence;
 using RigMD.Api.Services;
+
+if (args is [StorageCleanupWorker.Switch])
+{
+    Environment.Exit(StorageCleanupWorker.RunFromEnvironment());
+    return;
+}
+
+if (args is [RegisteredUninstallHelper.Switch])
+{
+    Environment.Exit(await RegisteredUninstallHelper.RunFromEnvironmentAsync());
+    return;
+}
+if (string.Equals(Path.GetFileName(Environment.ProcessPath), "RigMD.Uninstall.exe", StringComparison.OrdinalIgnoreCase))
+{
+    Environment.Exit(87);
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 // SignalR browser transports use a query credential; do not log full request URLs.
@@ -17,6 +34,8 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<TelemetrySubscriptions>();
+builder.Services.AddSingleton<IHomeOverviewReader, WindowsHomeOverviewReader>();
 builder.Services.AddSingleton(new RigMD.Api.Services.LocalApiSession(
     Environment.GetEnvironmentVariable(RigMD.Api.Services.LocalApiSession.EnvironmentVariable)));
 builder.Services.AddSingleton<RigMD.Api.Services.LocalRemediationExecutionGate>();
@@ -26,6 +45,10 @@ builder.Services.AddSingleton<PerformanceRecorder>();
 builder.Services.AddHostedService(services => services.GetRequiredService<PerformanceRecorder>());
 builder.Services.AddScoped<ISessionFeedbackRepository, SessionFeedbackRepository>();
 builder.Services.AddSingleton<RigMD.Api.Services.RemediationApprovalStore>();
+builder.Services.AddSingleton<RigMD.Api.Services.IAppUninstallPlatform, RigMD.Api.Services.WindowsAppUninstallPlatform>();
+builder.Services.AddSingleton<RigMD.Api.Services.AppUninstallService>();
+builder.Services.AddSingleton<IStorageCleanupPlatform, WindowsStorageCleanupPlatform>();
+builder.Services.AddSingleton<StorageFileCleanupService>();
 builder.Services.AddHttpClient("CloudAccount").RedactLoggedHeaders(_ => true)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<RigMD.Application.Contracts.Autonomy.ICloudAiSession>(services =>
@@ -70,6 +93,10 @@ var sqliteConnectionString =
 
 builder.Services.AddDbContext<RigMdDbContext>(options =>
     options.UseSqlite(sqliteConnectionString));
+builder.Services.AddSingleton<IStorageOperationStore>(new SqliteStorageOperationStore(sqliteConnectionString));
+builder.Services.AddSingleton<IStorageBootIdentity, RigMD.Infrastructure.Windows.WindowsStorageBootIdentity>();
+builder.Services.AddSingleton<StorageOperationJournal>();
+builder.Services.AddHostedService<StorageRecoveryStartupService>();
 
 // Client identification & isolation
 builder.Services.AddScoped<RigMD.Application.Contracts.Common.ICurrentClientProvider, RigMD.Api.Services.HttpCurrentClientProvider>();
@@ -107,6 +134,9 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IPowerProvider,
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IDisplayProvider,          RigMD.Infrastructure.Windows.WmiDisplayProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IWindowsSystemProfileService, RigMD.Infrastructure.Windows.WindowsSystemProfileService>();
 builder.Services.AddSingleton<RigMD.Infrastructure.Windows.IHardwareMonitorService, RigMD.Infrastructure.Windows.HardwareMonitorService>();
+// Resolve sensor initialization on the telemetry worker, not while hosted services are constructed.
+builder.Services.AddSingleton(services => new Lazy<RigMD.Infrastructure.Windows.IHardwareMonitorService>(
+    services.GetRequiredService<RigMD.Infrastructure.Windows.IHardwareMonitorService>));
 
 // ---------------------------------------------------------------
 // Application Services
@@ -126,30 +156,7 @@ builder.Services.AddScoped<WarningSignService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRemediationExecutor,    RigMD.Infrastructure.Remediation.WindowsRemediationExecutor>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IAutonomousOrchestrator, RigMD.Application.Services.Autonomy.AutonomousOrchestrator>();
 
-// Tier 0: Read-Only Diagnostic & Whole-System Memory Tools
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectCpuAndThermalsTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectMemoryAndProcessesTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectStorageHealthTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectGpuAndDisplaysTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectNetworkConnectivityTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectBatteryAndPowerTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.QueryWindowsEventLogsTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.QueryStartupAppsTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.InspectFullDeviceProfileTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.QueryPastChecksAndRemediationsTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Diagnostic.QueryRecurringProblemsAndWarningsTool>();
-
-// Tier 1 & Tier 2: OS Remediation Tools
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.TerminateProcessesTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearTempFilesTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearBrowserCacheTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.FlushDnsCacheTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RestartWindowsExplorerTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.ClearWindowsUpdateCacheTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RunSystemFileCheckerTool>();
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentTool, RigMD.Infrastructure.Remediation.Tools.Remediation.RescanPlugAndPlayDevicesTool>();
-
-builder.Services.AddScoped<RigMD.Application.Contracts.Autonomy.IRigMdAgentToolRegistry, RigMD.Infrastructure.Remediation.Tools.RigMdAgentToolRegistry>();
+RigMD.Infrastructure.Remediation.Tools.AgentToolRegistration.AddRigMdAgentTools(builder.Services);
 builder.Services.AddHttpClient<RigMD.Application.Contracts.Autonomy.IReActLlmClient, RigMD.Infrastructure.Ai.GeminiReActLlmClient>()
     .RedactLoggedHeaders(_ => true)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -160,6 +167,8 @@ builder.Services.AddScoped<DatabaseSyncService>();
 builder.Services.AddScoped<LocalDatabaseSchemaUpgradeService>();
 
 var app = builder.Build();
+// Prime the native CPU rate sample while schema/recovery and the desktop finish preparing.
+app.Services.GetRequiredService<IHomeOverviewReader>().Prime();
 
 // Secondary orphan protection: if launched by RigMD.Desktop with --parent-pid <PID>,
 // automatically shut down RigMD.Api the moment the parent desktop process exits.
@@ -213,7 +222,7 @@ if (parentPid.HasValue)
     });
 }
 
-// Auto-create SQLite schema, enable WAL concurrency mode, and synchronize with Supabase PostgreSQL on startup
+// Upgrade local SQLite and enable WAL. Legacy unscoped remote import is disabled.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<RigMdDbContext>();
@@ -236,10 +245,10 @@ using (var scope = app.Services.CreateScope())
         scope.ServiceProvider.GetRequiredService<LocalDatabaseSchemaUpgradeService>();
     await schemaUpgradeService.ApplyAsync();
 
-    var syncService =
-        scope.ServiceProvider.GetRequiredService<DatabaseSyncService>();
-    await syncService.SyncFromPostgresAsync();
 }
+// Read-only recovery never launches an action or recreates an approval.
+// Block mutations before the listener starts; recover in the background so Home can open independently.
+app.Services.GetRequiredService<LocalRemediationExecutionGate>().SetRecoveryBlock(StorageRecoveryStartupService.PendingMessage);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

@@ -71,7 +71,10 @@ test('findings use plain language without claiming unavailable readings are heal
 
 test('cleanup is described as storage recovery, never guaranteed RAM relief', () => {
   const copy = getActionExplanation('clear_temp_files');
-  assert.match(copy.bytesLabel, /storage/);
+  assert.match(copy.bytesLabel, /storage/i);
+  assert.doesNotMatch(copy.bytesLabel, /space to recover/i);
+  assert.match(copy.caution, /permanently deleted.*without using the Recycle Bin/);
+  assert.match(copy.caution, /cannot restore/);
   assert.match(copy.caution, /does not.*free.*working memory/);
   assert.match(getActionExplanation('close_selected_app').caution, /unsaved/);
   assert.equal(friendlyToolName('flush_dns_cache'), 'Refresh saved website addresses');

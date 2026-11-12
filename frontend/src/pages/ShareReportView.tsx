@@ -6,6 +6,7 @@ import { getDesktopPdfBridge, saveDesktopReportPdf } from '../lib/desktopReportP
 import { copyReport } from '../lib/reportExports';
 import ReportDocument from '../components/ReportDocument';
 import { loadReportData } from '../lib/reportData';
+import { loadReportActionHistory, type ReportActionHistory } from '../lib/reportActionHistory';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { createPortal } from 'react-dom';
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import { ReportPreviewSkeleton } from '../components/DeviceDataSkeleton';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import { apiFetch } from '../lib/api';
 import type { DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd';
@@ -50,6 +52,7 @@ export default function ShareReportView({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [includeHistory, setIncludeHistory] = useState(false);
+  const [actionHistory, setActionHistory] = useState<{ session: SessionSummary; value: ReportActionHistory } | null>(null);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const pdfRequest = useRef<AbortController | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -79,7 +82,7 @@ export default function ShareReportView({
     setMessage(null);
 
     try {
-      const fresh = await loadReportData(apiFetch, controller.signal);
+      const fresh = await loadReportData(apiFetch, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
       if (controller.signal.aborted) return;
       setSessions(fresh.sessions);
       setSelectedSessionId((prev) =>
@@ -107,7 +110,19 @@ export default function ShareReportView({
     () => sessions.find((s) => s.session_id === selectedSessionId) ?? sessions[0] ?? null,
     [selectedSessionId, sessions]
   );
-  const canExport = snapshot !== null && !isLoading && !loadError;
+  useEffect(() => {
+    if (!activeSession || isLoading || loadError) return;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]);
+    void loadReportActionHistory(apiFetch, activeSession, signal).then(value => {
+      if (!controller.signal.aborted) setActionHistory({ session: activeSession, value });
+    }).catch(() => {
+      if (!controller.signal.aborted) setActionHistory({ session: activeSession, value: { runs: [], unavailable: true } });
+    });
+    return () => controller.abort();
+  }, [activeSession, isLoading, loadError]);
+  const actionHistoryLoading = !!activeSession && actionHistory?.session !== activeSession;
+  const canExport = snapshot !== null && !isLoading && !loadError && !actionHistoryLoading;
   const statusMessage = loadError ? { type: 'error', text: loadError } : message;
 
   const isLatestSelected =
@@ -121,10 +136,11 @@ export default function ShareReportView({
         ...snapshot,
         sessions,
         selectedSession: activeSession,
+        actionHistory: actionHistory?.session === activeSession ? actionHistory.value : undefined,
         historyUnavailable: false,
         includeHistory,
       }) : null,
-    [activeSession, snapshot, sessions, includeHistory]
+    [activeSession, snapshot, sessions, includeHistory, actionHistory]
   );
   const reportText = useMemo(() => report ? reportDocumentText(report) : '', [report]);
 
@@ -328,7 +344,7 @@ export default function ShareReportView({
                 </label>
               </div>
               <div tabIndex={0} role="region" aria-label="Report preview" className="max-h-[700px] overflow-auto">
-                {isLoading ? <p className="p-5 text-slate-200">Loading report...</p>
+                {isLoading || actionHistoryLoading ? <ReportPreviewSkeleton />
                   : loadError ? <p className="p-5 text-slate-200">Report unavailable. Refresh to try again.</p>
                     : report && <ReportDocument report={report} />}
               </div>
@@ -412,7 +428,7 @@ export default function ShareReportView({
                 <li>Run a new check if the Device changed since the last scan.</li>
               </ul>
 
-              {sessions.length === 0 && onStartNewDiagnosis && (
+              {!isLoading && !loadError && sessions.length === 0 && onStartNewDiagnosis && (
                 <motion.button
                   type="button"
                   onClick={onStartNewDiagnosis}

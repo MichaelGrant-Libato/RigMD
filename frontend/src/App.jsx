@@ -9,7 +9,7 @@ import {
 
 import SplashScreen from './components/SplashScreen';
 import DisplayPreferencesProvider from './components/DisplayPreferencesProvider';
-import { afterScreenPaint, notifyDesktopDashboardReady } from './lib/performanceRecording';
+import { afterScreenPaint, notifyDesktopDashboardReady, notifyDesktopHomeSummaryReady } from './lib/performanceRecording';
 import HardwareDashboard from './pages/HardwareDashboard';
 import PublicPageMetadata from './components/PublicPageMetadata';
 
@@ -27,6 +27,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 function DashboardApp() {
   const [showSplash, setShowSplash] = useState(true);
   const [startupReady, setStartupReady] = useState(null);
+  const [summaryReady, setSummaryReady] = useState(null);
   const [splashExited, setSplashExited] = useState(false);
   const hiddenDuringStartup = useRef(document.visibilityState === 'hidden');
   useEffect(() => {
@@ -38,18 +39,18 @@ function DashboardApp() {
     if (!splashExited || startupReady === null) return;
     return afterScreenPaint(() => notifyDesktopDashboardReady(startupReady && !hiddenDuringStartup.current));
   }, [splashExited, startupReady]);
+  useEffect(() => {
+    if (!splashExited || summaryReady === null) return;
+    return afterScreenPaint(() => notifyDesktopHomeSummaryReady(summaryReady && !hiddenDuringStartup.current));
+  }, [splashExited, summaryReady]);
 
   useEffect(() => {
-    const splashTimer = window.setTimeout(() => {
-      setShowSplash(false);
-    }, 1100);
-
-    return () => window.clearTimeout(splashTimer);
-  }, []);
+    if (startupReady !== null) setShowSplash(false);
+  }, [startupReady]);
 
   return (
     <>
-      <HardwareDashboard onStartupReady={setStartupReady} />
+      <HardwareDashboard onStartupReady={setStartupReady} onSummaryReady={setSummaryReady} />
 
       <AnimatePresence onExitComplete={() => setSplashExited(true)}>
         {showSplash && <SplashScreen />}

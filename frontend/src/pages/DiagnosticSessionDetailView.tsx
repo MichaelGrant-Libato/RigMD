@@ -1,6 +1,8 @@
 import { afterScreenPaint, finishScanMeasurement } from '../lib/performanceRecording';
 import { unavailableReadingCount } from '../lib/performanceMetrics';
 import CheckReadings from '../components/CheckReadings';
+import FollowUpHistory from '../components/FollowUpHistory';
+import type { FollowUpObservation } from '../lib/followUpHistory';
 import ProblemFeedback from '../components/ProblemFeedback';
 import CheckNextSteps from '../components/CheckNextSteps';
 import ResultDetails from '../components/ResultDetails';
@@ -63,6 +65,8 @@ interface RemediationRunDetail {
 }
 
 interface SessionDetail {
+  follow_up_history?: FollowUpObservation[];
+  follow_up_history_status?: string;
   session_id: string;
   display_date?: string;
   display_time?: string;
@@ -321,6 +325,8 @@ export default function DiagnosticSessionDetailView({
 
                   resolution_proof:
                     resolutionData.resolution_proof,
+                  follow_up_history: resolutionData.follow_up_history,
+                  follow_up_history_status: resolutionData.follow_up_history_status,
                 }
               : prev,
         );
@@ -371,6 +377,8 @@ export default function DiagnosticSessionDetailView({
 
                   resolution_proof:
                     data.resolution_proof,
+                  follow_up_history: data.follow_up_history,
+                  follow_up_history_status: data.follow_up_history_status,
                 }
               : prev,
         );
@@ -490,7 +498,8 @@ export default function DiagnosticSessionDetailView({
                 </motion.section>
               )}
               </CheckNextSteps>
-              <ProblemFeedback key={sessionId} sessionId={sessionId} />
+              <ProblemFeedback key={`feedback-${sessionId}`} sessionId={sessionId} />
+              <FollowUpHistory key={`rechecks-${sessionId}`} observations={session.follow_up_history} status={session.follow_up_history_status} />
               <ResultDetails label="Original check" title="Original check">
               <div data-testid="original-check-details">
                 <motion.section

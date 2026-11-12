@@ -42,7 +42,7 @@ export function getFindingDetails(reading: DiagnosticReading) {
         : 'Review the recorded evidence and take a new reading before deciding whether to close apps.';
   } else if (reading.metric_id === 'cpu_usage') {
     explanation = 'This shows how busy the processor was during the check. Activity alone does not tell us its temperature or prove a hardware fault.';
-  } else if (reading.metric_id === 'storage_usage') {
+  } else if (/^storage_usage(?:_|$)/.test(reading.metric_id ?? '')) {
     explanation = 'This is storage used by Windows, apps and saved files. It is different from the working memory used by running apps and does not test drive health.';
     if (tone === 'attention') nextStep = 'Review files you no longer need and back up important files before removing anything. Recheck the available storage afterward.';
   } else if (/crash_history$/.test(reading.metric_id ?? '')) {

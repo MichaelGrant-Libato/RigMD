@@ -52,15 +52,16 @@ public class WmiMemoryProvider : IMemoryProvider
     public MemoryStatsDto GetMemoryStats()
     {
         var dto = ReadUsage();
+        List<ulong?>? installedModules = null;
         
         try
         {
             using var memSearcher = new ManagementObjectSearcher("SELECT Speed, FormFactor, Capacity FROM Win32_PhysicalMemory");
-            int slotsUsed = 0;
+            var capacities = new List<ulong?>();
             double totalRawCapacity = 0;
             foreach (var obj in memSearcher.Get())
             {
-                slotsUsed++;
+
                 if (obj["Speed"] != null && double.TryParse(obj["Speed"].ToString(), out var speed))
                 {
                     dto.SpeedMtps = speed;
@@ -71,13 +72,11 @@ public class WmiMemoryProvider : IMemoryProvider
                     dto.FormFactor = ff == 8 ? "DIMM" : ff == 12 ? "SODIMM" : "Unknown";
                 }
                 
-                if (obj["Capacity"] != null && long.TryParse(obj["Capacity"].ToString(), out var cap))
-                {
-                    totalRawCapacity += cap;
-                }
+                var capacity = ulong.TryParse(obj["Capacity"]?.ToString(), out var cap) && cap > 0 ? cap : (ulong?)null;
+                capacities.Add(capacity);
+                if (capacity.HasValue) totalRawCapacity += capacity.Value;
             }
-            dto.SlotsUsed = slotsUsed;
-            dto.SlotsTotal = slotsUsed > 4 ? slotsUsed : 4; // Approximating total slots
+            installedModules = capacities;
             
             dto.HardwareReservedMb = Math.Max(0, Math.Round((totalRawCapacity / (1024.0 * 1024.0)) - (dto.TotalGb * 1024.0), 1));
             
@@ -101,6 +100,44 @@ public class WmiMemoryProvider : IMemoryProvider
             // Ignore
         }
 
+        var slots = ReadSlotCounts(() => installedModules ?? throw new InvalidOperationException("Memory inventory unavailable."), ReadSystemSlotCounts);
+        dto.SlotsUsed = slots.Used;
+        dto.SlotsTotal = slots.Total;
         return dto;
+    }
+
+    internal static (int? Used, int? Total) ReadSlotCounts(Func<IReadOnlyList<ulong?>> readModules, Func<IReadOnlyList<int?>> readArrays)
+    {
+        int? used = null, total = null;
+        try
+        {
+            var modules = readModules();
+            if (modules.Count > 0 && modules.All(capacity => capacity is > 0)) used = modules.Count;
+        }
+        catch { }
+        try
+        {
+            var arrays = readArrays();
+            if (arrays.Count > 0 && arrays.All(count => count is > 0 and <= ushort.MaxValue))
+                total = arrays.Sum(count => count!.Value);
+        }
+        catch { }
+        // Retain the independently reported installed count without inventing a larger array.
+        if (used.HasValue && total.HasValue && used > total) total = null;
+        return (used, total);
+    }
+
+    private static IReadOnlyList<int?> ReadSystemSlotCounts()
+    {
+        using var searcher = new ManagementObjectSearcher("SELECT MemoryDevices FROM Win32_PhysicalMemoryArray WHERE Use = 3");
+        searcher.Options.Timeout = TimeSpan.FromSeconds(2);
+        using var rows = searcher.Get();
+        var counts = new List<int?>();
+        foreach (var row in rows)
+        {
+            using (row)
+                counts.Add(int.TryParse(row["MemoryDevices"]?.ToString(), out var count) ? count : null);
+        }
+        return counts;
     }
 }

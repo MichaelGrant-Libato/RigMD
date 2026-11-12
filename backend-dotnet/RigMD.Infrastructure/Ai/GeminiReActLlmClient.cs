@@ -699,20 +699,16 @@ public class GeminiReActLlmClient : IReActLlmClient
                 thermalSummary = "Completed live CPU and GPU thermal inspection.";
             }
 
-            var toolName = availableSet.Contains("terminate_processes") ? "terminate_processes" : "clear_temp_files";
             return new ReActModelTurnDecision
             {
                 EngineName = "RigMD Local Tool-Calling ReAct Engine",
-                Thought = $"Synthesized thermal telemetry ({thermalSummary}). Proposing '{toolName}' to reduce sustained background processor heat load.",
+                Thought = "Temperature and workload observations support investigation, not an unnamed app-close request.",
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = thermalSummary,
                     ConfidenceLevel = "NotRated",
-                    RecommendedToolName = toolName,
-                    RecommendedToolArgumentsJson = "{}",
-                    RemediationRationale = toolName == "terminate_processes"
-                        ? "Closing non-essential background workload processes reduces sustained processor utilization, heat output, and cooling fan speed."
-                        : "Clearing temporary runtime artifacts reduces background disk indexing and processor wake activity.",
+                    RecommendedToolName = null,
+                    RemediationRationale = "Review airflow, ventilation and current workload. A separate memory check must support any app-closing review; no automatic cooling repair is offered.",
                     EvidenceCitations = evidence
                 }
             };
@@ -849,14 +845,13 @@ public class GeminiReActLlmClient : IReActLlmClient
             return new ReActModelTurnDecision
             {
                 EngineName = "RigMD Local Tool-Calling ReAct Engine",
-                Thought = $"Synthesized battery and power telemetry ({batterySummary}). Proposing 'terminate_processes' to reduce background power draw.",
+                Thought = "Battery observations support charging and power review, not an unnamed app-close request.",
                 FinalProposal = new ReActFinalProposal
                 {
                     RootCauseAnalysis = batterySummary,
                     ConfidenceLevel = "NotRated",
-                    RecommendedToolName = "terminate_processes",
-                    RecommendedToolArgumentsJson = "{}",
-                    RemediationRationale = "Closing heavy background processes lowers CPU wake residency and extends battery runtime.",
+                    RecommendedToolName = null,
+                    RemediationRationale = "Review charging and Windows power settings. A separate memory check must support any app-closing review. These readings do not verify battery recovery.",
                     EvidenceCitations = evidence
                 }
             };
@@ -929,8 +924,8 @@ public class GeminiReActLlmClient : IReActLlmClient
             : "Completed live hardware and OS inspection.";
 
         var thoughtSummary = memObs != null
-            ? $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Browser caches hold {browserCacheMb:F1} MB, RAM is at {ramUsagePercent:F1}%. Proposing 'clear_temp_files' as a safe, verified Tier 1 remediation."
-            : $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Windows Update cache holds {wuCacheMb:F1} MB. Proposing 'clear_temp_files' as a safe, verified Tier 1 remediation.";
+            ? $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Browser caches hold {browserCacheMb:F1} MB, RAM is at {ramUsagePercent:F1}%. Proposing 'clear_temp_files' as an approval-required storage cleanup option."
+            : $"Synthesized {context.History.Count} live tool observation(s): %TEMP% holds {userTempMb:F1} MB, Windows Update cache holds {wuCacheMb:F1} MB. Proposing 'clear_temp_files' as an approval-required storage cleanup option.";
 
         return new ReActModelTurnDecision
         {

@@ -6,9 +6,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="RigMD Windows diagnostic support: review supported device readings, findings, and recommended next steps." />
     <title>RigMD | Windows Diagnostic Support</title>
+    <style>
+      html, body { margin: 0; background: #070c12; }
+      .rigmd-startup { box-sizing: border-box; position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: auto; padding: 32px 24px; background: #070c12; color: #f1f5f9; font-family: "Segoe UI", sans-serif; }
+      .rigmd-startup .startup-shell { width: min(400px, 100%); text-align: center; }
+      .rigmd-startup .startup-hardware { position: relative; width: min(320px, 100%); height: 156px; margin: 0 auto; }
+      .rigmd-startup .startup-circuits { width: 100%; height: 156px; fill: none; stroke: #294451; stroke-width: 1; }
+      .rigmd-startup .startup-logo { position: absolute; width: 64px; height: 64px; top: 46px; left: 50%; transform: translateX(-50%); }
+      .rigmd-startup h1 { margin: 16px 0 7px; font-size: 32px; line-height: 1.2; font-weight: 600; letter-spacing: -0.6px; }
+      .rigmd-startup .startup-subtitle { margin: 0; font-size: 13px; line-height: 1.5; color: #91a4b5; }
+      .rigmd-startup .startup-track { position: relative; width: 240px; max-width: 100%; height: 2px; margin: 32px auto 16px; overflow: hidden; background: #1c2d3a; }
+      .rigmd-startup .startup-activity { display: block; width: 64px; height: 2px; background: #2dd4bf; transform: translateX(88px); animation: rigmd-activity 1.8s linear infinite; }
+      .rigmd-startup .startup-status { margin: 0; color: #b2c2cf; font-size: 13px; line-height: 1.5; }
+      @keyframes rigmd-activity { from { transform: translateX(-64px); } to { transform: translateX(240px); } }
+      @media (prefers-reduced-motion: reduce) { .rigmd-startup .startup-activity { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <section id="rigmd-boot" class="rigmd-startup" role="status" aria-label="Getting RigMD ready">
+        <div class="startup-shell">
+          <div class="startup-hardware" aria-hidden="true">
+            <svg class="startup-circuits" viewBox="0 0 320 156" focusable="false"><path d="M18 54 H62 L82 74 H116 M18 102 H62 L82 82 H116 M204 74 H238 L258 54 H302 M204 82 H238 L258 102 H302 M142 12 V34 M160 12 V34 M178 12 V34 M142 122 V144 M160 122 V144 M178 122 V144"/><rect x="116" y="34" width="88" height="88" rx="12"/><path d="M106 54 H116 M106 66 H116 M106 90 H116 M106 102 H116 M204 54 H214 M204 66 H214 M204 90 H214 M204 102 H214"/></svg>
+            <img class="startup-logo" src="/rigmd-logo.png" alt="" width="64" height="64"/>
+          </div>
+          <h1>RigMD</h1>
+          <p class="startup-subtitle">Windows diagnostic support</p>
+          <div class="startup-track" aria-hidden="true"><span class="startup-activity"></span></div>
+          <p class="startup-status">Starting RigMD…</p>
+        </div>
+      </section>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

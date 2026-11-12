@@ -130,6 +130,7 @@ public static class RemediationEligibilityPolicy
             "cpu_temperature" => "thermal",
             "gpu_temperature" or "graphics_devices" => "gpu",
             "storage_usage" or "storage_health" => "storage",
+            _ when System.Text.RegularExpressions.Regex.IsMatch(metric, @"^storage_usage_[A-Za-z]:\\?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant) => "storage",
             "battery_charge" => "battery",
             _ when metric.StartsWith("network_", StringComparison.Ordinal) => "network",
             _ when metric.StartsWith("device_error_", StringComparison.Ordinal) => "drivers",

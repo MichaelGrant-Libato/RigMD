@@ -38,6 +38,7 @@ export const reportStyles = `
   .rigmd-report-paper section { margin-bottom: 18px; }
   .rigmd-report-paper .report-header { padding-bottom: 12px; margin-bottom: 16px; }
   .rigmd-report-paper .report-entry { padding: 9px; margin: 9px 0; }
+  .rigmd-report-paper .report-entry[data-status="action"] { break-inside: auto; page-break-inside: auto; }
   .rigmd-report-paper h1 { font-size: 23pt; }
   .rigmd-report-paper h2 { font-size: 13pt; }
   .rigmd-report-paper h3 { font-size: 11pt; }

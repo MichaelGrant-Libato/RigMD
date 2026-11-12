@@ -23,10 +23,11 @@ public class LocalDatabaseSchemaUpgradeService
             return;
         }
 
-        await _db.Database.ExecuteSqlRawAsync(
-            """
-            DROP INDEX IF EXISTS "IX_RemediationRuns_DiagnosticOutputId";
-            """);
+        var oldIndex = await _db.Database.SqlQueryRaw<int>(
+            "SELECT \"unique\" AS Value FROM pragma_index_list('RemediationRuns') WHERE name = 'IX_RemediationRuns_DiagnosticOutputId'").ToArrayAsync();
+        if (oldIndex.SingleOrDefault() == 1)
+            await _db.Database.ExecuteSqlRawAsync(
+                "DROP INDEX IF EXISTS \"IX_RemediationRuns_DiagnosticOutputId\";");
 
         await _db.Database.ExecuteSqlRawAsync(
             """

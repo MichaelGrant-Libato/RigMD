@@ -93,4 +93,49 @@ public class PerFindingActionTests
         finding.DiagnosedCategory = "Storage health behavior";
         Assert.NotNull(RepairSupportPolicy.SelectedAppBlockReason(finding, hardware));
     }
+    [Theory]
+    [InlineData(0)] [InlineData(70.8)] [InlineData(81.99)]
+    public void ClearedCurrentWarningReportsTheObservedPercent(double usage)
+    {
+        var block = Assert.IsType<RepairSupportPolicy.SelectedAppReviewBlock>(RepairSupportPolicy.SelectedAppBlockDetails(
+            Diagnostic(Warning), new() { Ram = new() { UsageAvailable = true, UsagePercent = usage } }));
+        Assert.Equal("memory_warning_cleared", block.Code);
+        Assert.Equal(usage, block.CurrentMemoryUsagePercent);
+        Assert.Contains(usage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%", block.Message);
+        Assert.Contains("No apps were closed", block.Message);
+        Assert.DoesNotContain("unavailable", block.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(double.NaN)] [InlineData(double.PositiveInfinity)] [InlineData(double.NegativeInfinity)]
+    [InlineData(-1)] [InlineData(101)]
+    public void InvalidUsageIsUnavailableAndNeverReportedAsAClearedWarning(double usage)
+    {
+        var block = Assert.IsType<RepairSupportPolicy.SelectedAppReviewBlock>(RepairSupportPolicy.SelectedAppBlockDetails(
+            Diagnostic(Warning), new() { Ram = new() { UsageAvailable = true, UsagePercent = usage } }));
+        Assert.Equal("memory_reading_unavailable", block.Code); Assert.Null(block.CurrentMemoryUsagePercent);
+        Assert.Contains("unavailable", block.Message); Assert.DoesNotContain("below", block.Message);
+    }
+
+    [Fact]
+    public void AnUnavailableReadingCannotExposeItsNumericPlaceholderAsCurrentUsage()
+    {
+        var block = Assert.IsType<RepairSupportPolicy.SelectedAppReviewBlock>(RepairSupportPolicy.SelectedAppBlockDetails(
+            Diagnostic(Warning), new() { Ram = new() { UsageAvailable = false, UsagePercent = 70.8 } }));
+        Assert.Equal("memory_reading_unavailable", block.Code); Assert.Null(block.CurrentMemoryUsagePercent);
+        Assert.DoesNotContain("70.8", block.Message);
+    }
+
+    [Theory]
+    [InlineData(82)] [InlineData(82.6)] [InlineData(100)]
+    public void CurrentActivePressureRetainsTheExistingReviewBoundary(double usage)
+        => Assert.Null(RepairSupportPolicy.SelectedAppBlockDetails(Diagnostic(Warning),
+            new() { Ram = new() { UsageAvailable = true, UsagePercent = usage } }));
+
+    [Fact]
+    public void AReportedWindowsMemoryWarningRetainsItsExistingActiveEvidence()
+        => Assert.Null(RepairSupportPolicy.SelectedAppBlockDetails(Diagnostic(Warning),
+            new() { Ram = new() { UsageAvailable = true, UsagePercent = 70 },
+                ProcessInsights = new() { MemoryLeakWarning = "Synthetic Windows memory warning" } }));
+
 }

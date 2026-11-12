@@ -34,6 +34,17 @@ test('headings follow current evidence and initial results do not demand unneces
   assert.equal(getOriginalResultStatus({ ...baseline, proof: [memory()] }).label, 'Needs attention');
   assert.equal(getOriginalResultStatus({ ...baseline, diagnosed_category: 'Component Not Present', proof: [] }).label, 'Not applicable');
 });
+test('latest headings follow the remaining warning when the original primary finding clears', () => {
+  const storage = { metric_id: 'storage_usage_C:', label: 'Storage space C:', value: '89% used', status: 'high' };
+  const check = { ...baseline, diagnosis_mode: 'component', component_ids: ['memory', 'storage'], proof: [memory(), storage] };
+  const before = JSON.stringify(check);
+  assert.equal(getResultHeading({ ...check, resolution_proof: [memory('60%', 'normal'), storage] }), 'Storage space needs attention');
+  assert.equal(getResultHeading({ ...check, resolution_proof: [memory(), { ...storage, value: '50% used', status: 'normal' }] }), 'Memory needs attention');
+  assert.equal(getResultHeading({ ...check, resolution_proof: [{ ...memory(), value: 'Unavailable', status: 'unknown' }, storage] }), 'Storage space needs attention');
+  assert.equal(getResultHeading({ ...check, resolution_proof: [memory('60%', 'normal'), { ...storage, value: '50% used', status: 'normal' }] }), 'Memory and Storage check');
+  assert.equal(JSON.stringify(check), before);
+});
+
 test('capability limits are separate from unavailable readings and query failures', () => {
   const battery = { metric_id: 'battery_drain', label: 'Battery wear and drain rate', value: 'Not verified', status: 'unknown',
     meaning: 'Charge is not capacity or drain rate. This check has no timed discharge measurement or full-charge/design-capacity comparison. Review a Windows battery report.' };

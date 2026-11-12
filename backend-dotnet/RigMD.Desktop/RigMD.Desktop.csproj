@@ -1,14 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\rigmd-logo.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.2.4</Version>
+    <Version>0.2.20</Version>
     <DeleteExistingFiles>true</DeleteExistingFiles>
   </PropertyGroup>
 
@@ -18,6 +18,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RigMD.Api\RigMD.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\rigmd-logo.png" />
   </ItemGroup>
 
   <ItemGroup>

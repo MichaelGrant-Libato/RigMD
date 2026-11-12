@@ -6,6 +6,64 @@ namespace RigMD.Tests.Application;
 
 public class RemediationEligibilityPolicyTests
 {
+    [Theory]
+    [InlineData("storage_usage_C:")]
+    [InlineData("storage_usage_C:\\")]
+    [InlineData("storage_usage_d:")]
+    public void VerifiedVolumeWarningsCanReviewActionsWithinStorageScope(string metric)
+    {
+        var check = Check(0);
+        check.Proof = [Row(metric, "high", "90% used")];
+        foreach (var mode in new[] { "full", "component", "scenario" })
+        {
+            check.DiagnosisMode = mode;
+            check.ComponentIds = "[\"storage\"]";
+            check.ScenarioId = "storage-problem";
+            Assert.Equal("allowed", RemediationEligibilityPolicy.Evaluate(check, []).State);
+        }
+        check.DiagnosisMode = "component";
+        check.ComponentIds = "[\"memory\"]";
+        Assert.Equal("recheck_required", RemediationEligibilityPolicy.Evaluate(check, []).State);
+    }
+
+    [Theory]
+    [InlineData("storage_usage_")]
+    [InlineData("storage_usage_unidentified")]
+    [InlineData("storage_usage_C:\\other")]
+    public void UnidentifiedVolumeMetricsCannotAuthorizeActions(string metric)
+    {
+        var check = Check(0);
+        check.DiagnosisMode = "full";
+        check.Proof = [Row(metric, "high", "90% used")];
+        Assert.Equal("recheck_required", RemediationEligibilityPolicy.Evaluate(check, []).State);
+    }
+
+    [Theory]
+    [InlineData("", "not_indicated")]
+    [InlineData("unavailable", "not_indicated")]
+    [InlineData("measurement", "allowed")]
+    public void VolumeWarningsStillRequireVerifiedMeasurementMetadata(string kind, string expected)
+    {
+        var check = Check(0);
+        check.ComponentIds = "[\"storage\"]";
+        check.Proof = [Row("storage_usage_C:", "high", "90% used", kind)];
+        Assert.Equal(expected, RemediationEligibilityPolicy.Evaluate(check, []).State);
+    }
+
+    [Fact]
+    public void NewerStorageChecksRetainVolumeIdentityAndOrderingRequirements()
+    {
+        var original = Check(0); original.ComponentIds = "[\"storage\"]";
+        original.Proof = [Row("storage_usage_C:", "high", "90% used")];
+        var newer = Check(1); newer.ComponentIds = "[\"storage\"]";
+        newer.Proof = [Row("storage_usage_C:", "normal", "50% used")];
+        Assert.Equal("superseded", RemediationEligibilityPolicy.Evaluate(original, [newer]).State);
+        newer.Proof = [Row("storage_usage_D:", "normal", "50% used")];
+        Assert.Equal("recheck_required", RemediationEligibilityPolicy.Evaluate(original, [newer]).State);
+        newer.DeviceId = "different-device";
+        Assert.Equal("allowed", RemediationEligibilityPolicy.Evaluate(original, [newer]).State);
+    }
+
     internal static DiagnosticSessionDto Check(int minute, string status = "high", string value = "90%", string device = "device-a") => new()
     {
         SessionId = Guid.NewGuid().ToString(), DeviceId = device, ProfileId = "shared-cpu-os-profile",

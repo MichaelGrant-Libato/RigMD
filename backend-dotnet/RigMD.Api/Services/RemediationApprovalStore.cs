@@ -7,7 +7,7 @@ public sealed class RemediationApprovalStore(TimeProvider clock)
 {
     public sealed record Scope(string Operation, Guid SessionId, string ToolName, string Arguments);
     public sealed record Approval(string Token, DateTimeOffset ExpiresAt);
-    private sealed record Entry(Scope Scope, DateTimeOffset ExpiresAt);
+    private sealed record Entry(Scope Scope, DateTimeOffset ExpiresAt, object? Context);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly object _sync = new();
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
@@ -23,7 +23,7 @@ public sealed class RemediationApprovalStore(TimeProvider clock)
             JsonSerializer.Serialize(arguments.RootElement));
     }
 
-    public Approval Issue(Scope scope)
+    public Approval Issue(Scope scope, object? context = null)
     {
         lock (_sync)
         {
@@ -34,18 +34,24 @@ public sealed class RemediationApprovalStore(TimeProvider clock)
             if (_entries.Count >= 256) _entries.Remove(_entries.MinBy(entry => entry.Value.ExpiresAt).Key);
             var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             var expiresAt = now.Add(Lifetime);
-            _entries.Add(token, new Entry(scope, expiresAt));
+            _entries.Add(token, new Entry(scope, expiresAt, context));
             return new Approval(token, expiresAt);
         }
     }
 
     public bool TryConsume(string? token, Scope scope)
+        => TryConsume(token, scope, out _);
+
+    public bool TryConsume(string? token, Scope scope, out object? context)
     {
+        context = null;
         if (token?.Length != 64) return false;
         lock (_sync)
         {
             // Removal is atomic and precedes execution, including failed/changed requests.
-            return _entries.Remove(token, out var entry) && entry.ExpiresAt > clock.GetUtcNow() && entry.Scope == scope;
+            if (!_entries.Remove(token, out var entry) || entry.ExpiresAt <= clock.GetUtcNow() || entry.Scope != scope) return false;
+            context = entry.Context;
+            return true;
         }
     }
 }

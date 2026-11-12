@@ -1,11 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using RigMD.Application.Contracts.Autonomy;
 using RigMD.Application.Models;
@@ -13,197 +6,100 @@ using RigMD.Infrastructure.Remediation.Actions;
 
 namespace RigMD.Infrastructure.Remediation.Tools.Remediation;
 
-public class ClearBrowserCacheTool : IRigMdAgentTool
+public class ClearBrowserCacheTool : IRigMdAgentTool, IApprovalBoundAgentTool
 {
     private readonly ILoggerFactory _loggerFactory;
+    private readonly Func<string> _localAppData;
+    private readonly TimeProvider _clock;
+    private BrowserCachePlan? _approved;
 
-    private static readonly EnumerationOptions SafeEnumOptions = new()
-    {
-        RecurseSubdirectories = true,
-        IgnoreInaccessible = true,
-        AttributesToSkip = FileAttributes.ReparsePoint
-    };
-
-    public ClearBrowserCacheTool(ILoggerFactory loggerFactory)
-    {
-        _loggerFactory = loggerFactory;
-    }
+    public ClearBrowserCacheTool(ILoggerFactory loggerFactory) : this(loggerFactory,
+        () => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), TimeProvider.System) { }
+    internal ClearBrowserCacheTool(ILoggerFactory loggerFactory, Func<string> localAppData, TimeProvider clock)
+    { _loggerFactory = loggerFactory; _localAppData = localAppData; _clock = clock; }
 
     public string Name => "clear_browser_cache";
-
     public string DisplayName => "Clear Web Browser Disk Caches";
-
-    public string Description =>
-        "Clears disk cache directories for Chrome, Edge, and Firefox (leaves passwords, bookmarks, cookies, and history completely untouched) to reclaim disk space and fix corrupted web assets.";
-
+    public string Description => "Permanently delete only browser-cache files captured in the approved preview for the selected browsers. This does not use the Recycle Bin and RigMD cannot undo it. Profile settings, passwords, cookies and history are not cleanup targets.";
     public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier2_DestructiveOrAdmin;
-
-    public AgentToolFunctionDeclaration GetFunctionDeclaration()
+    public AgentToolFunctionDeclaration GetFunctionDeclaration() => new()
     {
-        return new AgentToolFunctionDeclaration
+        Name = Name, Description = Description,
+        Parameters = new()
         {
-            Name = Name,
-            Description = Description,
-            Parameters = new Dictionary<string, AgentToolParameterProperty>
-            {
-                ["browsers"] = new()
-                {
-                    Type = "array",
-                    ItemsType = "string",
-                    Description = "Optional list of browsers to target: ['chrome', 'edge', 'firefox'] (defaults to all three)."
-                }
-            },
-            Required = new List<string>()
-        };
+            ["browsers"] = new() { Type = "array", ItemsType = "string",
+                Description = "Select exact identifiers: chrome, edge, firefox. Default is all three. Empty, duplicate and unsupported selections are rejected." }
+        }
+    };
+
+    public bool TryBindApprovalContext(object context)
+    {
+        if (context is not BrowserCachePlan plan || !plan.Snapshot.IsCurrent(_clock.GetUtcNow()) || plan.Snapshot.Files.Length == 0) return false;
+        _approved = plan; return true;
     }
 
-    public Task<ToolDryRunPreview> PreviewImpactAsync(
-        JsonElement arguments,
-        CancellationToken cancellationToken = default)
+    public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default)
     {
-        var requested = ToolArgumentHelper.GetStringArray(
-            arguments,
-            "browsers",
-            new[] { "chrome", "edge", "firefox" });
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        int totalFiles = 0;
-        long totalBytes = 0;
-        var targets = new List<string>();
-        var warnings = new List<string>();
-
-        if (requested.Any(b => b.Contains("chrome", StringComparison.OrdinalIgnoreCase)))
-        {
-            var path = Path.Combine(localAppData, "Google", "Chrome", "User Data", "Default", "Cache");
-            var (files, bytes) = MeasureDirectory(path);
-            totalFiles += files;
-            totalBytes += bytes;
-            targets.Add($"Google Chrome Cache ({files} files, ~{ToolArgumentHelper.FormatBytes(bytes)})");
-
-            var procs = Process.GetProcessesByName("chrome");
-            if (procs.Length > 0)
-            {
-                warnings.Add($"Google Chrome is currently running ({procs.Length} processes); some active cache files may be locked until Chrome is closed.");
-                foreach (var p in procs) p.Dispose();
-            }
-        }
-
-        if (requested.Any(b => b.Contains("edge", StringComparison.OrdinalIgnoreCase)))
-        {
-            var path = Path.Combine(localAppData, "Microsoft", "Edge", "User Data", "Default", "Cache");
-            var (files, bytes) = MeasureDirectory(path);
-            totalFiles += files;
-            totalBytes += bytes;
-            targets.Add($"Microsoft Edge Cache ({files} files, ~{ToolArgumentHelper.FormatBytes(bytes)})");
-
-            var procs = Process.GetProcessesByName("msedge");
-            if (procs.Length > 0)
-            {
-                warnings.Add($"Microsoft Edge is currently running ({procs.Length} processes); some active cache files may be locked until Edge is closed.");
-                foreach (var p in procs) p.Dispose();
-            }
-        }
-
-        if (requested.Any(b => b.Contains("firefox", StringComparison.OrdinalIgnoreCase)))
-        {
-            var profilesRoot = Path.Combine(localAppData, "Mozilla", "Firefox", "Profiles");
-            int ffFiles = 0;
-            long ffBytes = 0;
-            if (Directory.Exists(profilesRoot))
-            {
-                try
-                {
-                    foreach (var profileDir in Directory.EnumerateDirectories(profilesRoot))
-                    {
-                        var (f, b) = MeasureDirectory(Path.Combine(profileDir, "cache2"));
-                        ffFiles += f;
-                        ffBytes += b;
-                    }
-                }
-                catch { }
-            }
-
-            totalFiles += ffFiles;
-            totalBytes += ffBytes;
-            targets.Add($"Mozilla Firefox Cache ({ffFiles} files, ~{ToolArgumentHelper.FormatBytes(ffBytes)})");
-
-            var procs = Process.GetProcessesByName("firefox");
-            if (procs.Length > 0)
-            {
-                warnings.Add($"Mozilla Firefox is currently running ({procs.Length} processes); some active cache files may be locked.");
-                foreach (var p in procs) p.Dispose();
-            }
-        }
-
-        return Task.FromResult(new ToolDryRunPreview
-        {
-            ToolName = Name,
-            DisplayName = DisplayName,
-            SafetyTier = SafetyTier,
-            CanExecute = true,
-            RequiresAdmin = false,
-            IsRunningAsAdmin = ToolArgumentHelper.IsCurrentProcessElevated(),
-            RequiresUserConfirmation = true,
-            AffectedItemsCount = totalFiles,
-            EstimatedBytesAffected = totalBytes,
-            AffectedTargets = targets,
-            Warnings = warnings,
-            WhatWillHappen =
-                $"Will delete up to {totalFiles} cached web asset file(s) (~{ToolArgumentHelper.FormatBytes(totalBytes)}) across {string.Join(", ", targets)}. Bookmarks, saved passwords, cookies, and history are never touched."
-        });
-    }
-
-    public async Task<AgentToolExecutionResult> ExecuteAsync(
-        JsonElement arguments,
-        Action<string>? progressReporter = null,
-        CancellationToken cancellationToken = default)
-    {
-        progressReporter?.Invoke("Clearing web browser disk cache directories...");
-
-        var action = new ClearBrowserCacheAction(_loggerFactory.CreateLogger<ClearBrowserCacheAction>());
-        var execResult = await action.ExecuteAsync();
-
-        var payload = new
-        {
-            success = execResult.Success,
-            summary = execResult.Summary,
-            proof = execResult.Proof
-        };
-
-        return new AgentToolExecutionResult
-        {
-            ToolName = Name,
-            Success = execResult.Success,
-            Summary = execResult.Summary,
-            DataJson = JsonSerializer.Serialize(payload, ToolArgumentHelper.JsonOptions),
-            OutputLog = execResult.OutputLog,
-            Proof = execResult.Proof
-        };
-    }
-
-    private static (int FileCount, long Bytes) MeasureDirectory(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-        {
-            return (0, 0);
-        }
-
-        int count = 0;
-        long bytes = 0;
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SafeEnumOptions))
+            var spec = BrowserCacheSpecification.Parse(arguments);
+            var basePath = BrowserCachePlan.NormalizeBase(_localAppData());
+            var plan = _approved;
+            if (plan != null)
             {
-                try
-                {
-                    bytes += new FileInfo(file).Length;
-                    count++;
-                }
-                catch { }
+                if (!plan.Snapshot.IsCurrent(_clock.GetUtcNow()) || plan.Specification != spec ||
+                    !string.Equals(plan.LocalAppData, basePath, StringComparison.OrdinalIgnoreCase))
+                    return Task.FromResult(Blocked("The approved browser-cache scope changed or expired. Review a fresh preview."));
             }
+            else plan = BrowserCachePlan.Capture(spec, basePath, _clock.GetUtcNow(), cancellationToken);
+            var count = plan.Snapshot.Files.Length;
+            var preview = new ToolDryRunPreview
+            {
+                ToolName = Name, DisplayName = DisplayName, SafetyTier = SafetyTier, CanExecute = count > 0,
+                RequiresUserConfirmation = true, RequiresAdmin = false, IsRunningAsAdmin = ToolArgumentHelper.IsCurrentProcessElevated(),
+                ApprovalContext = plan, AffectedItemsCount = count,
+                EstimatedBytesAffected = plan.Snapshot.Files.Sum(file => file.Identity.Bytes),
+                AffectedTargets = spec.Browsers.Select(browser => browser switch
+                {
+                    "chrome" => "Google Chrome - Default profile cache",
+                    "edge" => "Microsoft Edge - Default profile cache",
+                    _ => "Mozilla Firefox - local profile cache2 folders"
+                }).ToList(),
+                Warnings = plan.Warnings.ToList(),
+                WhatWillHappen = count == 0 ? "No eligible browser-cache files were captured. Nothing can be deleted from this preview."
+                    : $"Permanently delete up to {count} unchanged browser-cache files recorded in this preview, only for {string.Join(", ", spec.Browsers)}. New, changed, linked, locked or unverifiable files are left alone. No apps are closed. This does not use the Recycle Bin and RigMD cannot undo it."
+            };
+            preview.Warnings.Add("This review covers Chrome and Edge Default-profile Cache folders and Firefox local-profile cache2 folders, not every browser or profile. Active browsers may change or lock cache files; affected files will be skipped. File sizes are not guaranteed recovered drive space.");
+            return Task.FromResult(preview);
         }
-        catch { }
-
-        return (count, bytes);
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { return Task.FromResult(Blocked(error is InvalidOperationException ? error.Message : "Browser-cache folders could not be verified. Nothing will be deleted.")); }
     }
+
+    public async Task<AgentToolExecutionResult> ExecuteAsync(JsonElement arguments, Action<string>? progressReporter = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var plan = Interlocked.Exchange(ref _approved, null);
+        ExecutionResult result;
+        try
+        {
+            var spec = BrowserCacheSpecification.Parse(arguments);
+            if (plan == null || plan.Specification != spec ||
+                !string.Equals(plan.LocalAppData, BrowserCachePlan.NormalizeBase(_localAppData()), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A matching server-approved browser-cache snapshot is required. Nothing was deleted.");
+            result = await new ClearBrowserCacheAction(_loggerFactory.CreateLogger<ClearBrowserCacheAction>())
+                .ExecutePlanAsync(plan, _clock.GetUtcNow(), cancellationToken, progressReporter);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { result = new() { Success = false, Summary = error.Message }; }
+        return new()
+        {
+            ToolName = Name, Success = result.Success, Summary = result.Summary, Proof = result.Proof, OutputLog = result.OutputLog,
+            DataJson = JsonSerializer.Serialize(new { success = result.Success, summary = result.Summary, proof = result.Proof }, ToolArgumentHelper.JsonOptions)
+        };
+    }
+
+    private ToolDryRunPreview Blocked(string reason) => new()
+    { ToolName = Name, DisplayName = DisplayName, SafetyTier = SafetyTier, CanExecute = false, RequiresUserConfirmation = true, WhatWillHappen = reason };
 }

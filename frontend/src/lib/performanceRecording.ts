@@ -47,3 +47,10 @@ export function notifyDesktopDashboardReady(complete: boolean) {
     type: 'rigmd:dashboard-ready', outcome: complete ? 'completed' : 'incomplete',
   });
 }
+
+export function notifyDesktopHomeSummaryReady(complete: boolean) {
+  if (!getLocalApiToken()) return;
+  (window as Window & { chrome?: { webview?: { postMessage: (message: unknown) => void } } }).chrome?.webview?.postMessage({
+    type: 'rigmd:home-summary-ready', outcome: complete ? 'completed' : 'incomplete',
+  });
+}

@@ -14,12 +14,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabase';
-
-const RELEASE_DOWNLOAD_URL =
-  'https://github.com/MichaelGrant-Libato/RigMD/releases/latest/download/RigMD-Setup.exe';
-
-const INSTALLER_SHA256 =
-  ''; // You can remove this or dynamically fetch it if needed, but hardcoding it breaks on new releases.
+import release from '../../release.json';
+import { releaseDownloadUrl } from '../../server/releasePolicy';
 
 const features = [
   [
@@ -58,6 +54,18 @@ function DownloadLandingPage() {
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState('');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloadMessage, setDownloadMessage] = useState('Checking the current download…');
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/download-url', { signal: controller.signal, cache: 'no-store' }).then(async response => {
+      const data = await response.json();
+      if (!response.ok || data.available !== true || data.version !== release.version || data.url !== releaseDownloadUrl)
+        throw new Error('The current download is being prepared. Please try again later.');
+      if (!controller.signal.aborted) { setDownloadUrl(data.url); setDownloadMessage(`RigMD ${data.version}`); }
+    }).catch(() => { if (!controller.signal.aborted) setDownloadMessage('The current download is unavailable. Please try again later.'); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -181,15 +189,17 @@ function DownloadLandingPage() {
                 <motion.a
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.98 }}
-                  href={RELEASE_DOWNLOAD_URL}
+                  href={downloadUrl || undefined}
+                  aria-disabled={!downloadUrl}
+                  tabIndex={downloadUrl ? 0 : -1}
                   className="inline-flex items-center justify-center gap-3 rounded-lg bg-[var(--rigmd-accent)] px-8 py-4 font-semibold text-slate-950 shadow-lg shadow-black/20 transition hover:brightness-110"
                 >
                   <Download size={20} />
                   Download RigMD
                 </motion.a>
 
-                <p className="text-sm text-[var(--rigmd-text-faint)]">
-                  Windows 10 / 11 - 64-bit
+                <p role="status" className="text-sm text-[var(--rigmd-text-faint)]">
+                  {downloadMessage}<br />Windows 10 / 11 - 64-bit
                 </p>
               </div>
 
@@ -233,60 +243,6 @@ function DownloadLandingPage() {
           </div>
         </section>
 
-        <section>
-          <div className="mx-auto max-w-4xl px-6 py-20 lg:px-8">
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.35 }}
-              className="rigmd-glass rounded-lg border p-7 sm:p-9"
-            >
-              <div className="flex gap-4">
-                <TriangleAlert
-                  size={24}
-                  className="mt-1 shrink-0 text-[var(--rigmd-warning)]"
-                />
-
-                <div>
-                  <h2 className="font-semibold text-white">
-                    About the current release
-                  </h2>
-
-                  <p className="mt-2 text-sm leading-6 text-[var(--rigmd-text-muted)]">
-                    RigMD is an academic capstone release. Windows
-                    SmartScreen may display an unrecognized application warning
-                    because the installer is not yet digitally signed.
-                  </p>
-
-                  <p className="mt-3 text-sm leading-6 text-[var(--rigmd-text-muted)]">
-                    Do not disable Windows security features globally when
-                    installing RigMD.
-                  </p>
-
-                  <div className="mt-5 rounded-lg border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-main-surface)]/70 p-4">
-                    <p className="text-sm font-semibold text-white">
-                      Installer checksum
-                    </p>
-
-                    <p className="mt-1 text-sm leading-6 text-[var(--rigmd-text-muted)]">
-                      Use this SHA-256 hash to verify the downloaded installer:
-                    </p>
-
-                    <code className="mt-3 block break-all rounded-lg border border-[var(--rigmd-border-soft)] bg-black/25 px-4 py-3 text-xs leading-5 text-[var(--rigmd-text-soft)]">
-                      {INSTALLER_SHA256}
-                    </code>
-                  </div>
-
-                  <p className="mt-4 text-sm leading-6 text-[var(--rigmd-warning)]">
-                    RigMD is currently provided as a verified-access capstone release. Only
-                    install it from the official RigMD download page.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </section>
       </main>
 
       <AnimatePresence>

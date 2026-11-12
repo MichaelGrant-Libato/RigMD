@@ -37,6 +37,18 @@ public class LiveUsageSamplingTests
         Assert.Null(CpuUsageSampler.BusyPercent(100, 200, 100, 0, 300, 200));
         Assert.Null(CpuUsageSampler.BusyPercent(100, 200, 100, 400, 300, 200));
     }
+    [Fact]
+    public void ObservationKeepsWarmupZeroAndFailureProvenanceTogether()
+    {
+        var clock = new Clock(); var fail = false;
+        var sampler = new CpuUsageSampler(() => fail ? throw new IOException("unavailable") : 0, clock);
+        var warming = sampler.ReadObservation(); Assert.Null(warming.Value); Assert.True(warming.Primed); Assert.Null(warming.CapturedAt);
+        clock.Milliseconds = 1000;
+        var measured = sampler.ReadObservation(); Assert.Equal(0, measured.Value); Assert.Equal(1, measured.WindowSeconds); Assert.Equal(clock.GetUtcNow(), measured.CapturedAt);
+        fail = true; clock.Milliseconds = 2000;
+        var unavailable = sampler.ReadObservation(); Assert.False(unavailable.Primed); Assert.Null(unavailable.Value); Assert.Null(unavailable.CapturedAt); Assert.Null(unavailable.WindowSeconds);
+    }
+
     private sealed class Clock : TimeProvider
     {
         public long Milliseconds;

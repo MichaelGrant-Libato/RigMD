@@ -17,6 +17,11 @@ public sealed class CpuUsageSampler(Func<double> readCounter, TimeProvider? time
     public DateTimeOffset? CapturedAt { get; private set; }
     public double? WindowSeconds { get; private set; }
 
+    public (double? Value, bool Primed, DateTimeOffset? CapturedAt, double? WindowSeconds) ReadObservation()
+    {
+        lock (_gate) { var value = Read(); return (value, _primed, CapturedAt, WindowSeconds); }
+    }
+
     public double? Read()
     {
         lock (_gate)

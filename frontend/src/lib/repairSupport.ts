@@ -34,12 +34,22 @@ export function requiresHardwareInspection(category?: string) {
   return /storage health|drive health|s\.m\.a\.r\.t|smart failure/i.test(category ?? '');
 }
 
+export function workloadGuidanceNotice(category?: string) {
+  if (/thermal|overheat|fan/i.test(category ?? ''))
+    return 'Review airflow, ventilation and the measured temperatures. RigMD does not automatically close apps or repair cooling hardware from this finding. If memory use also needs attention, run a separate memory check before reviewing apps.';
+  if (/battery|power/i.test(category ?? ''))
+    return 'Review charging, the power connection and Windows power settings. RigMD cannot confirm battery recovery from a snapshot and does not automatically close apps from this finding. Use a separate memory check before considering app closing.';
+  if (/elevated cpu|processor load/i.test(category ?? ''))
+    return 'Review the current workload in Task Manager and save work before closing apps yourself. Processor activity alone does not authorize app closing in RigMD. Run a separate memory check if memory use also needs attention.';
+  return null;
+}
+
 export function reviewOnlyNotice(category?: string) {
   if (/crash|stop error|stability risk/i.test(category ?? ''))
     return 'Review the affected app, event time and error details in Reliability Monitor. Crash records alone do not identify a repairable cause. Windows repair, cleanup and app closing are not offered as a fix for these records. If the problem returns, collect the matching record and follow the app or device maker\'s guidance.';
   if (/unavailable|could not verify|no active issue|component not present/i.test(category ?? ''))
     return 'No automatic repair is supported by this result. Review unavailable measurements or select a relevant check if symptoms continue. Missing readings do not establish a need for Windows repair or cleanup.';
-  return null;
+  return workloadGuidanceNotice(category);
 }
 
 export const hardwareInspectionNotice = 'A drive-health warning was reported. Back up important files and arrange a hardware inspection. RigMD cannot repair physical damage. Cleanup and Windows repair tools are not a repair for this warning; the warning alone does not prove the exact fault.';

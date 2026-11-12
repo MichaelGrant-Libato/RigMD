@@ -177,6 +177,9 @@ public class AutonomyController : ControllerBase
         if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
             return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         var hardware = _profileService.GetLiveSystemProfile();
+        if (DnsCacheActionPolicy.IsNetworkCategory(diagnostic.DiagnosedCategory) &&
+            DnsCacheActionPolicy.BlockReason(diagnostic, hardware) is { } networkReason)
+            return Conflict(new { message = networkReason, evidenceReviewRequired = true });
 
         var result =
             await _orchestrator.RunDryRunCycleAsync(
@@ -200,6 +203,8 @@ public class AutonomyController : ControllerBase
         var proposed = result.ProposedTool;
         var action = result.Plan?.PlannedActions.FirstOrDefault();
         var toolName = proposed?.ToolName ?? action?.Id;
+        if (DnsCacheActionPolicy.IsDnsTool(toolName) && DnsCacheActionPolicy.BlockReason(diagnostic, hardware) is { } dnsReason)
+            return Conflict(new { message = dnsReason, evidenceReviewRequired = true });
         if (!string.IsNullOrWhiteSpace(toolName) && RepairSupportPolicy.ScopeBlockReason(diagnostic, toolName) is { } scopeReason)
             return Conflict(new { message = scopeReason });
         if (preview?.CanExecute == true && result.Safety?.IsApproved == true &&
@@ -283,8 +288,8 @@ public class AutonomyController : ControllerBase
         if (names.Count is < 1 or > 5 || names.Any(name => !IsEligibleUserApp(name)))
             return BadRequest(new { message = "Choose between one and five eligible apps." });
         var hardware = _profileService.GetLiveSystemProfile();
-        if (RepairSupportPolicy.SelectedAppBlockReason(diagnostic, hardware) is { } reviewReason)
-            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
+        if (CheckSelectedAppMemoryGuard(diagnostic, hardware, "preview") is { } memoryBlock)
+            return memoryBlock;
         if (names.Any(name => !hardware.ProcessInsights.TopMemoryApps.Any(app =>
             app.MemoryMb >= 100 && app.Name.Equals(name, StringComparison.OrdinalIgnoreCase))))
             return BadRequest(new { message = "A selected app is no longer memory-heavy. Refresh and choose again." });
@@ -301,9 +306,23 @@ public class AutonomyController : ControllerBase
         return Ok(preview);
     }
 
+    private IActionResult? CheckSelectedAppMemoryGuard(DiagnosticOutput diagnostic, HardwareProfileDto hardware, string stage)
+    {
+        var block = RepairSupportPolicy.SelectedAppBlockDetails(diagnostic, hardware);
+        if (block == null) return null;
+        _logger.LogInformation("Selected-app {Stage} blocked: {ReasonCode}; current RAM {MemoryPercent}",
+            stage, block.Code, block.CurrentMemoryUsagePercent);
+        return Conflict(new
+        {
+            message = block.Message, evidenceReviewRequired = true,
+            reasonCode = block.Code, currentMemoryUsagePercent = block.CurrentMemoryUsagePercent,
+            blockStage = stage
+        });
+    }
+
     private void AttachApproval(ToolDryRunPreview preview, RemediationApprovalStore.Scope scope)
     {
-        var approval = _approvals.Issue(scope);
+        var approval = _approvals.Issue(scope, preview.ApprovalContext);
         preview.ToolName = scope.ToolName;
         preview.ApprovalToken = approval.Token;
         preview.ApprovalExpiresAt = approval.ExpiresAt;
@@ -323,7 +342,7 @@ public class AutonomyController : ControllerBase
 
         using var executionLease = _executionGate.TryEnter();
         if (executionLease == null)
-            return Conflict(new { message = "Another fix is running. Wait for it to finish before trying again." });
+            return Conflict(new { message = _executionGate.RecoveryBlockReason ?? "Another fix is running. Wait for it to finish before trying again." });
 
         if (!Guid.TryParse(request.SessionId, out var sessionId))
             return BadRequest(new { message = "A valid diagnostic session ID is required." });
@@ -335,8 +354,8 @@ public class AutonomyController : ControllerBase
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
         var selectedProcessNames = SelectedProcessNames(request);
         var beforeHardware = _profileService.GetLiveSystemProfile();
-        if (RepairSupportPolicy.SelectedAppBlockReason(diagnostic, beforeHardware) is { } reviewReason)
-            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
+        if (CheckSelectedAppMemoryGuard(diagnostic, beforeHardware, "execution") is { } memoryBlock)
+            return memoryBlock;
         if (selectedProcessNames.Count > 5 ||
             !_approvals.TryConsume(request.ApprovalToken, CloseAppScope(sessionId, selectedProcessNames)))
             return Conflict(new { message = "This approval expired, changed, or was already used. Review the selected apps again." });
@@ -472,6 +491,7 @@ public class AutonomyController : ControllerBase
 
     public class ExecuteRequest
     {
+        public string? FindingMetricId { get; set; }
         public string? ApprovalToken { get; set; }
         public string SessionId { get; set; } = string.Empty;
         public string DiagnosedCategory { get; set; } = string.Empty;
@@ -492,7 +512,7 @@ public class AutonomyController : ControllerBase
 
         using var executionLease = _executionGate.TryEnter();
         if (executionLease == null)
-            return Conflict(new { message = "Another fix is running. Wait for it to finish before trying again." });
+            return Conflict(new { message = _executionGate.RecoveryBlockReason ?? "Another fix is running. Wait for it to finish before trying again." });
 
         if (!Guid.TryParse(request.SessionId, out var sessionId))
         {
@@ -515,11 +535,17 @@ public class AutonomyController : ControllerBase
 
         if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
             return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
-        if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
-            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
         if (string.IsNullOrWhiteSpace(request.ToolName))
             return BadRequest(new { message = "Select the action shown in the preview." });
+        if (request.FindingMetricId != null)
+        {
+            var selected = RepairSupportPolicy.SelectStorageFinding(diagnostic, request.FindingMetricId, request.ToolName);
+            if (selected == null) return Conflict(new { message = "This storage action requires a current saved storage warning in this check's scope. Run a storage check and review a new preview." });
+            diagnostic = selected;
+        }
+        if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
+            return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
         if (RepairSupportPolicy.ScopeBlockReason(diagnostic, request.ToolName) is { } scopeReason)
             return Conflict(new { message = scopeReason });
         if (RepairSupportPolicy.ToolMismatchReason(diagnostic.DiagnosedCategory, request.ToolName) is { } mismatchReason)
@@ -527,19 +553,29 @@ public class AutonomyController : ControllerBase
         RemediationApprovalStore.Scope approvalScope;
         try
         {
-            approvalScope = RemediationApprovalStore.CreateScope("remediation", sessionId,
+            approvalScope = RemediationApprovalStore.CreateScope(request.FindingMetricId == null ? "remediation" : $"storage:{request.FindingMetricId}", sessionId,
                 request.ToolName, request.ToolArgumentsJson);
         }
         catch (JsonException)
         {
             return BadRequest(new { message = "Tool arguments must be a valid JSON object." });
         }
-        if (!_approvals.TryConsume(request.ApprovalToken, approvalScope))
+        HardwareProfileDto? dnsHardware = null;
+        if (DnsCacheActionPolicy.IsDnsTool(request.ToolName))
+        {
+            dnsHardware = _profileService.GetLiveSystemProfile();
+            if (DnsCacheActionPolicy.BlockReason(diagnostic, dnsHardware) is { } dnsReason)
+                return Conflict(new { message = dnsReason, evidenceReviewRequired = true });
+        }
+        if (!_approvals.TryConsume(request.ApprovalToken, approvalScope, out var approvalContext))
             return Conflict(new { message = "This approval expired, changed, or was already used. Review the action again." });
+        if (_toolRegistry?.GetTool(request.ToolName) is IApprovalBoundAgentTool boundTool &&
+            (approvalContext == null || !boundTool.TryBindApprovalContext(approvalContext)))
+            return Conflict(new { message = "The approved action snapshot is unavailable. Review a fresh preview before continuing." });
 
         // Real hardware is used for safety evaluation and as the
         // persisted pre-execution system snapshot.
-        var hardware = _profileService.GetLiveSystemProfile();
+        var hardware = dnsHardware ?? _profileService.GetLiveSystemProfile();
 
         var result =
             await _orchestrator.RunExecutionCycleAsync(
@@ -1032,6 +1068,7 @@ public class AutonomyController : ControllerBase
             "startup apps" => ("ms-settings:startupapps", "Startup Apps"),
             "reliability monitor" => ("perfmon /rel", "Reliability Monitor"),
             "storage settings" => ("ms-settings:storagesense", "Storage Settings"),
+            "installed apps" => ("ms-settings:appsfeatures", "Installed Apps"),
             "backup settings" => ("ms-settings:backup", "Backup Settings"),
             "power settings" => ("ms-settings:powersleep", "Power Settings"),
             _ => (string.Empty, string.Empty)
@@ -1080,6 +1117,7 @@ public class AutonomyController : ControllerBase
 
     public class ToolInvocationRequest
     {
+        public string? FindingMetricId { get; set; }
         public string ToolName { get; set; } = string.Empty;
         public JsonElement Arguments { get; set; }
         public string? SessionId { get; set; }
@@ -1134,18 +1172,27 @@ public class AutonomyController : ControllerBase
             if (await CheckRemediationGuardAsync(sessionId) is { } guardBlock) return guardBlock;
             if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
                 return Conflict(new { message = RepairSupportPolicy.HardwareNotice, hardwareInspectionRequired = true });
+            if (request.FindingMetricId != null)
+            {
+                var selected = RepairSupportPolicy.SelectStorageFinding(diagnostic, request.FindingMetricId, tool.Name);
+                if (selected == null) return Conflict(new { message = "This storage action requires a current saved storage warning in this check's scope. Run a storage check and review a new preview." });
+                diagnostic = selected;
+            }
             if (RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory) is { } reviewReason)
                 return Conflict(new { message = reviewReason, evidenceReviewRequired = true });
             if (RepairSupportPolicy.ToolMismatchReason(diagnostic.DiagnosedCategory, tool.Name) is { } mismatchReason)
                 return Conflict(new { message = mismatchReason });
             if (RepairSupportPolicy.ScopeBlockReason(diagnostic, tool.Name) is { } scopeReason)
                 return Conflict(new { message = scopeReason });
+            if (DnsCacheActionPolicy.IsDnsTool(tool.Name) &&
+                DnsCacheActionPolicy.BlockReason(diagnostic, _profileService.GetLiveSystemProfile()) is { } dnsReason)
+                return Conflict(new { message = dnsReason, evidenceReviewRequired = true });
             guardedSessionId = sessionId;
         }
         var preview = await tool.PreviewImpactAsync(request.Arguments, cancellationToken);
         if (guardedSessionId is { } approvedSessionId && preview.CanExecute)
         {
-            AttachApproval(preview, RemediationApprovalStore.CreateScope("remediation", approvedSessionId,
+            AttachApproval(preview, RemediationApprovalStore.CreateScope(request.FindingMetricId == null ? "remediation" : $"storage:{request.FindingMetricId}", approvedSessionId,
                 tool.Name, request.Arguments.GetRawText()));
         }
         return Ok(preview);

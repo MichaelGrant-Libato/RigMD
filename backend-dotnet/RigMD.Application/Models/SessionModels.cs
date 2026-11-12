@@ -93,6 +93,12 @@ public class DiagnosticSessionDto
     [JsonPropertyName("resolution_proof")]
     public object[] ResolutionProof { get; set; } = Array.Empty<object>();
 
+    [JsonPropertyName("follow_up_history")]
+    public List<FollowUpObservationDto> FollowUpHistory { get; set; } = new();
+
+    [JsonPropertyName("follow_up_history_status")]
+    public string FollowUpHistoryStatus { get; set; } = "not_loaded";
+
     [JsonPropertyName("proof")]
     public object[] Proof { get; set; } = Array.Empty<object>();
 

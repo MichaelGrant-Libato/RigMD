@@ -250,7 +250,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Maintain",
                 ConfidenceLabel = "High",
                 Explanation = primary,
-                RecommendedNextStep = "Check airflow and cooling, or run the guided inspection below to review processor temperatures and heavy background tasks.",
+                RecommendedNextStep = "Review airflow, ventilation and supported temperature readings. If memory also needs attention, run a separate memory check before reviewing apps.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -274,7 +274,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = cpuUsage >= 90 ? "High" : "Medium",
                 Explanation = primary,
-                RecommendedNextStep = "Run the guided inspection below to identify high-CPU processes and safely close non-essential background tasks.",
+                RecommendedNextStep = "Review the current workload in Task Manager. Save work before closing apps yourself; run a separate memory check for any memory warning.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -328,7 +328,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = "Medium",
                 Explanation = primary,
-                RecommendedNextStep = "Run the guided inspection below to test network connectivity and flush the Windows DNS resolver cache.",
+                RecommendedNextStep = "Review the recorded network findings. Restore the connection if disconnected, then check again. Consider refreshing saved website addresses only when a DNS lookup failure remains on an active connection.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -491,7 +491,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
         if (selectedComponents.Contains("gpu") || selectedComponents.Contains("display"))
         {
             componentSummaries.Add(
-                $"No active device error was reported for the selected graphics hardware ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}, {hw.ConnectedDisplays} connected display(s)).");
+                $"No active device error was reported for the selected graphics hardware ({hw.Gpu.Name}, Driver {hw.Gpu.Driver}, {DesktopDisplaySummary(hw)}).");
         }
 
         if (selectedComponents.Contains("drivers"))
@@ -563,6 +563,10 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             }
         };
     }
+
+    private static string DesktopDisplaySummary(HardwareProfileDto hardware) => hardware.ConnectedDisplays is > 0
+        ? $"{hardware.ConnectedDisplays} active desktop display(s) reported by Windows"
+        : "active desktop display count unavailable";
 
     private static AutomaticDiagnosisResult BuildScenarioDiagnosis(
         string scenarioId,
@@ -754,7 +758,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             },
             "no-display" when !hasDeviceErrors && hw.ConnectedDisplays > 0 => BuildScenarioHealthyDiagnosis(
                 targetScopeLabels,
-                $"No active display-driver issue detected. Display check completed for {hw.Gpu.Name} across {hw.ConnectedDisplays} connected display(s).",
+                $"No active display-driver issue detected. Display check recorded {DesktopDisplaySummary(hw)} for {hw.Gpu.Name}.",
                 "Device Manager - Display Adapters",
                 "device_manager",
                 "Check display adapter status again if flicker, black-screen behavior, or display instability returns.",
@@ -763,11 +767,11 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
             {
                 ComponentStatus = ComponentStatus.Present,
                 TargetScope = targetScopeLabels,
-                PrimaryResult = $"Display check completed for {hw.Gpu.Name} across {hw.ConnectedDisplays} connected display(s).",
+                PrimaryResult = $"Display check for {hw.Gpu.Name}: {DesktopDisplaySummary(hw)}.",
                 DiagnosedCategory = "Display driver behavior",
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = hasDeviceErrors ? "High" : "Medium",
-                Explanation = $"Display check completed for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}) across {hw.ConnectedDisplays} connected display(s).",
+                Explanation = $"Display check for {hw.Gpu.Name} (Driver: {hw.Gpu.Driver}): {DesktopDisplaySummary(hw)}.",
                 RecommendedNextStep = "Check display adapter status in Device Manager or run the guided inspection below to check graphics telemetry and refresh the Windows shell.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
@@ -795,7 +799,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Maintain",
                 ConfidenceLabel = "High",
                 Explanation = thermalSummary,
-                RecommendedNextStep = "Check fan airflow and vents, or run the guided inspection below to check processor temperatures and close heat-generating tasks.",
+                RecommendedNextStep = "Review fan airflow, vents and supported temperature readings. This check does not authorize app closing or verify a cooling repair.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -820,7 +824,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 ActionCategory = "Troubleshoot",
                 ConfidenceLabel = hw.Network != null && (!hw.Network.HasActiveAdapter || !hw.Network.DnsResolutionSucceeded || (hw.Network.PingLatencyMs ?? 0) >= 120) ? "High" : "Medium",
                 Explanation = $"Network check recorded adapter ping latency at {hw.Network?.PingLatencyMs?.ToString() ?? "N/A"} ms and packet loss at {hw.Network?.PacketLossPercent ?? 0:0.#}%.",
-                RecommendedNextStep = "Run the guided inspection below to test network connectivity and flush the Windows DNS resolver cache.",
+                RecommendedNextStep = "Review the recorded network findings. Restore the connection if disconnected, then check again. Consider refreshing saved website addresses only when a DNS lookup failure remains on an active connection.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -876,7 +880,7 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
                 Explanation = hw.Battery?.HasBattery == true
                     ? $"Battery check recorded {hw.Battery.EstimatedChargeRemaining}% charge ({hw.Battery.StatusDescription}) with CPU load at {cpuUsage:0.#}% under power plan '{hw.ActivePowerPlan}'."
                     : "No battery detected on this desktop device.",
-                RecommendedNextStep = "Review active power plan settings or run the guided inspection below to check battery drain and background processor activity.",
+                RecommendedNextStep = "Review charging and Windows power settings. A snapshot does not measure battery drain or verify battery recovery. Run a separate memory check before reviewing apps.",
                 Proof = proof,
                 VerificationTarget = new AutomaticVerificationTarget
                 {
@@ -1081,6 +1085,14 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         if (Include("gpu", "display", "drivers", "peripherals", "audio", "thermal"))
         {
+            if (Include("display"))
+                proof.Add(new AutomaticDiagnosisProof
+                {
+                    MetricId = "display_count", Label = "Active desktop displays",
+                    Value = hw.ConnectedDisplays is > 0 ? hw.ConnectedDisplays.Value.ToString() : "Unavailable",
+                    Status = hw.ConnectedDisplays is > 0 ? "info" : "unknown",
+                    Meaning = "Windows desktop monitor count, which may reflect a remote session. This is not an adapter count or a test of the picture, cable or panel."
+                });
             var driverErrorInScope = activeScopeKeys == null ||
                 activeScopeKeys.Contains("drivers") ||
                 activeScopeKeys.Contains("display") ||

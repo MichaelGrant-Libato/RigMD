@@ -464,13 +464,18 @@ public class DiagnosticController : ControllerBase
             if (!updated)
                 return NotFound(new { detail = "Diagnosis record not found." });
 
+            var savedFollowUp = await _sessionRepository.GetSessionAsync(id);
+            if (savedFollowUp == null)
+                return NotFound(new { detail = "Diagnosis record not found." });
             return Ok(new
             {
                 session_id = sessionId,
-                resolution_status = result.resolution_status,
-                resolution_checked_at = result.resolution_checked_at,
-                resolution_summary = result.resolution_summary,
-                resolution_proof = result.resolution_proof
+                resolution_status = savedFollowUp.ResolutionStatus,
+                resolution_checked_at = savedFollowUp.ResolutionCheckedAt,
+                resolution_summary = savedFollowUp.ResolutionSummary,
+                resolution_proof = savedFollowUp.ResolutionProof,
+                follow_up_history = savedFollowUp.FollowUpHistory,
+                follow_up_history_status = savedFollowUp.FollowUpHistoryStatus
             });
         }
         catch (Exception ex)

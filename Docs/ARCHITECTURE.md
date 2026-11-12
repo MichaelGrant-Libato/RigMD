@@ -38,7 +38,7 @@ RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous
    - **Responsibilities**: Contains core domain entities, baseline telemetry mappers, tool/ReAct contracts, and the `AutonomousOrchestrator` ReAct loop. Enforces strict inward dependency rules (`Domain` <- `Application` <- `Infrastructure` / `Api`, verified by `LayerDependencyTests`).
    - **Projects**: `RigMD.Application`, `RigMD.Domain`
    - **Key Contracts & Services**:
-     - `IRigMdAgentTool` & `IRigMdAgentToolRegistry` — standardized interface and registry for all 14 diagnostic (`Tier0_ReadOnly`) and remediation (`Tier1_SafeReversible`, `Tier2_DestructiveOrAdmin`) tools, including JSON Schema function declarations (`AgentToolFunctionDeclaration`) and non-destructive `PreviewImpactAsync`.
+     - `IRigMdAgentTool` & `IRigMdAgentToolRegistry` — typed interfaces for diagnostic (`Tier0_ReadOnly`) and consent-required maintenance (`Tier1_SafeReversible`, `Tier2_DestructiveOrAdmin`) tools, including JSON Schema function declarations and non-destructive previews.
      - `IReActLlmClient` — contract for multi-turn ReAct decision steps (`DecideNextTurnAsync`).
      - `AutonomousOrchestrator` — drives the multi-turn `Thought -> Tool Call -> Observation` loop, enforces the safety gate preventing unapproved write-tool execution during reasoning, runs live dry-run impact previews, and performs before/after telemetry verification using paired `Tier0_ReadOnly` tools.
      - `DiagnosticEngineService` & `AutomaticDiagnosisService` — lightweight baseline telemetry mappers that record initial session state before handing off deep investigation to the ReAct agent.
@@ -48,12 +48,12 @@ RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous
    - **Responsibilities**: Interfaces directly with Windows WMI, CIM, Windows Performance Counters (user-mode only, no kernel drivers), `System.Diagnostics`, Windows Event Logs (`wevtutil.exe`), and the Google Gemini Function-Calling API.
    - **Project**: `RigMD.Infrastructure`
    - **Hardware & Sensor Providers** (implementing `IHardwareProvider.cs`):
-     - `HardwareMonitorService` (user-mode ACPI/Performance Counter telemetry with thermal estimation fallback; no kernel driver) — CPU/GPU temperatures, loads, and VRAM readings.
+     - `HardwareMonitorService` (supported user-mode Windows readings; no kernel driver) — available temperatures, loads, and VRAM readings. Missing temperatures remain unavailable and are not estimated from workload.
      - `WmiCpuProvider`, `WmiGpuProvider`, `WmiMemoryProvider`, `WmiStorageProvider`, `WmiMotherboardProvider`, `WmiOperatingSystemProvider`, `WindowsNetworkProvider`, `ProcessProvider`, `WmiDeviceTypeProvider`, `WmiBatteryProvider`, `WmiPowerProvider`, `WmiDisplayProvider`, `WindowsSystemProfileService`.
    - **ReAct LLM Reasoning Client**:
-     - `GeminiReActLlmClient` — invokes Google Gemini (`gemini-2.5-flash` / `gemini-2.0-flash`) free-tier native `functionDeclarations` when `Gemini:ApiKey` or `GEMINI_API_KEY` is configured, and automatically falls back to a built-in **$0.00 Local Tool-Calling ReAct Engine** that invokes the same `Tier0_ReadOnly` tools and synthesizes root-cause proposals from live JSON observations.
-   - **14 Registered Agent Tools (`RigMD.Infrastructure/Remediation/Tools/`)**:
-     - **7 `Tier0_ReadOnly` Diagnostic Tools**:
+     - `GeminiReActLlmClient` — uses the authenticated cloud proxy/session for optional explanations and falls back to local tool-driven reasoning. Provider keys are not distributed with the desktop. Proposed write actions still require a current backend preview and explicit consent.
+   - **Registered Agent Tools (`RigMD.Infrastructure/Remediation/Tools/`)**:
+     - **`Tier0_ReadOnly` Diagnostic Tools**:
        1. `InspectCpuAndThermalsTool` (`inspect_cpu_and_thermals`)
        2. `InspectMemoryAndProcessesTool` (`inspect_memory_and_processes`)
        3. `InspectStorageHealthTool` (`inspect_storage_health`)
@@ -61,8 +61,8 @@ RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous
        5. `InspectNetworkConnectivityTool` (`inspect_network_connectivity`)
        6. `InspectBatteryAndPowerTool` (`inspect_battery_and_power`)
        7. `QueryWindowsEventLogsTool` (`query_windows_event_logs`)
-     - **7 `Tier1_SafeReversible` & `Tier2_DestructiveOrAdmin` Remediation Tools**:
-       1. `ClearTempFilesTool` (`clear_temp_files` — Tier 1)
+     - **`Tier1_SafeReversible` & `Tier2_DestructiveOrAdmin` Maintenance Tools**:
+       1. `ClearTempFilesTool` (`clear_temp_files` — Tier 2, permanent deletion of unchanged approved snapshot files only)
        2. `FlushDnsCacheTool` (`flush_dns_cache` — Tier 1)
        3. `RestartWindowsExplorerTool` (`restart_windows_explorer` — Tier 1)
        4. `TerminateProcessesTool` (`terminate_processes` — Tier 2)
@@ -73,7 +73,7 @@ RigMD is a local-first React + C#/.NET 10 diagnostic and ReAct-driven autonomous
      - `ClearTempFilesAction`, `ClearBrowserCacheAction`, `ClearWindowsUpdateCacheAction`, `FlushDnsAction`, `RestartExplorerAction`, `TerminateProcessesAction`, `RunDiskCleanupAction`, `RunSfcScanAction`, dispatched via `WindowsRemediationExecutor` and the `IRigMdAgentTool` wrappers.
 
 6. **Persistence Layer (EF Core + Local-First SQLite)**
-   - **Responsibilities**: Stores all diagnostic sessions, hardware profiles, and remediation audit runs locally in `%LOCALAPPDATA%\RigMD\rigmd.db` via Entity Framework Core SQLite, with optional startup synchronization from Supabase PostgreSQL when `DATABASE_URL` is configured.
+   - **Responsibilities**: Stores diagnostic sessions, profiles, generic action history and durable storage-action receipts locally in `%LOCALAPPDATA%\RigMD\rigmd.db`. EF Core manages the core schema; the SQLite storage-operation journal commits intent before native launch. Legacy raw PostgreSQL import is disabled even if `DATABASE_URL` is configured. Cloud account/AI access remains a separate authenticated service.
    - **Repositories**: `DiagnosticSessionRepository`, `RemediationRepository`.
 
 ---

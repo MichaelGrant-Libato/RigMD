@@ -70,6 +70,9 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         if (RepairSupportPolicy.RequiresHardwareInspection(diagnostic.DiagnosedCategory))
             return HardwareInspectionResult(diagnostic);
         var reviewReason = RepairSupportPolicy.ReviewOnlyReason(diagnostic.DiagnosedCategory);
+        if (DnsCacheActionPolicy.IsNetworkCategory(diagnostic.DiagnosedCategory) &&
+            DnsCacheActionPolicy.BlockReason(diagnostic, hardware) is { } networkReason)
+            return ReviewOnlyResult(diagnostic, networkReason);
         if (_toolRegistry == null || _llmClient == null)
         {
             return reviewReason != null ? ReviewOnlyResult(diagnostic, reviewReason) : BuildFallbackDryRunResult(diagnostic);
@@ -140,6 +143,9 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
                 {
                     return false;
                 }
+
+                if (reviewReason != null && tool.SafetyTier != ToolSafetyTier.Tier0_ReadOnly)
+                    return false;
 
                 if (diagnosisMode == "component" && allowedTier0Tools.Count > 0)
                 {
@@ -340,6 +346,10 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             }
         }
 
+        if (DnsCacheActionPolicy.IsDnsTool(finalProposal.RecommendedToolName) &&
+            DnsCacheActionPolicy.BlockReason(diagnostic, hardware) is { } dnsReason)
+            return ReviewOnlyResult(diagnostic, dnsReason);
+
         var recommendedTool = memoryFinding || string.IsNullOrWhiteSpace(finalProposal.RecommendedToolName) ? null
             : _toolRegistry.GetTool(finalProposal.RecommendedToolName);
 
@@ -464,6 +474,9 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         var toolName = !string.IsNullOrWhiteSpace(requestedToolName)
             ? requestedToolName!
             : ResolveDefaultToolName(diagnostic.DiagnosedCategory);
+
+        if (DnsCacheActionPolicy.IsDnsTool(toolName) && DnsCacheActionPolicy.BlockReason(diagnostic, hardware) is { } dnsReason)
+            return ReviewOnlyResult(diagnostic, dnsReason);
 
         var argsJson = !string.IsNullOrWhiteSpace(requestedArgumentsJson)
             ? requestedArgumentsJson!
@@ -882,7 +895,7 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
         return diagnosisMode == "full" ? null : "inspect_full_device_profile";
     }
 
-    private static VerificationStatus DetermineVerificationStatus(
+    internal static VerificationStatus DetermineVerificationStatus(
         DiagnosticOutput diagnostic,
         ExecutionResult execution,
         AgentToolExecutionResult? afterSnapshot,
@@ -891,7 +904,8 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
     {
         if (!execution.Success)
         {
-            return VerificationStatus.Unresolved;
+            // Failure to perform an action does not itself verify the original condition.
+            return VerificationStatus.Unknown;
         }
         if (afterSnapshot?.Success != true) return VerificationStatus.Unknown;
 
@@ -1296,8 +1310,9 @@ public class AutonomousOrchestrator : IAutonomousOrchestrator
             Id = toolId,
             Name = toolId == "flush_dns_cache" ? "Flush Windows DNS Resolver Cache" : "Clear Temporary Files",
             Description = $"Preview '{toolId}' for '{diagnostic.DiagnosedCategory}'.",
-            RiskLevel = "Low",
-            IsReversible = true,
+            RiskLevel = toolId == "flush_dns_cache" ? "Low (Tier 1)" : "Medium (Tier 2)",
+            SafetyTier = (toolId == "flush_dns_cache" ? ToolSafetyTier.Tier1_SafeReversible : ToolSafetyTier.Tier2_DestructiveOrAdmin).ToString(),
+            IsReversible = toolId == "flush_dns_cache",
             RequiresUserConfirmation = true
         };
 

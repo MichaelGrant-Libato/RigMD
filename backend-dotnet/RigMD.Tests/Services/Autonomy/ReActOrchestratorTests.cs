@@ -91,7 +91,7 @@ public class ReActOrchestratorTests
             VramGb = 12.0
         };
 
-        public int GetConnectedDisplays() => 1;
+        public int? GetConnectedDisplays() => 1;
 
         public List<DisplayStatsDto> GetDisplays() => new()
         {
@@ -257,9 +257,27 @@ public class ReActOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task FailedActionIsRecordedAsFailedWithoutInferringTheOriginalConditionFromFailure()
+    {
+        var tool = new FakeSafeRemediationTool { Succeeds = false };
+        var orchestrator = new AutonomousOrchestrator(
+            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
+            new RigMdAgentToolRegistry(new IRigMdAgentTool[] { tool }));
+        var result = await orchestrator.RunExecutionCycleAsync(new DiagnosticOutput { DiagnosedCategory = "OS performance degradation" },
+            new HardwareProfileDto(), userConsentProvided: true, requestedToolName: tool.Name, requestedArgumentsJson: "{}");
+        Assert.Equal(1, tool.ExecutionCount);
+        Assert.False(result.Execution!.Success);
+        Assert.Equal(RemediationAttemptState.ExecutionFailed, Assert.Single(result.Attempts).State);
+        Assert.Equal(VerificationStatus.Unknown, result.Verification);
+        Assert.Equal(VerificationStatus.Unknown, result.VerificationReport!.Status);
+        Assert.Contains("Nothing was removed", result.Execution.Summary);
+    }
+
     private sealed class FakeSafeRemediationTool : IRigMdAgentTool
     {
         public int ExecutionCount { get; private set; }
+        public bool Succeeds { get; init; } = true;
 
         public string Name { get; init; } = "clear_temp_files";
         public string DisplayName => "Clear Temporary Files";
@@ -293,6 +311,7 @@ public class ReActOrchestratorTests
             CancellationToken cancellationToken = default)
         {
             ExecutionCount++;
+            if (!Succeeds) return Task.FromResult(new AgentToolExecutionResult { ToolName = Name, Success = false, Summary = "Nothing was removed. Review a fresh preview." });
             return Task.FromResult(new AgentToolExecutionResult
             {
                 ToolName = Name,
@@ -691,29 +710,18 @@ public class ReActOrchestratorTests
     [InlineData("Elevated CPU Utilization", 45d, 89.9, VerificationStatus.Unresolved)]
     [InlineData("Elevated CPU Utilization", 45d, 90d, VerificationStatus.Unresolved)]
     [InlineData("Elevated CPU Utilization", 45d, 95d, VerificationStatus.Unresolved)]
-    public async Task CpuAndThermalVerification_UsesTheRelevantMeasurement(
+    public async Task CpuAndThermalEvidence_UsesTheRelevantMeasurement(
         string category, double? temperature, double usage, VerificationStatus expected)
     {
         var providers = new StubProviders { CpuTemperature = temperature, CpuUsage = usage };
-        var fakeAction = new FakeSafeRemediationTool { Name = "terminate_processes" };
-        var registry = new RigMdAgentToolRegistry(new IRigMdAgentTool[]
-        {
-            new InspectCpuAndThermalsTool(providers), fakeAction
-        });
-        var orchestrator = new AutonomousOrchestrator(
-            new WindowsRemediationExecutor(NullLogger<WindowsRemediationExecutor>.Instance, NullLoggerFactory.Instance),
-            registry,
-            new GeminiReActLlmClient(new HttpClient(),
-                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gemini:ApiKey"] = "" }).Build(),
-                NullLogger<GeminiReActLlmClient>.Instance));
-        var result = await orchestrator.RunExecutionCycleAsync(
-            new DiagnosticOutput { Id = Guid.NewGuid(), DiagnosticSessionId = Guid.NewGuid(), DiagnosedCategory = category },
-            new HardwareProfileDto(), userConsentProvided: true,
-            requestedToolName: "terminate_processes", requestedArgumentsJson: "{}");
-
-        Assert.Equal(1, fakeAction.ExecutionCount);
-        Assert.Equal("inspect_cpu_and_thermals", result.VerificationReport!.VerificationToolName);
-        Assert.Equal(expected, result.Verification);
+        using var arguments = JsonDocument.Parse("{}");
+        var observation = await new InspectCpuAndThermalsTool(providers).ExecuteAsync(arguments.RootElement);
+        Assert.True(observation.Success);
+        // Keep measurement interpretation coverage independent of the now-guidance-only action policy.
+        var status = AutonomousOrchestrator.DetermineVerificationStatus(
+            new DiagnosticOutput { DiagnosedCategory = category }, new ExecutionResult { Success = true },
+            observation, "inspect_cpu_and_thermals");
+        Assert.Equal(expected, status);
     }
 
     [Fact]

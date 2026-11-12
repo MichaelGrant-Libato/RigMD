@@ -4,7 +4,8 @@ import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 // HealthScoreRing is disabled for now — too risky to claim computer health with lacking parameters
 // import HealthScoreRing from './dashboard/HealthScoreRing';
 import StatusPill from './dashboard/StatusPill';
-import { CpuCard, MemoryCard, StorageCard, NetworkCard } from './dashboard/MetricCards';
+import HomeOverviewCards from './dashboard/HomeOverviewCards';
+import { overviewPills, type HomeOverview } from '../lib/homeOverview';
 import RecentDiagnosticsTimeline from './dashboard/RecentDiagnosticsTimeline';
 import AlertsSummaryCard from './dashboard/AlertsSummaryCard';
 import { REVIEW_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
@@ -13,6 +14,9 @@ import { getHomeDashboardMessage } from '../lib/homeDashboardMessage';
 
 interface Props {
   stats: HardwareStats | null;
+  overview: HomeOverview | null;
+  overviewError: string | null;
+  summaryState: 'pending' | 'completed' | 'failed';
   dashboard: DashboardSummary;
   setActivePage: (page: PageKey) => void;
   onViewSession: (sessionId: string) => void;
@@ -88,11 +92,13 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
   return pills;
 }
 
-export default function HomeDashboardContent({ stats, dashboard, setActivePage, onViewSession }: Props) {
+export default function HomeDashboardContent({ stats, overview, overviewError, summaryState, dashboard, setActivePage, onViewSession }: Props) {
   const hasWarnings = dashboard.warning_signs_active_count > 0;
-  const pills = getStatusPills(stats, dashboard);
+  const pills = overview ? overviewPills(overview) : getStatusPills(stats, dashboard);
+  if (overview && dashboard.warning_signs_active_count > 0) pills.push({ label: `${dashboard.warning_signs_active_count} Alerts`, variant: 'warning' });
   const currentWarnings = pills.filter(pill => pill.variant === 'warning' && !pill.label.includes('Alert')).map(pill => pill.label);
-  const { title, subtitle, latest, primary } = getHomeDashboardMessage(dashboard, currentWarnings);
+  const { title, subtitle, latest, primary } = summaryState === 'completed' ? getHomeDashboardMessage(dashboard, currentWarnings)
+    : { title: 'Your device overview', subtitle: summaryState === 'failed' ? 'Saved-check summary is unavailable. You can still check your device or open Past Checks.' : 'Essential readings are shown below. Your saved-check summary is loading.', latest: null, primary: 'current' as const };
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
@@ -154,15 +160,13 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
       </motion.section>
 
       {/* ═══════ METRIC CARDS ═══════ */}
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <CpuCard stats={stats} />
-        <MemoryCard stats={stats} />
-        <StorageCard stats={stats} />
-        <NetworkCard stats={stats} />
-      </section>
+      <HomeOverviewCards overview={overview} error={overviewError} />
 
       {/* ═══════ BOTTOM ROW — Timeline + Alerts ═══════ */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      {summaryState !== 'completed' ? <section className="rigmd-card-surface rounded-xl border p-6" role={summaryState === 'failed' ? 'alert' : 'status'}>
+        <h3 className="font-semibold">{summaryState === 'failed' ? 'Saved-check summary unavailable' : 'Loading saved-check summary…'}</h3>
+        <p className="mt-2 text-sm text-slate-400">{summaryState === 'failed' ? 'Saved counts are unavailable. Open Past Checks to review your saved checks.' : 'Recent checks, saved alerts and repeated-check counts will appear after the saved records finish loading.'}</p>
+      </section> :       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <RecentDiagnosticsTimeline
           dashboard={dashboard}
           onViewSession={onViewSession}
@@ -172,7 +176,7 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
           dashboard={dashboard}
           setActivePage={setActivePage}
         />
-      </div>
+      </div>}
 
     </div>
   );

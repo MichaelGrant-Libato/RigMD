@@ -1,24 +1,29 @@
 import CloudAiAccountPanel from '../components/CloudAiAccountPanel';
+import ActionRecoveryNotice from '../components/ActionRecoveryNotice';
 //HardwareDashboard.tsx
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Wrench } from 'lucide-react';
 import HomeDashboardContent from '../components/HomeDashboardContent';
+import DeviceDataSkeleton from '../components/DeviceDataSkeleton';
+import PageLoadBoundary from '../components/PageLoadBoundary';
 
 import AppSidebar from '../components/AppSidebar';
 import TopHeader, { HeaderStatusProvider, type LiveDataStatus } from '../components/TopHeader';
-import SystemProfileView from './SystemProfileView';
-import DiagnosticHistoryView from './DiagnosticHistoryView';
+const SystemProfileView = lazy(() => import('./SystemProfileView'));
+const DiagnosticHistoryView = lazy(() => import('./DiagnosticHistoryView'));
 import { DEFAULT_TREND_SELECTION, type TrendSelection } from '../lib/diagnosticTrends';
-import RecurringPatternsView from './RecurringPatternsView';
-import WarningSignsView from './WarningSignsView';
-import NewDiagnosisView from './NewDiagnosisView'; // Imported the separated module view
-import HelpScopeView from './HelpScopeView';
-import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
-import ShareReportView from './ShareReportView';
-import SettingsView from './SettingsView';
-import AppSpeedView from './AppSpeedView';
+const RecurringPatternsView = lazy(() => import('./RecurringPatternsView'));
+const WarningSignsView = lazy(() => import('./WarningSignsView'));
+const NewDiagnosisView = lazy(() => import('./NewDiagnosisView'));
+const HelpScopeView = lazy(() => import('./HelpScopeView'));
+const DiagnosticSessionDetailView = lazy(() => import('./DiagnosticSessionDetailView'));
+const ShareReportView = lazy(() => import('./ShareReportView'));
+const SettingsView = lazy(() => import('./SettingsView'));
+const AppSpeedView = lazy(() => import('./AppSpeedView'));
+import { useHomeOverview } from '../lib/useHomeOverview';
+import { fullInventoryNeeded, sensorStreamingNeeded, type HomeOverview } from '../lib/homeOverview';
 
 import {
   cardTransition,
@@ -29,7 +34,6 @@ import * as signalR from '@microsoft/signalr';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { mergeLiveUsage, type LiveUsageSample } from '../lib/liveReadings';
 import type {
-  AgentSnapshotResponse,
   AgentStatus,
   DashboardSessionSummary,
   DashboardSummary,
@@ -73,219 +77,6 @@ const emptyDashboard: DashboardSummary = {
   recent_warning_signs: [],
   last_saved_session: null,
 };
-
-const AGENT_ID = import.meta.env.VITE_AGENT_ID;
-
-function agentSnapshotToHardwareStats(
-  snapshot: AgentSnapshotResponse
-): HardwareStats {
-  const hardware = snapshot.hardware;
-
-  return {
-    device_name: hardware.deviceName,
-    device_type: hardware.deviceType,
-    os_version: hardware.osVersion,
-    system_age: hardware.systemAge,
-    chipset_driver: hardware.chipsetDriver,
-    storage_type: hardware.primaryStorageType,
-
-    connected_displays: hardware.connectedDisplays,
-    active_power_plan: hardware.activePowerPlan,
-    battery: hardware.battery ? {
-      is_charging: hardware.battery.isCharging,
-      charge_percent: hardware.battery.chargePercent,
-      health_status: hardware.battery.healthStatus,
-    } : null,
-
-    network: (hardware.network || (hardware as unknown as { Network?: any }).Network) ? {
-      is_wifi: Boolean(hardware.network?.isWifi ?? (hardware as unknown as { Network?: any }).Network?.IsWifi),
-      wifi_signal_strength: hardware.network?.wifiSignalStrength ?? (hardware as unknown as { Network?: any }).Network?.WifiSignalStrength ?? null,
-      mac_address: hardware.network?.macAddress ?? (hardware as unknown as { Network?: any }).Network?.MacAddress ?? '',
-      ip_address: hardware.network?.ipAddress ?? (hardware as unknown as { Network?: any }).Network?.IpAddress ?? '',
-      ping_latency_ms: hardware.network?.pingLatencyMs ?? (hardware as unknown as { Network?: any }).Network?.PingLatencyMs ?? undefined,
-      packet_loss_percent: hardware.network?.packetLossPercent ?? (hardware as unknown as { Network?: any }).Network?.PacketLossPercent ?? undefined,
-    } : null,
-
-    displays: (hardware.displays || (hardware as unknown as { Displays?: any[] }).Displays || []).map((d: any) => ({
-      name: d.name ?? d.Name ?? '',
-      resolution: d.resolution ?? d.Resolution ?? '',
-      refresh_rate: d.refreshRate ?? d.RefreshRate ?? 0,
-    })),
-
-    device_errors: (hardware.deviceErrors || (hardware as unknown as { DeviceErrors?: any[] }).DeviceErrors || []).map((e: any) => ({
-      name: e.name ?? e.Name ?? '',
-      device_id: e.deviceId ?? e.DeviceId ?? '',
-      error_code: e.errorCode ?? e.ErrorCode ?? 0,
-      description: e.description ?? e.Description ?? '',
-    })),
-
-    cpu: {
-      name: hardware.cpu.name,
-      usage_percent: hardware.cpu.usageAvailable === false ? null : hardware.cpu.usagePercent,
-      usage_source: hardware.cpu.usageSource,
-      cores: hardware.cpu.cores,
-      threads: hardware.cpu.threads,
-      frequency_mhz: hardware.cpu.frequencyMhz,
-      max_frequency_mhz: hardware.cpu.maxFrequencyMhz,
-      sockets: hardware.cpu.sockets,
-      virtualization_enabled: hardware.cpu.virtualizationEnabled,
-      l1_cache_kb: hardware.cpu.l1CacheKb,
-      l2_cache_mb: hardware.cpu.l2CacheMb,
-      l3_cache_mb: hardware.cpu.l3CacheMb,
-      processes: hardware.cpu.processes,
-      handles: hardware.cpu.handles,
-      temperature_celsius: hardware.cpu.temperatureCelsius ?? null,
-      temperature_source: hardware.cpu.temperatureSource,
-      temperature_sensor_identifier: hardware.cpu.temperatureSensorIdentifier,
-      temperature_captured_at_utc: hardware.cpu.temperatureCapturedAtUtc,
-    },
-
-    gpu: {
-      name: hardware.gpu.name,
-      driver: hardware.gpu.driver,
-      type: hardware.gpu.type,
-      vram_gb: hardware.gpu.vramGb,
-      dedicated_memory_gb: hardware.gpu.dedicatedMemoryGb,
-      shared_memory_gb: hardware.gpu.sharedMemoryGb,
-      driver_date: hardware.gpu.driverDate,
-      directx_version: hardware.gpu.directxVersion,
-      physical_location: hardware.gpu.physicalLocation,
-      temperature_celsius: hardware.gpu.temperatureCelsius,
-    },
-
-    ram: {
-      total_gb: hardware.ram.totalGb,
-      used_gb: hardware.ram.usageAvailable === false ? null : hardware.ram.usedGb,
-      usage_percent: hardware.ram.usageAvailable === false ? null : hardware.ram.usagePercent,
-      speed_mtps: hardware.ram.speedMtps,
-      slots_used: hardware.ram.slotsUsed,
-      slots_total: hardware.ram.slotsTotal,
-      form_factor: hardware.ram.formFactor,
-      hardware_reserved_mb: hardware.ram.hardwareReservedMb,
-      committed_gb: hardware.ram.committedGb,
-      cached_gb: hardware.ram.cachedGb,
-    },
-
-    disk: {
-      total_gb: Math.round(
-        ((hardware.storageDrives && hardware.storageDrives.length > 0)
-          ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
-          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0)) * 100
-      ) / 100,
-      used_gb: Math.round(
-        ((hardware.storageDrives && hardware.storageDrives.length > 0)
-          ? hardware.storageDrives.reduce((acc, d) => acc + (d.usedGb || 0), 0)
-          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.usedGb || 0), 0)) * 100
-      ) / 100,
-      usage_percent:
-        ((hardware.storageDrives && hardware.storageDrives.length > 0)
-          ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
-          : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0)) > 0
-          ? Math.round(
-              (((hardware.storageDrives && hardware.storageDrives.length > 0)
-                ? hardware.storageDrives.reduce((acc, d) => acc + (d.usedGb || 0), 0)
-                : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.usedGb || 0), 0)) /
-                ((hardware.storageDrives && hardware.storageDrives.length > 0)
-                  ? hardware.storageDrives.reduce((acc, d) => acc + (d.sizeGb || 0), 0)
-                  : (hardware.allDisks ?? []).reduce((acc, d) => acc + (d.totalGb || 0), 0))) *
-                1000
-            ) / 10
-          : Number.NaN,
-    },
-
-    all_disks: (hardware.allDisks ?? []).map((d) => ({
-      drive: d.drive,
-      mountpoint: d.mountpoint,
-      fstype: d.fsType,
-      disk_index: d.diskIndex,
-      total_gb: d.totalGb,
-      used_gb: d.usedGb,
-      usage_percent: d.usagePercent,
-    })),
-
-    storage_drives: (hardware.storageDrives ?? []).map((drive) => {
-      const driveVolumes = (drive.volumes && drive.volumes.length > 0)
-        ? drive.volumes.map((v) => ({
-            drive: v.drive,
-            mountpoint: v.mountpoint,
-            fstype: v.fsType || v.fstype || '',
-            disk_index: v.diskIndex ?? v.disk_index ?? drive.diskIndex,
-            total_gb: v.totalGb ?? v.total_gb ?? 0,
-            used_gb: v.usedGb ?? v.used_gb ?? 0,
-            usage_percent: v.usagePercent ?? v.usage_percent ?? 0,
-          }))
-        : (hardware.allDisks ?? [])
-            .filter((d) => drive.diskIndex != null && d.diskIndex === drive.diskIndex)
-            .map((v) => ({
-              drive: v.drive,
-              mountpoint: v.mountpoint,
-              fstype: v.fsType,
-              disk_index: v.diskIndex,
-              total_gb: v.totalGb,
-              used_gb: v.usedGb,
-              usage_percent: v.usagePercent,
-            }));
-
-      let usedGb = drive.usedGb;
-      let usagePercent = drive.usagePercent;
-      if ((usedGb == null || usagePercent == null) && driveVolumes.length > 0) {
-        const totalVol = driveVolumes.reduce((acc, v) => acc + (v.total_gb || 0), 0);
-        const usedVol = driveVolumes.reduce((acc, v) => acc + (v.used_gb || 0), 0);
-        usedGb = Math.round(usedVol * 100) / 100;
-        if (totalVol > 0) {
-          usagePercent = Math.round((usedVol / totalVol) * 1000) / 10;
-        }
-      }
-
-      return {
-        model: drive.model,
-        type: drive.type,
-        size_gb: drive.sizeGb,
-        interface: drive.interface,
-        media_type: drive.mediaType,
-        bus_type: drive.busType,
-        detection_source: drive.detectionSource,
-        disk_index: drive.diskIndex,
-        used_gb: usedGb,
-        usage_percent: usagePercent,
-        is_failing_smart: drive.isFailingSmart ?? false,
-        status: drive.isFailingSmart ? 'Warning / Failing S.M.A.R.T.' : 'Healthy / OK',
-        volumes: driveVolumes,
-      };
-    }),
-
-    process_insights: hardware.processInsights
-      ? {
-          browser_detected:
-            hardware.processInsights.browserDetected,
-
-          browser_process_count:
-            hardware.processInsights.browserProcessCount,
-
-          browser_memory_mb:
-            hardware.processInsights.browserMemoryMb,
-
-          browser_heavy:
-            hardware.processInsights.browserHeavy,
-
-          game_detected:
-            hardware.processInsights.gameDetected,
-
-          game_processes:
-            hardware.processInsights.gameProcesses,
-
-          top_memory_apps:
-            hardware.processInsights.topMemoryApps.map(
-              (app) => ({
-                name: app.name,
-                process_count: app.processCount,
-                memory_mb: app.memoryMb,
-              })
-            ),
-        }
-      : undefined,
-  };
-}
 
 function formatTodayLabel() {
   return new Intl.DateTimeFormat('en-US', {
@@ -476,11 +267,17 @@ function normalizeDashboardSummary(rawSummary: unknown, sessions: SessionSummary
 
 function HomeDashboardView({
   stats,
+  overview,
+  overviewError,
+  summaryState,
   dashboard,
   setActivePage,
   onViewSession,
 }: {
   stats: HardwareStats | null;
+  overview: HomeOverview | null;
+  overviewError: string | null;
+  summaryState: 'pending' | 'completed' | 'failed';
   dashboard: DashboardSummary;
   setActivePage: (page: PageKey) => void;
   onViewSession: (sessionId: string) => void;
@@ -499,6 +296,9 @@ function HomeDashboardView({
       >
         <HomeDashboardContent
           stats={stats}
+          overview={overview}
+          overviewError={overviewError}
+          summaryState={summaryState}
           dashboard={dashboard}
           setActivePage={setActivePage}
           onViewSession={onViewSession}
@@ -530,17 +330,21 @@ function PlaceholderView({ title, subtitle }: { title: string; subtitle: string 
   );
 }
 
-void AGENT_ID;
-void agentSnapshotToHardwareStats;
 void PlaceholderView;
 
-export default function HardwareDashboard({ onStartupReady }: { onStartupReady?: (complete: boolean) => void } = {}) {
+export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { onStartupReady?: (complete: boolean) => void; onSummaryReady?: (complete: boolean) => void } = {}) {
   const [initialDashboard, setInitialDashboard] = useState<'pending' | 'completed' | 'failed'>('pending');
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
   const [error, setError] = useState<string | null>(null);
+  const [reportWithoutInventory, setReportWithoutInventory] = useState(false);
   const [activePage, setActivePage] = useState<PageKey>('home');
+  const overview = useHomeOverview(!fullInventoryNeeded(activePage));
+  const needsFullInventory = fullInventoryNeeded(activePage);
+  const needsSensorStreaming = sensorStreamingNeeded(activePage);
+  const startupReported = useRef(false);
+  const summaryReported = useRef(false);
   const [restoreAppSpeedFocus, setRestoreAppSpeedFocus] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [historyView, setHistoryView] = useState<'saved' | 'trends'>('saved');
@@ -549,49 +353,40 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
   const [diagnosisPreset, setDiagnosisPreset] = useState<'memory' | null>(null);
   const [hardwareUpdatedAt, setHardwareUpdatedAt] = useState<Date | null>(null);
   const [isRefreshingHardware, setIsRefreshingHardware] = useState(false);
+  const [isInventoryPageLoading, setIsInventoryPageLoading] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  const visibleError = needsFullInventory ? error : overview.error;
+  const hasVisibleReadings = needsFullInventory ? !!stats : !!overview.data;
+  const visibleLoading = needsFullInventory ? isRefreshingHardware : overview.state === 'pending';
+  const readingTimestamp = needsFullInventory ? hardwareUpdatedAt?.getTime() ?? null : overview.data ? Date.parse(overview.data.capturedAt) : null;
+  const visibleUpdatedAt = readingTimestamp === null ? null : new Date(readingTimestamp);
   const liveStatus: LiveDataStatus = useMemo(() => {
-    if (
-      isRefreshingHardware ||
-      (!stats && !error)
-    ) {
-      return 'syncing';
-    }
-
-    if (error || agentStatus?.isOnline === false) {
-      return 'offline';
-    }
-
-    if (
-      !hardwareUpdatedAt ||
-      Date.now() -
-        hardwareUpdatedAt.getTime() >
-        120000
-    ) {
-      return 'stale';
-    }
-
-    return 'live';
-  }, [
-    agentStatus,
-    error,
-    hardwareUpdatedAt,
-    isRefreshingHardware,
-    stats,
-  ]);
+    if (visibleLoading || (!hasVisibleReadings && !visibleError)) return 'syncing';
+    if (visibleError || agentStatus?.isOnline === false) return 'offline';
+    return readingTimestamp === null || Date.now() - readingTimestamp > 120000 ? 'stale' : 'live';
+  }, [visibleLoading, hasVisibleReadings, visibleError, agentStatus, readingTimestamp]);
 
   useEffect(() => {
-    if (initialDashboard !== 'pending' && (stats || error)) onStartupReady?.(initialDashboard === 'completed' && !error);
-  }, [initialDashboard, stats, error, onStartupReady]);
+    if (startupReported.current) return;
+    const failed = activePage !== 'home' || overview.state === 'failed';
+    const complete = overview.state === 'completed';
+    if (failed || complete) { startupReported.current = true; onStartupReady?.(!failed && complete); }
+  }, [overview.state, activePage, onStartupReady]);
+  useEffect(() => {
+    if (summaryReported.current) return;
+    const failed = activePage !== 'home' || initialDashboard === 'failed';
+    if (failed || initialDashboard === 'completed') { summaryReported.current = true; onSummaryReady?.(!failed); }
+  }, [initialDashboard, activePage, onSummaryReady]);
 
-  const deviceName = stats?.device_name?.trim() || 'Detecting Device';
+  const deviceName = overview.data?.deviceName?.trim() || stats?.device_name?.trim() || 'Detecting Device';
   const isFetchingHardwareRef = useRef(false);
   const isFetchingDashboardRef = useRef(false);
   const latestUsageRef = useRef<{ sample: LiveUsageSample; receivedAt: number } | null>(null);
   const usageUpdatedAtRef = useRef(0);
 
   useEffect(() => {
+    if (!needsSensorStreaming) return;
     let disposed = false;
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`${API_BASE_URL}/hubs/telemetry`, { accessTokenFactory: getLocalApiToken })
@@ -611,7 +406,7 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
       }
     }, 1000);
     return () => { disposed = true; window.clearInterval(staleTimer); void connection.stop(); };
-  }, []);
+  }, [needsSensorStreaming]);
 
   const fetchHardware = useCallback(async () => {
     if (isFetchingHardwareRef.current) {
@@ -619,8 +414,10 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
     }
 
     isFetchingHardwareRef.current = true;
+    setIsRefreshingHardware(true);
+    setError(null);
     try {
-      const liveResponse = await apiGet<HardwareStats>('/api/hardware/live');
+      const liveResponse = await apiGet<HardwareStats>('/api/hardware/live', { timeout: 60000 });
       const fresh = latestUsageRef.current;
       setStats(fresh && Date.now() - fresh.receivedAt <= 5000 ? mergeLiveUsage(liveResponse.data, fresh.sample) : liveResponse.data);
       usageUpdatedAtRef.current = fresh?.receivedAt ?? Date.now();
@@ -631,21 +428,19 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
       setError('Unable to retrieve Windows hardware telemetry.');
     } finally {
       isFetchingHardwareRef.current = false;
+      setIsRefreshingHardware(false);
+      setIsInventoryPageLoading(false);
     }
   }, []);
 
   const refreshHardware = useCallback(async () => {
-    setIsRefreshingHardware(true);
-
-    try {
-      await fetchHardware();
-    } finally {
-      setIsRefreshingHardware(false);
-    }
-  }, [fetchHardware]);
+    if (error || !stats) setIsInventoryPageLoading(true);
+    await fetchHardware();
+  }, [fetchHardware, error, stats]);
 
   useEffect(() => {
-    fetchHardware();
+    if (!needsFullInventory) return;
+    void fetchHardware();
 
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'hidden') {
@@ -655,7 +450,7 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
     }, 30000);
 
     return () => window.clearInterval(interval);
-  }, [fetchHardware]);
+  }, [fetchHardware, needsFullInventory, activePage]);
 
   useEffect(() => {
     if (activePage !== 'home') {
@@ -669,7 +464,7 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
 
       isFetchingDashboardRef.current = true;
       try {
-        const response = await apiGet<DashboardSummary | LegacyDashboardSummary>('/api/dashboard/summary');
+        const response = await apiGet<DashboardSummary | LegacyDashboardSummary>('/api/dashboard/summary', { timeout: 10000 });
         let sessions: SessionSummary[] = [];
 
         if (!hasDashboardContract(response.data)) {
@@ -684,10 +479,10 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
         }
 
         setDashboard(normalizeDashboardSummary(response.data, sessions));
-        setInitialDashboard(previous => previous === 'pending' ? 'completed' : previous);
+        setInitialDashboard('database_warning' in response.data && response.data.database_warning ? 'failed' : 'completed');
       } catch {
-        setDashboard(emptyDashboard);
-        setInitialDashboard(previous => previous === 'pending' ? 'failed' : previous);
+        setDashboard(previous => ({ ...previous, database_warning: 'Saved-check summary could not be refreshed.' }));
+        setInitialDashboard('failed');
       } finally {
         isFetchingDashboardRef.current = false;
       }
@@ -706,6 +501,8 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
   }, [activePage]);
 
   const handleSetActivePage = (page: PageKey) => {
+  if (page !== activePage) setReportWithoutInventory(false);
+  if (fullInventoryNeeded(page) && page !== activePage) { setIsInventoryPageLoading(true); setError(null); }
   if (page === 'newDiagnosis') { setDiagnosisPreset(null); setNewSessionId(null); }
   if (page === 'diagnosticHistory') {
     setSelectedSessionId(null);
@@ -721,11 +518,25 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
   };
 
   const renderPage = () => {
+    if (needsFullInventory && !(activePage === 'reports' && reportWithoutInventory) && (error || !stats || isInventoryPageLoading)) {
+      if (!error) return <DeviceDataSkeleton report={activePage === 'reports'} />;
+      return <><TopHeader title={activePage === 'reports' ? 'Share Report' : 'My Device Info'} subtitle="Device details are unavailable" /><div className="p-8" role="alert">
+        <h2 className="text-xl font-semibold">{error ? 'Device details could not be loaded' : 'Loading full device details…'}</h2>
+        <p className="mt-2 text-slate-400">{error ?? 'Reading hardware inventory and sensors. Home essentials are available separately.'}</p>
+        {error && <div className="mt-4 flex flex-wrap gap-3">
+          <button className="rounded border px-4 py-2 text-cyan-300" onClick={() => { void refreshHardware(); }}>Retry device details</button>
+          {activePage === 'reports' && <button className="rounded border px-4 py-2 text-cyan-300" onClick={() => setReportWithoutInventory(true)}>Use saved check results only</button>}
+        </div>}
+      </div></>;
+    }
     switch (activePage) {
       case 'home':
         return (
           <HomeDashboardView
-            stats={stats}
+            stats={null}
+            overview={overview.data}
+            overviewError={overview.error}
+            summaryState={initialDashboard}
             dashboard={dashboard}
             setActivePage={handleSetActivePage}
             onViewSession={(sessionId) => {
@@ -767,10 +578,10 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
       );
 
       case 'recurringPatterns':
-        return <RecurringPatternsView setActivePage={setActivePage} />;
+        return <RecurringPatternsView setActivePage={setActivePage} onOpenMemoryCheck={openMemoryCheck} />;
 
       case 'warningSigns':
-        return <WarningSignsView />;
+        return <WarningSignsView onOpenMemoryCheck={openMemoryCheck} />;
       case 'newDiagnosis':
         return newSessionId ? (
           <DiagnosticSessionDetailView
@@ -792,13 +603,14 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
         );
 
       case 'reports':
-        return (
+        return (<>
+          {reportWithoutInventory && <p role="status" className="mx-6 mt-4 text-sm text-amber-200">Using saved check results only. Current device details are unavailable and will be omitted from the report.</p>}
           <ShareReportView
-            stats={stats}
-            hardwareUpdatedAt={hardwareUpdatedAt}
+            stats={reportWithoutInventory ? null : stats}
+            hardwareUpdatedAt={reportWithoutInventory ? null : hardwareUpdatedAt}
             onStartNewDiagnosis={() => handleSetActivePage('newDiagnosis')}
           />
-        );
+        </>);
 
       case 'settings':
         return <SettingsView onOpenAppSpeed={() => { setRestoreAppSpeedFocus(false); handleSetActivePage('appSpeed'); }} restoreAppSpeedFocus={restoreAppSpeedFocus} />;
@@ -811,7 +623,10 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
       default:
         return (
           <HomeDashboardView
-            stats={stats}
+            stats={null}
+            overview={overview.data}
+            overviewError={overview.error}
+            summaryState={initialDashboard}
             dashboard={dashboard}
             setActivePage={handleSetActivePage}
             onViewSession={(sessionId) => {
@@ -830,12 +645,13 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
         setActivePage={handleSetActivePage}
         dashboard={dashboard}
         liveStatus={liveStatus}
-        hardwareUpdatedAt={hardwareUpdatedAt}
+        hardwareUpdatedAt={visibleUpdatedAt}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
       <main className="rigmd-main-surface flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <ActionRecoveryNotice />
         <HeaderStatusProvider
           deviceName={deviceName}
           liveStatus={liveStatus}
@@ -843,7 +659,13 @@ export default function HardwareDashboard({ onStartupReady }: { onStartupReady?:
         >
           <AnimatePresence mode="wait">
             <div key={`${activePage}-${(activePage === 'newDiagnosis' ? newSessionId : selectedSessionId) ?? 'list'}`} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {renderPage()}
+              <PageLoadBoundary key={activePage} onHome={() => setActivePage('home')}>
+                <Suspense fallback={activePage === 'systemProfile' || activePage === 'reports'
+                  ? <DeviceDataSkeleton report={activePage === 'reports'} />
+                  : <div role="status" aria-live="polite" className="p-8 text-slate-300">Opening this page…</div>}>
+                  {renderPage()}
+                </Suspense>
+              </PageLoadBoundary>
             </div>
           </AnimatePresence>
         </HeaderStatusProvider>

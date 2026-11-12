@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>de6a4acc-2cac-4706-9aad-aa07d4807396</UserSecretsId>
-    <Version>0.2.4</Version>
+    <Version>0.2.20</Version>
     <DeleteExistingFiles>true</DeleteExistingFiles>
   </PropertyGroup>
 
@@ -29,5 +29,13 @@
     <ProjectReference Include="..\RigMD.Application\RigMD.Application.csproj" />
     <ProjectReference Include="..\RigMD.Infrastructure\RigMD.Infrastructure.csproj" />
   </ItemGroup>
+
+  <!-- A distinct process name keeps crash cleanup from confusing an active uninstall helper with an orphan API. -->
+  <Target Name="CopyRegisteredUninstallHelper" AfterTargets="Build" Condition="Exists('$(TargetDir)RigMD.Api.exe')">
+    <Copy SourceFiles="$(TargetDir)RigMD.Api.exe" DestinationFiles="$(TargetDir)RigMD.Uninstall.exe" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishRegisteredUninstallHelper" AfterTargets="Publish" Condition="Exists('$(PublishDir)RigMD.Api.exe')">
+    <Copy SourceFiles="$(PublishDir)RigMD.Api.exe" DestinationFiles="$(PublishDir)RigMD.Uninstall.exe" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

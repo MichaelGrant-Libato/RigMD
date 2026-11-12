@@ -19,6 +19,130 @@ namespace RigMD.Tests.Api;
 public class AutonomyControllerTests
 {
     [Theory]
+    [InlineData("adapter")][InlineData("address")][InlineData("gateway")][InlineData("servers")]
+    [InlineData("query")][InlineData("lookup-cleared")][InlineData("lookup-unavailable")]
+    public async Task DnsActionRechecksCurrentEvidenceBeforePreviewAndApprovalConsumption(string changed)
+    {
+        var diagnostic = RigMD.Tests.Application.DnsCacheActionPolicyTests.Diagnostic();
+        var hardware = RigMD.Tests.Application.DnsCacheActionPolicyTests.Hardware();
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var tool = new DnsPreviewFixture();
+        var orchestrator = new FakeOrchestrator();
+        var saved = new FakeRemediationRepository();
+        var controller = CreateController(orchestrator, diagnostic, saved, approvals,
+            new RigMdAgentToolRegistry(new[] { tool }), hardware);
+        var sessionId = diagnostic.DiagnosticSessionId.ToString();
+        var request = new AutonomyController.ToolInvocationRequest {
+            SessionId = sessionId, ToolName = tool.Name, Arguments = JsonSerializer.SerializeToElement(new { })
+        };
+        var ok = Assert.IsType<OkObjectResult>(await controller.PreviewTool(request, CancellationToken.None));
+        var preview = Assert.IsType<ToolDryRunPreview>(ok.Value);
+        Assert.NotNull(preview.ApprovalToken);
+        RigMD.Tests.Application.DnsCacheActionPolicyTests.Change(hardware.Network, changed);
+        Assert.IsType<ConflictObjectResult>(await controller.PreviewTool(request, CancellationToken.None));
+        Assert.IsType<ConflictObjectResult>(await controller.Preview(new() { SessionId = sessionId }));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(new() {
+            SessionId = sessionId, ToolName = tool.Name, ToolArgumentsJson = "{}", ApprovalToken = preview.ApprovalToken, UserConsentProvided = true
+        }));
+        Assert.Equal(1, tool.PreviewCalls);
+        Assert.Equal(0, tool.ExecutionCalls);
+        Assert.Equal(0, orchestrator.Calls);
+        Assert.Equal(0, saved.SaveCallCount);
+        Assert.True(approvals.TryConsume(preview.ApprovalToken,
+            RemediationApprovalStore.CreateScope("remediation", diagnostic.DiagnosticSessionId, tool.Name, "{}")));
+    }
+    private sealed class DnsPreviewFixture : IRigMdAgentTool {
+        public string Name => "flush_dns_cache";
+        public string DisplayName => "DNS fixture";
+        public string Description => "Inert test fixture";
+        public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier1_SafeReversible;
+        public int PreviewCalls;
+        public int ExecutionCalls;
+        public AgentToolFunctionDeclaration GetFunctionDeclaration() => new() { Name = Name };
+        public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default) {
+            PreviewCalls++; return Task.FromResult(new ToolDryRunPreview { ToolName = Name, CanExecute = true });
+        }
+        public Task<AgentToolExecutionResult> ExecuteAsync(JsonElement arguments, Action<string>? progressReporter = null, CancellationToken cancellationToken = default) {
+            ExecutionCalls++; throw new InvalidOperationException("No real DNS flush is permitted in this test.");
+        }
+    }
+
+    [Theory]
+    [InlineData("component", "[\"memory\"]", "High Memory Pressure")]
+    [InlineData("full", "[]", "Application crash history requires review")]
+    [InlineData("full", "[]", "Storage health behavior")]
+    public async Task DirectUninstallCannotBypassSavedScopeCrashOrHardwareRestrictions(string mode, string components, string category)
+    {
+        var diagnostic = CreateDiagnostic();
+        diagnostic.DiagnosedCategory = category;
+        diagnostic.Session = new() { Answers = new List<SessionAnswer>
+        {
+            new() { QuestionKey = "diagnosis_mode", AnswerValue = mode },
+            new() { QuestionKey = "component_ids", AnswerValue = components },
+            new() { QuestionKey = "proof", AnswerValue = JsonSerializer.Serialize(new[]
+            {
+                new { metric_id = "storage_usage_C:", value = "90% used", status = "high", evidence_kind = "measurement" }
+            }) }
+        } };
+        var controller = new StorageAppsController(null!, new FakeDiagnosticSessionRepository(diagnostic));
+        var request = new StorageAppsController.UninstallRequest
+        {
+            SessionId = Guid.NewGuid().ToString(), MetricId = "storage_usage_C:", AppId = new string('A', 64), Confirmed = true
+        };
+        Assert.IsType<ConflictObjectResult>(await controller.Preview(request));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(request));
+        request.Confirmed = false;
+        Assert.IsType<BadRequestObjectResult>(await controller.Execute(request));
+    }
+
+    [Fact]
+    public async Task StoragePreviewBindsApprovalToSelectedFindingAndPreservesThePrimaryDiagnosis()
+    {
+        var diagnostic = CreateDiagnostic();
+        diagnostic.DiagnosedCategory = "High Memory Pressure";
+        diagnostic.Session = new() { Answers = new List<SessionAnswer>
+        {
+            new() { QuestionKey = "diagnosis_mode", AnswerValue = "full" },
+            new() { QuestionKey = "proof", AnswerValue = JsonSerializer.Serialize(new[]
+            {
+                new { metric_id = "storage_usage_C:", value = "90% used", status = "high", evidence_kind = "measurement" },
+                new { metric_id = "storage_usage_D:", value = "95% used", status = "high", evidence_kind = "measurement" }
+            }) }
+        } };
+        var tool = new LocalApiSecurityTests.FakeTool(ToolSafetyTier.Tier1_SafeReversible) { CanPreviewExecute = true };
+        var orchestrator = new FakeOrchestrator();
+        var controller = CreateController(orchestrator, diagnostic, new FakeRemediationRepository(),
+            new RemediationApprovalStore(TimeProvider.System), new RigMdAgentToolRegistry(new[] { tool }));
+        var sessionId = Guid.NewGuid().ToString();
+        async Task<ToolDryRunPreview> Preview()
+        {
+            var response = Assert.IsType<OkObjectResult>(await controller.PreviewTool(new()
+            {
+                SessionId = sessionId, ToolName = tool.Name, FindingMetricId = "storage_usage_C:",
+                Arguments = JsonSerializer.SerializeToElement(new { })
+            }, CancellationToken.None));
+            return Assert.IsType<ToolDryRunPreview>(response.Value);
+        }
+        var preview = await Preview();
+        Assert.NotNull(preview.ApprovalToken);
+        var request = new AutonomyController.ExecuteRequest
+        {
+            SessionId = sessionId, ToolName = tool.Name, ToolArgumentsJson = "{}", UserConsentProvided = true,
+            FindingMetricId = "storage_usage_D:", ApprovalToken = preview.ApprovalToken
+        };
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(request));
+        Assert.Equal(0, orchestrator.Calls);
+        preview = await Preview();
+        request.FindingMetricId = "storage_usage_C:";
+        request.ApprovalToken = preview.ApprovalToken;
+        Assert.IsType<OkObjectResult>(await controller.Execute(request));
+        Assert.IsType<ConflictObjectResult>(await controller.Execute(request));
+        Assert.Equal(1, orchestrator.Calls);
+        Assert.Equal("High Memory Pressure", diagnostic.DiagnosedCategory);
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Theory]
     [InlineData(false, "normal", "40%", "superseded")]
     [InlineData(true, "normal", "40%", "superseded")]
     [InlineData(true, "high", "95%", "superseded")]
@@ -641,6 +765,88 @@ public class AutonomyControllerTests
             SessionId = sessionId.ToString(), ProcessNames = new() { "calculator" },
             Confirmed = true, ApprovalToken = preview.ApprovalToken
         }));
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task CleanupApprovalBindsServerSnapshotAcrossRequestsAndRejectsUnavailableContext(bool includeContext, bool acceptBinding)
+    {
+        var context = new object();
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var previewTool = new SnapshotTool { Context = includeContext ? context : null };
+        var previewController = CreateController(new(), CreateDiagnostic(), new(), approvals, new RigMdAgentToolRegistry([previewTool]));
+        var id = Guid.NewGuid().ToString();
+        using var arguments = JsonDocument.Parse("{}");
+        var preview = Assert.IsType<ToolDryRunPreview>(Assert.IsType<OkObjectResult>(await previewController.PreviewTool(new()
+        { SessionId = id, ToolName = previewTool.Name, Arguments = arguments.RootElement }, CancellationToken.None)).Value);
+        Assert.NotNull(preview.ApprovalToken);
+
+        var executionTool = new SnapshotTool { AcceptBinding = acceptBinding };
+        var orchestrator = new FakeOrchestrator();
+        var executionController = CreateController(orchestrator, CreateDiagnostic(), new(), approvals, new RigMdAgentToolRegistry([executionTool]));
+        var request = new AutonomyController.ExecuteRequest
+        { SessionId = id, ToolName = executionTool.Name, ToolArgumentsJson = "{}", UserConsentProvided = true, ApprovalToken = preview.ApprovalToken };
+        var result = await executionController.Execute(request);
+        if (includeContext && acceptBinding)
+        {
+            Assert.IsType<OkObjectResult>(result); Assert.Same(context, executionTool.BoundContext); Assert.Equal(1, orchestrator.Calls);
+        }
+        else { Assert.IsType<ConflictObjectResult>(result); Assert.Equal(0, orchestrator.Calls); }
+        Assert.IsType<ConflictObjectResult>(await executionController.Execute(request));
+    }
+
+    private sealed class SnapshotTool : IRigMdAgentTool, IApprovalBoundAgentTool
+    {
+        public string Name => "clear_temp_files";
+        public string DisplayName => "Snapshot test tool";
+        public string Description => "Inert test tool; never changes files.";
+        public ToolSafetyTier SafetyTier => ToolSafetyTier.Tier2_DestructiveOrAdmin;
+        public object? Context { get; init; }
+        public object? BoundContext { get; private set; }
+        public bool AcceptBinding { get; init; } = true;
+        public bool TryBindApprovalContext(object context) { if (!AcceptBinding) return false; BoundContext = context; return true; }
+        public AgentToolFunctionDeclaration GetFunctionDeclaration() => new() { Name = Name, Description = Description };
+        public Task<ToolDryRunPreview> PreviewImpactAsync(JsonElement arguments, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ToolDryRunPreview { CanExecute = true, RequiresUserConfirmation = true, ApprovalContext = Context });
+        public Task<AgentToolExecutionResult> ExecuteAsync(JsonElement arguments, Action<string>? progressReporter = null, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The controller test must use its inert orchestrator.");
+    }
+
+    [Theory]
+    [InlineData(70.8, true, "memory_warning_cleared")]
+    [InlineData(0, true, "memory_warning_cleared")]
+    [InlineData(90, false, "memory_reading_unavailable")]
+    [InlineData(double.NaN, true, "memory_reading_unavailable")]
+    public async Task SelectedAppBlocksHaveDistinctEvidenceAndCannotConsumeApprovalOrExecute(double usage, bool available, string code)
+    {
+        var hardware = new HardwareProfileDto { Ram = new() { UsageAvailable = true, UsagePercent = 90 },
+            ProcessInsights = new() { TopMemoryApps = [new() { Name = "chrome", MemoryMb = 256, ProcessCount = 1 }] } };
+        var orchestrator = new FakeOrchestrator(); var repository = new FakeRemediationRepository();
+        var approvals = new RemediationApprovalStore(TimeProvider.System);
+        var controller = CreateController(orchestrator, CreateMemoryDiagnostic(), repository, approvals, hardware: hardware);
+        var id = Guid.NewGuid();
+        var preview = Assert.IsType<ToolDryRunPreview>(Assert.IsType<OkObjectResult>(await controller.PreviewCloseSelectedApp(
+            new() { SessionId = id.ToString(), ProcessNames = ["chrome"] })).Value);
+        hardware.Ram.UsagePercent = usage; hardware.Ram.UsageAvailable = available;
+        var execution = Assert.IsType<ConflictObjectResult>(await controller.CloseSelectedApp(new()
+        { SessionId = id.ToString(), ProcessNames = ["chrome"], Confirmed = true, ApprovalToken = preview.ApprovalToken }));
+        var blockedPreview = Assert.IsType<ConflictObjectResult>(await controller.PreviewCloseSelectedApp(
+            new() { SessionId = id.ToString(), ProcessNames = ["chrome"] }));
+        foreach (var (response, stage) in new[] { (execution, "execution"), (blockedPreview, "preview") })
+        {
+            var body = JsonSerializer.SerializeToElement(response.Value);
+            Assert.Equal(code, body.GetProperty("reasonCode").GetString());
+            Assert.Equal(stage, body.GetProperty("blockStage").GetString());
+            Assert.True(body.GetProperty("evidenceReviewRequired").GetBoolean());
+            if (code == "memory_warning_cleared") Assert.Equal(usage, body.GetProperty("currentMemoryUsagePercent").GetDouble());
+            else Assert.Equal(JsonValueKind.Null, body.GetProperty("currentMemoryUsagePercent").ValueKind);
+        }
+        Assert.Equal(0, repository.SaveCallCount); Assert.Equal(0, orchestrator.Calls);
+        var scope = RemediationApprovalStore.CreateScope("close-app", id, "close_selected_app",
+            JsonSerializer.Serialize(new { processNames = new[] { "chrome" } }));
+        Assert.True(approvals.TryConsume(preview.ApprovalToken, scope));
     }
 
     private static DiagnosticOutput CreateMemoryDiagnostic() => new()

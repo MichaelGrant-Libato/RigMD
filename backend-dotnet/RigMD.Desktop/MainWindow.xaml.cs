@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
@@ -16,19 +18,33 @@ namespace RigMD.Desktop;
 public partial class MainWindow : Window
 {
     private readonly string _localApiToken;
+    private readonly Task _apiReadiness;
     private static readonly Uri LocalApiOrigin = new("http://localhost:5273");
     private bool _startupRecorded;
+    private bool _summaryRecorded;
     private readonly Stopwatch _navigationWatch = new();
     private double _webViewDurationMs;
     private bool _isSavingPdf;
     private bool _exitConfirmationOpen;
+    private bool _exitAllowed;
+    private Storyboard? _startupActivityMotion;
 
-    public MainWindow(string localApiToken)
+    public MainWindow(string localApiToken, Task? apiReadiness = null)
     {
         _localApiToken = localApiToken;
+        _apiReadiness = apiReadiness ?? Task.CompletedTask;
         InitializeComponent();
+        Browser.DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 7, 12, 18);
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
+        Closed += (_, _) => StopStartupActivityMotion();
+    }
+
+    private void StopStartupActivityMotion()
+    {
+        _startupActivityMotion?.Remove(this);
+        NativeActivitySegment.RenderTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        _startupActivityMotion = null;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -36,6 +52,11 @@ public partial class MainWindow : Window
         var phaseWatch = Stopwatch.StartNew();
         try
         {
+            if (SystemParameters.ClientAreaAnimation)
+            {
+                _startupActivityMotion = ((Storyboard)FindResource("StartupActivityMotion")).Clone();
+                _startupActivityMotion.Begin(this, true);
+            }
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(
                     Environment.SpecialFolder.LocalApplicationData),
@@ -49,7 +70,10 @@ public partial class MainWindow : Window
                     browserExecutableFolder: null,
                     userDataFolder: userDataFolder);
 
-            await Browser.EnsureCoreWebView2Async(environment);
+            // Set the compositor background before creation, not after its first white frame.
+            var controllerOptions = environment.CreateCoreWebView2ControllerOptions();
+            controllerOptions.DefaultBackgroundColor = Browser.DefaultBackgroundColor;
+            await Browser.EnsureCoreWebView2Async(environment, controllerOptions);
             ConfigureZoomControls();
             Browser.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
             Browser.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
@@ -80,15 +104,20 @@ public partial class MainWindow : Window
 #endif
 
             _webViewDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
+            // Prepare WebView while the API starts; navigate only after its authenticated assets are ready.
+            try { await _apiReadiness; }
+            catch { return; } // App owns the API startup error and shuts down safely.
             _navigationWatch.Restart();
             Browser.Source = new Uri(
                 "http" + Uri.SchemeDelimiter + "localhost:5273");
 
             Browser.Visibility = Visibility.Visible;
-            LoadingText.Visibility = Visibility.Collapsed;
+            NativeStartupSplash.Visibility = Visibility.Collapsed;
+            StopStartupActivityMotion();
         }
         catch (Exception ex)
         {
+            StopStartupActivityMotion();
             LoadingText.Text =
                 "RigMD could not load the desktop interface.";
 
@@ -100,15 +129,30 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (_exitAllowed) return;
         // Cancel first so re-entrant close requests cannot bypass the dialog.
         e.Cancel = true;
         if (_exitConfirmationOpen) return;
         _exitConfirmationOpen = true;
         try
         {
-            e.Cancel = new ExitConfirmationDialog(_isSavingPdf) { Owner = this }.ShowDialog() != true;
+            if (new ExitConfirmationDialog(_isSavingPdf) { Owner = this }.ShowDialog() != true) return;
+            using var client = new HttpClient { BaseAddress = LocalApiOrigin, Timeout = TimeSpan.FromSeconds(5) };
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _localApiToken);
+            using var response = await client.PostAsync("/api/desktop/prepare-exit", null);
+            if (!response.IsSuccessStatusCode)
+            {
+                MessageBox.Show(this, "Storage cleanup or app removal may still be running. Complete any Windows prompts and wait for RigMD’s result before closing.", "Keep RigMD open", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            _exitAllowed = true;
+            Close();
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
+        {
+            MessageBox.Show(this, "RigMD could not confirm that system actions have finished. Check any open uninstaller before trying to close again.", "Exit check unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally { _exitConfirmationOpen = false; }
     }
@@ -127,6 +171,13 @@ public partial class MainWindow : Window
             await RecordPerformanceAsync("startup.api_ready.desktop", App.ApiReadyDurationMs, "completed");
             await RecordPerformanceAsync("startup.webview.desktop", _webViewDurationMs, "completed");
             await RecordPerformanceAsync("startup.dashboard.desktop", dashboardMs, startupOutcome);
+            return;
+        }
+        if (!_summaryRecorded && Browser.Source?.GetLeftPart(UriPartial.Authority) == LocalApiOrigin.GetLeftPart(UriPartial.Authority)
+            && DesktopPerformanceMessage.TryReadHomeSummaryReady(e.Source, e.WebMessageAsJson, out var summaryOutcome))
+        {
+            _summaryRecorded = true;
+            await RecordPerformanceAsync("startup.summary.desktop", App.StartupInitialMs + App.StartupWatch.Elapsed.TotalMilliseconds, summaryOutcome);
             return;
         }
         if (!DesktopReportExportRequest.TryParse(e.Source, e.WebMessageAsJson, out var request) ||
@@ -202,7 +253,7 @@ public partial class MainWindow : Window
         {
             using var client = new HttpClient { BaseAddress = LocalApiOrigin, Timeout = TimeSpan.FromSeconds(3) };
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _localApiToken);
-            using var response = await client.PostAsJsonAsync("/api/performance", new { id = Guid.NewGuid(), operation, durationMs, outcome });
+            using var response = await client.PostAsJsonAsync("/api/performance", new { id = Guid.NewGuid(), operation, durationMs, outcome, mode = operation.StartsWith("startup.", StringComparison.Ordinal) ? "essential_home" : "normal" });
         }
         catch { /* Performance recording must never block startup or PDF use. */ }
     }

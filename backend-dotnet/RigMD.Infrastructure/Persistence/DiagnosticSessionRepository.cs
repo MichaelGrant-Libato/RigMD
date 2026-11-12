@@ -354,7 +354,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     {
         var clientId = GetCurrentClientId();
         var query = _db.DiagnosticSessions
-            .Include(s => s.Answers)
+            .AsNoTracking()
+            .Include(s => s.Answers.Where(answer => answer.QuestionKey != SessionFollowUpHistory.Key))
             .Include(s => s.Output)
             .Include(s => s.Profile)
             .AsQueryable();
@@ -395,7 +396,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
         var session = await query.FirstOrDefaultAsync();
         if (session == null) return null;
-        var dto = MapToDto(session);
+        var dto = MapToDto(session, includeHistory: true);
         dto.IsRecurring = new RecurringPatternService().BuildPatterns(await GetRecurringSessionsAsync()).patterns
             .Any(p => p.occurrences.Any(o => o.id == dto.SessionId));
         return dto;
@@ -523,6 +524,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         string resolutionSummary,
         object[] resolutionProof)
     {
+        await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+            ? await _db.Database.BeginTransactionAsync() : null;
         var clientId = GetCurrentClientId();
         var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
@@ -539,13 +542,22 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         var session = await query.FirstOrDefaultAsync();
         if (session == null) return false;
 
-        SetOrAddAnswer(session, "resolution_status", resolutionStatus);
-        SetOrAddAnswer(session, "resolution_checked_at", resolutionCheckedAt);
-        SetOrAddAnswer(session, "resolution_device_id", LocalDiagnosticDeviceIdentity.Read());
-        SetOrAddAnswer(session, "resolution_summary", resolutionSummary);
-        SetOrAddAnswer(session, "resolution_proof", JsonSerializer.Serialize(resolutionProof));
+        var deviceId = LocalDiagnosticDeviceIdentity.Read();
+        SessionFollowUpHistory.Append(_db, session, resolutionStatus, resolutionCheckedAt,
+            resolutionSummary, resolutionProof, deviceId);
+        var savedAt = session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_checked_at")?.AnswerValue;
+        if (!DateTimeOffset.TryParse(savedAt, out var currentAt) ||
+            !DateTimeOffset.TryParse(resolutionCheckedAt, out var incomingAt) || incomingAt >= currentAt)
+        {
+            SetOrAddAnswer(session, "resolution_status", resolutionStatus);
+            SetOrAddAnswer(session, "resolution_checked_at", resolutionCheckedAt);
+            SetOrAddAnswer(session, "resolution_device_id", deviceId);
+            SetOrAddAnswer(session, "resolution_summary", resolutionSummary);
+            SetOrAddAnswer(session, "resolution_proof", JsonSerializer.Serialize(resolutionProof));
+        }
 
         await _db.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
         return true;
     }
 
@@ -564,6 +576,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
     public async Task<bool> MarkNeedsRecheckAsync(Guid sessionId)
     {
+        await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+            ? await _db.Database.BeginTransactionAsync() : null;
         var clientId = GetCurrentClientId();
         var query = _db.DiagnosticSessions
             .Include(s => s.Answers)
@@ -580,6 +594,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         var session = await query.FirstOrDefaultAsync();
         if (session == null) return false;
 
+        SessionFollowUpHistory.PreserveLegacy(_db, session);
         SetOrAddAnswer(session, "resolution_status", "needs_recheck");
         var previousProof = ReadSavedProof(session.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_proof")?.AnswerValue ?? "");
         if (previousProof.Length > 0)
@@ -596,6 +611,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             "The approved action finished. Its effect still needs checking.");
 
         await _db.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
         return true;
     }
 
@@ -633,9 +649,19 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         if (lastSavedSessionDto != null) lastSavedSessionDto.IsRecurring = recurring.patterns
             .Any(p => p.occurrences.Any(o => o.id == lastSavedSessionDto.SessionId));
 
-        var warningSignsSessions = sessions.Where(s => s.Answers.Any(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue) && !a.AnswerValue.Equals("None", StringComparison.OrdinalIgnoreCase))).ToList();
+        // Historical session/reference occurrences, not live or resolution-cleared
+        // alerts. Use exactly the same original evidence as the Alerts endpoint.
+        var warningOccurrences = sessions.SelectMany(s => GetWarningReferenceRows(s).Select(w => new
+        {
+            id = $"{s.Id}:{w.id}",
+            warning_sign = w.warning_sign,
+            threshold = w.threshold,
+            recommended_action = w.action,
+            created_at = s.CreatedAt.ToString("o"),
+            display_date = s.CreatedAt.ToLocalTime().ToString("MMM dd, yyyy")
+        })).ToList();
 
-        var warningSignsActiveCount = warningSignsSessions.Count;
+        var warningSignsActiveCount = warningOccurrences.Count;
 
         var labels = new[] { "Monitor", "Maintain", "Troubleshoot", "Escalate" };
         var actionDistribution = labels.Select(label => new 
@@ -649,14 +675,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
                                        .Select(g => new { date = g.Key.ToString("yyyy-MM-dd"), count = g.Count() })
                                        .ToList();
 
-        var recentWarningSigns = warningSignsSessions.Take(5).Select(s => new {
-            id = s.Id.ToString(),
-            warning_sign = s.Answers.FirstOrDefault(a => a.QuestionKey == "warning_signs")?.AnswerValue ?? "Unknown",
-            threshold = "N/A",
-            recommended_action = s.Output?.ActionCategory ?? "Monitor",
-            created_at = s.CreatedAt.ToString("o"),
-            display_date = s.CreatedAt.ToLocalTime().ToString("MMM dd, yyyy")
-        }).ToList();
+        var recentWarningSigns = warningOccurrences.Take(5).ToList();
 
         return new
         {
@@ -735,10 +754,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         var warnings = sessions.Select(s => new
         {
             session_id = s.Id.ToString(),
-            warning_signs = s.Answers
-                .Where(a => a.QuestionKey == "warning_signs")
-                .Select(a => a.AnswerValue)
-                .FirstOrDefault() ?? string.Empty,
+            warning_signs = string.Join("; ", GetWarningReferenceRows(s).Select(w => w.warning_sign)),
             diagnosed_category = s.Output?.DiagnosedCategory ?? string.Empty,
             created_at = s.CreatedAt.ToString("o")
         })
@@ -841,7 +857,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     // HELPERS
     // ---------------------------------------------------------------
 
-    private static DiagnosticSessionDto MapToDto(DiagnosticSession s)
+    private static DiagnosticSessionDto MapToDto(DiagnosticSession s, bool includeHistory = false)
     {
         string Answer(string key) =>
             s.Answers.FirstOrDefault(a => a.QuestionKey == key)?.AnswerValue ?? string.Empty;
@@ -857,6 +873,9 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
 
         var localTime = s.CreatedAt.ToLocalTime();
         var daysAgo = (int)(DateTime.UtcNow - s.CreatedAt).TotalDays;
+
+        var history = includeHistory ? SessionFollowUpHistory.Read(s)
+            : (Items: new List<FollowUpObservationDto>(), Status: "not_loaded");
 
         return new DiagnosticSessionDto
         {
@@ -884,6 +903,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             Proof = ReadSavedProof(Answer("proof")),
             ResolutionCheckedAt = Answer("resolution_checked_at"),
             ResolutionDeviceId = Answer("resolution_device_id"),
+            FollowUpHistory = history.Items,
+            FollowUpHistoryStatus = history.Status,
             LastActionStatus = Answer("last_action_status"),
             LastActionSummary = Answer("last_action_summary"),
             DiagnosisMode = Answer("diagnosis_mode"),
@@ -906,7 +927,7 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         };
     }
 
-    private static object[] ReadSavedProof(string json)
+    internal static object[] ReadSavedProof(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return Array.Empty<object>();
         try
@@ -951,7 +972,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     {
         var clientId = GetCurrentClientId();
         var query = _db.DiagnosticSessions
-            .Include(s => s.Answers)
+            .AsNoTracking()
+            .Include(s => s.Answers.Where(answer => answer.QuestionKey != SessionFollowUpHistory.Key))
             .Include(s => s.Output)
             .Include(s => s.Profile)
             .AsQueryable();
@@ -991,23 +1013,50 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
     public async Task<IEnumerable<string>> GetObservedWarningTextsAsync()
     {
         var clientId = GetCurrentClientId();
-        var query = _db.SessionAnswers
-            .Include(a => a.Session)
-            .ThenInclude(s => s.Profile)
-            .Where(a => a.QuestionKey == "warning_signs" && !string.IsNullOrWhiteSpace(a.AnswerValue));
+        var query = _db.DiagnosticSessions
+            .AsNoTracking()
+            .Include(s => s.Answers)
+            .Include(s => s.Profile)
+            .AsQueryable();
 
         if (!string.IsNullOrEmpty(clientId))
         {
-            query = query.Where(a => 
-                a.Session.Profile.ClientId == clientId || 
-                a.Session.Answers.Any(ans => ans.QuestionKey == "client_id" && ans.AnswerValue == clientId));
+            query = query.Where(s =>
+                s.Profile.ClientId == clientId ||
+                s.Answers.Any(ans => ans.QuestionKey == "client_id" && ans.AnswerValue == clientId));
         }
 
-        return await query
-            .Select(a => a.AnswerValue)
-            .Distinct()
-            .ToListAsync();
+        var sessions = await query.ToListAsync();
+        // Preserve one entry per session; Distinct across sessions loses repetition.
+        // Canonical IDs retain the existing IEnumerable<string> repository contract.
+        return sessions.Select(s => string.Join("; ", GetWarningReferenceIds(s)))
+            .Where(value => value.Length > 0).ToArray();
     }
+
+    public async Task<WarningChecksResponseDto> GetWarningChecksAsync(string referenceId, int offset, int limit)
+    {
+        if (offset < 0 || limit is < 1 or > 50) throw new ArgumentOutOfRangeException(nameof(offset));
+        var canonical = referenceId.ToUpperInvariant();
+        if (!new WarningSignService().BuildReference(Array.Empty<string>()).warning_signs.Any(w => w.id == canonical))
+            throw new ArgumentException("Unknown warning reference.", nameof(referenceId));
+        var clientId = GetCurrentClientId();
+        var query = _db.DiagnosticSessions.AsNoTracking().Include(s => s.Answers).Include(s => s.Profile).Include(s => s.Output).AsQueryable();
+        if (!string.IsNullOrEmpty(clientId)) query = query.Where(s => s.Profile.ClientId == clientId ||
+            s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        var sessions = await query.OrderByDescending(s => s.CreatedAt).ThenBy(s => s.Id).ToListAsync();
+        var matches = sessions.Where(s => GetWarningReferenceIds(s).Contains(canonical)).ToArray();
+        return new(canonical, matches.Length, offset, limit, matches.Skip(offset).Take(limit).Select(s =>
+            new WarningCheckDto(s.Id.ToString(), s.CreatedAt, s.Output?.ActionCategory ?? "",
+                s.Answers.FirstOrDefault(a => a.QuestionKey == "resolution_status")?.AnswerValue ?? "")).ToArray());
+    }
+
+    private static string[] GetWarningReferenceIds(DiagnosticSession session) =>
+        WarningSignService.GetSessionReferenceIds(
+            string.Join("; ", session.Answers.Where(a => a.QuestionKey == "warning_signs").Select(a => a.AnswerValue)),
+            session.Answers.FirstOrDefault(a => a.QuestionKey == "proof")?.AnswerValue);
+
+    private static List<WarningSignRowDto> GetWarningReferenceRows(DiagnosticSession session) =>
+        new WarningSignService().GetObservedReferenceRows([string.Join("; ", GetWarningReferenceIds(session))]);
 
    public async Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId)
     {
