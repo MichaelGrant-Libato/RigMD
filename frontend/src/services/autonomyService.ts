@@ -1,6 +1,8 @@
 import { API_BASE_URL, apiGet, apiPost } from '../lib/api';
 import * as signalR from '@microsoft/signalr';
 import { getLocalApiToken } from '../lib/localApiSession';
+import { readUninstallApp, readUninstallOperation, readUninstallPreview, type UninstallApp } from '../lib/appUninstall';
+import { readStorageOverview } from '../lib/storageOverview';
 
 async function remediationPost<T>(path: string, data: unknown) {
   try {
@@ -138,6 +140,7 @@ export interface AutonomyResult {
 }
 
 export interface AutonomyRequest {
+  findingMetricId?: string;
   approvalToken?: string;
   sessionId: string;
   diagnosedCategory: string;
@@ -160,6 +163,7 @@ export interface MemoryAppCandidate {
 interface MemoryAppsResponse {
   apps?: MemoryAppCandidate[];
 }
+
 
 interface CloseSelectedAppRequest {
   sessionId: string;
@@ -208,6 +212,79 @@ export async function stopRemediationStream() {
   }
 }
 
+async function openWindowsReview(target: 'storage settings' | 'reliability monitor' | 'installed apps', fallbackMessage: string) {
+  try {
+    const { data } = await apiPost<{ success: boolean; summary?: string }>(
+      '/api/remediation/open-target', { target }, { timeout: 15000 },
+    );
+    if (data.success !== true) throw new Error(data.summary || fallbackMessage);
+    return data;
+  } catch (error) {
+    const response = (error as { response?: { data?: { summary?: string } } }).response;
+    throw new Error(response?.data?.summary || (error instanceof Error ? error.message : fallbackMessage));
+  }
+}
+
+export async function openStorageSettings() {
+  return openWindowsReview('storage settings', 'Could not open Windows Storage.');
+}
+
+export async function openReliabilityMonitor() {
+  return openWindowsReview('reliability monitor', 'Could not open Windows Reliability Monitor.');
+}
+
+export async function openInstalledApps() {
+  return openWindowsReview('installed apps', 'Could not open Windows Installed apps.');
+}
+
+export async function getStorageOverview(metricId: string, signal: AbortSignal) {
+  const { data } = await apiGet<unknown>(`/api/autonomy/storage-overview?metricId=${encodeURIComponent(metricId)}`, { signal, timeout: 15000, headers: { 'Cache-Control': 'no-store' } });
+  return readStorageOverview(data, metricId);
+}
+
+export interface StorageAppSnapshot {
+  capturedAt: string;
+  partial: boolean;
+  summary: string;
+  apps: UninstallApp[];
+}
+
+export async function getStorageApps(signal: AbortSignal, includeStore = false): Promise<StorageAppSnapshot> {
+  const { data } = await apiGet<StorageAppSnapshot>(`/api/autonomy/storage-apps?includeStore=${includeStore}`, { signal, timeout: 12000, headers: { 'Cache-Control': 'no-store' } });
+  if (!data || typeof data.capturedAt !== 'string' || !Number.isFinite(Date.parse(data.capturedAt)) ||
+    typeof data.partial !== 'boolean' || typeof data.summary !== 'string' || !Array.isArray(data.apps) || data.apps.length > 2048 ||
+    data.apps.some(app => !app || typeof app.name !== 'string' || !app.name.trim() ||
+      typeof app.publisher !== 'string' || typeof app.version !== 'string' || typeof app.scope !== 'string' ||
+      app.estimatedBytes !== null && (!Number.isSafeInteger(app.estimatedBytes) || app.estimatedBytes <= 0))) {
+    throw new Error('The installed-app inventory could not be verified.');
+  }
+  data.apps.forEach(readUninstallApp);
+  return data;
+}
+
+export async function previewAppUninstall(sessionId: string, metricId: string, appId: string) {
+  const { data } = await remediationPost<unknown>('/api/autonomy/storage-apps/uninstall/preview', { sessionId, metricId, appId });
+  return readUninstallPreview(data, appId);
+}
+export async function executeAppUninstall(sessionId: string, metricId: string, appId: string, approvalToken: string) {
+  const { data } = await remediationPost<unknown>('/api/autonomy/storage-apps/uninstall/execute', { sessionId, metricId, appId, approvalToken, confirmed: true });
+  const operation = readUninstallOperation(data, sessionId, metricId);
+  if (operation.app.id !== appId) throw new Error('The uninstall identity could not be verified. Do not retry automatically.');
+  return operation;
+}
+export async function getAppUninstallOperation(id: string, sessionId: string, metricId: string, appId: string, signal: AbortSignal) {
+  const { data } = await apiGet<unknown>(`/api/autonomy/storage-apps/uninstall/operations/${encodeURIComponent(id)}`, { signal, timeout: 15000 });
+  const operation = readUninstallOperation(data, sessionId, metricId, appId);
+  if (operation.id !== id) throw new Error('The uninstall operation identity changed.');
+  return operation;
+}
+export async function getRecentAppUninstalls(sessionId: string, metricId: string, signal: AbortSignal) {
+  const { data } = await apiGet<unknown>(`/api/autonomy/storage-apps/uninstall/operations?sessionId=${encodeURIComponent(sessionId)}`, { signal, timeout: 15000 });
+  if (!Array.isArray(data) || data.length > 16) throw new Error('Uninstall history could not be verified.');
+  return data.filter(item => item && typeof item === 'object' && item.metricId === metricId)
+    .map(item => readUninstallOperation(item, sessionId, metricId));
+}
+
 export async function runAutonomyPreview({
   sessionId,
   diagnosedCategory,
@@ -224,6 +301,7 @@ export async function runAutonomyPreview({
 }
 
 export async function runAutonomyExecution({
+  findingMetricId,
   approvalToken,
   sessionId,
   diagnosedCategory,
@@ -235,6 +313,7 @@ export async function runAutonomyExecution({
     '/api/autonomy/execute',
     {
       approvalToken,
+      findingMetricId,
       sessionId,
       diagnosedCategory,
       userConsentProvided,
@@ -257,6 +336,7 @@ export async function previewAgentTool(
   toolName: string,
   args: Record<string, unknown> = {},
   sessionId?: string,
+  findingMetricId?: string,
 ) {
   const response = await remediationPost<ToolDryRunPreview>(
     '/api/autonomy/tools/preview',
@@ -264,6 +344,7 @@ export async function previewAgentTool(
       toolName,
       arguments: args,
       sessionId,
+      findingMetricId,
     },
   );
   return response.data;

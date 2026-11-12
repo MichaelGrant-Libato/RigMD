@@ -17,6 +17,7 @@ export const operationLabels: Record<string, string> = {
   'startup.api_ready.desktop': 'Startup · waiting for the local service',
   'startup.webview.desktop': 'Startup · preparing the app window',
   'startup.dashboard.desktop': 'Startup · loading the Home screen',
+  'startup.summary.desktop': 'Desktop launch → saved-check summary ready',
   'startup.desktop': 'Desktop launch → dashboard ready', 'scan.ui': 'Start check → result displayed',
   'scan.backend': 'Check request · backend', 'history.ui': 'Saved checks · screen ready',
   'history.backend': 'Saved checks · backend', 'report.ui': 'Report · preview ready',

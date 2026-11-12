@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, CheckCircle2, Clock3, FileText, Files, HelpCir
 import { apiFetch } from '../lib/api';
 import { getPerformanceDeliveryFailures } from '../lib/performanceRecording';
 import { measurementContext, operationLabels, summarizePerformance, targetFor, type PerformanceRecord } from '../lib/performanceMetrics';
-import { appSpeedSummary, friendlyBuildLabel, outcomeLabel, secondsLabel } from '../lib/performancePresentation';
+import { appSpeedSummary, outcomeLabel, secondsLabel } from '../lib/performancePresentation';
 
 interface RecordsResponse { records: PerformanceRecord[]; retentionLimit: number;
   health: { queued: number; saved: number; dropped: number; storageFailures: number }; }
@@ -14,7 +14,6 @@ export default function PerformanceRecords({ standalone = false }: { standalone?
   const [data, setData] = useState<RecordsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [context, setContext] = useState('');
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
@@ -23,14 +22,14 @@ export default function PerformanceRecords({ standalone = false }: { standalone?
       const result: RecordsResponse = await response.json();
       if (!Array.isArray(result.records)) throw new Error();
       setData(result);
-      setContext(previous => result.records.some(r => measurementContext(r) === previous) ? previous : result.records[0] ? measurementContext(result.records[0]) : '');
     } catch { setError('We couldn’t load the app’s timing results. Please try again.'); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (standalone) void load(); }, [standalone, load]);
+  // The API returns newest records first; keep build/device timings separate.
+  const context = data?.records[0] ? measurementContext(data.records[0]) : '';
   const records = data?.records.filter(row => measurementContext(row) === context) ?? [];
   const groups = summarizePerformance(records);
-  const setups = [...new Map((data?.records ?? []).map(row => [measurementContext(row), row])).entries()];
   const tasks = appSpeedSummary(data?.records ?? [], context);
   const deliveryFailures = getPerformanceDeliveryFailures();
   const missingResults = data && (data.health.dropped > 0 || data.health.storageFailures > 0 || deliveryFailures > 0);
@@ -51,12 +50,7 @@ export default function PerformanceRecords({ standalone = false }: { standalone?
     {data && !error && <>
       <p role="status" className="mt-4 text-sm text-slate-400">{data.records.length === 0 ? 'No results saved yet. Use RigMD, then refresh here.' : `${data.records.length} timing results saved on this PC.`}</p>
       {missingResults && <p role="alert" className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-200">Some timing results could not be saved. The summary may be incomplete. Details are available below.</p>}
-      {setups.length > 0 && <div className="mt-4">
-        {setups.length > 1 ? <label className="block text-sm text-slate-300">Results to show
-          <select value={context} onChange={e => setContext(e.target.value)} className="mt-2 block min-h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-[#15222e] p-3 text-white">{setups.map(([value, row], index) => <option key={value} value={value}>{friendlyBuildLabel(row, index)}</option>)}</select>
-        </label> : <p className="text-sm text-slate-300">{friendlyBuildLabel(setups[0][1], 0)}</p>}
-        {records[0]?.buildConfiguration === 'Debug' && <p className="mt-2 text-xs leading-relaxed text-slate-400">You’re testing a development build. Collect separate results from the release build for your final performance report.</p>}
-      </div>}
+      {records[0]?.buildConfiguration === 'Debug' && <p className="mt-4 text-xs leading-relaxed text-slate-400">You’re testing a development build. Collect separate results from the release build for your final performance report.</p>}
       <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
         {tasks.map(task => {
           const Icon = taskIcons[task.operation];
@@ -89,7 +83,7 @@ export default function PerformanceRecords({ standalone = false }: { standalone?
           <dt className="text-slate-400">System</dt><dd className="break-words">{records[0].osVersion} · {records[0].architecture} · {records[0].logicalProcessors} logical processors</dd>
         </dl>}
         {missingResults && <p className="mt-3 text-xs text-amber-200">Queue drops: {data.health.dropped}; storage failures: {data.health.storageFailures}; browser delivery failures this page lifetime: {deliveryFailures}.</p>}
-        <p className="mt-4 text-xs leading-relaxed text-slate-400">Typical time is the median (the middle observed time). The 95th percentile is a duration at or below which 95% of observed timings fall. Both include completed and incomplete operations; failed and canceled attempts remain in the counts. Target counts use only completed, eligible timings. Development and release builds, PCs, and operation boundaries are kept separate.</p>
+        <p className="mt-4 text-xs leading-relaxed text-slate-400">Typical time is the median (the middle observed time). The 95th percentile is a duration at or below which 95% of observed timings fall. Both include completed and incomplete operations; failed and canceled attempts remain in the counts. Target counts use only completed, eligible timings. Development and release builds, PCs, and operation boundaries are kept separate. Startup phases can overlap, so their durations should not be added together.</p>
         {groups.length > 0 && <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm"><caption className="sr-only">Detailed timing results for the selected setup</caption>
             <thead className="text-xs text-slate-400"><tr>{['Task', 'Attempts', 'Typical time (median)', '95th percentile', 'Longest time', 'What happened', 'Timing target results'].map(label => <th key={label} scope="col" className="p-3">{label}</th>)}</tr></thead>
@@ -108,7 +102,7 @@ export default function PerformanceRecords({ standalone = false }: { standalone?
             {row.apiWorkingSetMb !== null && <p className="mt-1 text-xs text-slate-400">API process memory: {row.apiWorkingSetMb.toFixed(1)} MB · API CPU time during request: {row.apiCpuTimeMs?.toFixed(1) ?? 'unavailable'} ms. Includes concurrent API work; excludes Desktop and WebView2.</p>}
           </li>)}</ol>
         </details>}
-        <p className="mt-4 text-xs leading-relaxed text-slate-400">SRS targets: startup ≤5 s; at least 50 saved checks displayed ≤3 s; selected report preview ready ≤5 s. A hidden page is marked incomplete. Report-preview time excludes PDF saving. PDF request time includes the Save dialog; PDF generation time excludes it.</p>
+        <p className="mt-4 text-xs leading-relaxed text-slate-400">SRS targets: startup ≤5 s; at least 50 saved checks displayed ≤3 s; selected report preview ready ≤5 s. Startup scope is recorded per launch: essential_home includes Home essential readings; saved-check summary readiness is timed separately and full hardware inventory loads on demand. Earlier normal launches waited for the full profile. A hidden page is marked incomplete. Report-preview time excludes PDF saving. PDF request time includes the Save dialog; PDF generation time excludes it.</p>
       </details>
     </>}
     {!data && !error && <p className="mt-4 text-xs text-slate-400">Choose Show results to see timings already saved on this PC. This does not start a device check.</p>}

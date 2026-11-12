@@ -16,6 +16,32 @@ namespace RigMD.Tests.Api;
 public class LocalApiRateLimitingTests
 {
     [Fact]
+    public async Task UninstallStatusPollingDoesNotSpendActionPermitsButRemainsAuthenticatedAndReadOnly()
+    {
+        await using var host = await TestHost.StartAsync();
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            using var action = await host.Client.PostAsync("/api/autonomy/preview", null);
+            Assert.Equal(HttpStatusCode.OK, action.StatusCode);
+        }
+        var path = $"/api/autonomy/storage-apps/uninstall/operations/{Guid.NewGuid():N}";
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            using var read = await host.Client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            using var cleanupRead = await host.Client.GetAsync($"/api/autonomy/storage-cleanup/operations/{Guid.NewGuid():N}");
+            Assert.Equal(HttpStatusCode.OK, cleanupRead.StatusCode);
+        }
+        using var write = await host.Client.PostAsync(path, null);
+        using var invalid = await host.Client.GetAsync("/api/autonomy/storage-apps/uninstall/operations/not-an-id");
+        Assert.Equal(HttpStatusCode.TooManyRequests, write.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, invalid.StatusCode);
+        host.Client.DefaultRequestHeaders.Authorization = null;
+        using var anonymous = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
+    [Fact]
     public async Task SettingsNavigationAndSignOut_DoNotConsumeTheScanAllowance()
     {
         await using var host = await TestHost.StartAsync();
@@ -220,6 +246,8 @@ public class LocalApiRateLimitingTests
             app.UseRateLimiter();
             // Sentinels exercise the real authentication/limiter, never Windows providers or cloud AI.
             app.MapMethods("/api/autonomy/{sessionId}/remediation-eligibility", new[] { "GET", "HEAD", "POST" }, () => Results.Ok());
+            app.MapMethods("/api/autonomy/storage-apps/uninstall/operations/{operationId}", new[] { "GET", "HEAD", "POST" }, () => Results.Ok());
+            app.MapMethods("/api/autonomy/storage-cleanup/operations/{operationId}", new[] { "GET", "HEAD", "POST" }, () => Results.Ok());
             app.MapMethods("/api/diagnosis/sessions/{sessionId}/feedback", new[] { "GET", "POST" }, () => Results.Ok());
             foreach (var path in new[] { "/api/autonomy/settings", "/api/autonomy/tools", "/api/autonomy/memory-apps" })
                 app.MapGet(path, () => Results.Ok());

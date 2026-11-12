@@ -83,8 +83,8 @@ public class MemoryStatsDto
     public double UsedGb { get; set; }
     public double UsagePercent { get; set; }
     public double SpeedMtps { get; set; }
-    public int SlotsUsed { get; set; }
-    public int SlotsTotal { get; set; }
+    public int? SlotsUsed { get; set; }
+    public int? SlotsTotal { get; set; }
     public string FormFactor { get; set; } = string.Empty;
     public double HardwareReservedMb { get; set; }
     public double CommittedGb { get; set; }
@@ -222,7 +222,7 @@ public class HardwareProfileDto
     public string ChipsetDriver { get; set; } = string.Empty;
     public string PrimaryStorageType { get; set; } = string.Empty;
     public string ActivePowerPlan { get; set; } = string.Empty;
-    public int ConnectedDisplays { get; set; }
+    public int? ConnectedDisplays { get; set; }
     
     public List<DisplayStatsDto> Displays { get; set; } = new();
     public List<DeviceErrorDto> DeviceErrors { get; set; } = new();

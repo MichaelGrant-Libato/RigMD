@@ -4,6 +4,8 @@ import { getSessionCheckLabel } from './pastChecksFormatting.ts';
 import { readingTone } from './diagnosticReadingVisuals.ts';
 import { validReading } from './storageTelemetry.ts';
 import { getFollowUpReadings } from './followUpReadings.ts';
+import { friendlyToolName, friendlyVerification } from './diagnosticLanguage.ts';
+import type { ReportActionHistory } from './reportActionHistory.ts';
 import type { DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd.ts';
 
 export function formatDate(value: string | Date | null | undefined) {
@@ -104,6 +106,7 @@ export type ReportInput = {
   historyUnavailable: boolean;
   generatedAt?: Date;
   includeHistory?: boolean;
+  actionHistory?: ReportActionHistory;
 };
 const field = (label: string, value: string): ReportField => ({ label, value });
 
@@ -140,7 +143,7 @@ function savedReadings(title: string, readings: DiagnosticReading[] | undefined)
 
 export function buildReportDocument({
   stats, dashboard, hardwareUpdatedAt, sessions, selectedSession, historyUnavailable,
-  generatedAt = new Date(), includeHistory = true,
+  generatedAt = new Date(), includeHistory = true, actionHistory,
 }: ReportInput): ReportDocument {
   const sorted = sortSessionsNewestFirst(sessions);
   const selected = selectedSession === undefined
@@ -179,10 +182,33 @@ export function buildReportDocument({
       ...savedReadings('Latest saved follow-up readings', followUp),
       notes: [getLatestCheckSummary(latest)],
     });
-    if (selected.last_action_summary) sections.push({
+    if (actionHistory?.runs.length) sections.push({
+      title: 'Recorded actions',
+      description: 'Saved action observations, not live app status. Action completion and diagnostic follow-up are separate results.',
+      entries: [...actionHistory.runs].sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))
+        .flatMap<ReportEntry>(run => run.attempts.length ? run.attempts.map(attempt => ({
+          title: friendlyToolName(attempt.action_code),
+          status: 'action',
+          fields: [field('Action recorded', formatDate(attempt.created_at)),
+            field('Run status (saved)', cleanValue(run.status)),
+            field('Run finished', formatDate(run.completed_at)),
+            field('Action verification (saved)', friendlyVerification(attempt.verification_status)),
+            ...(attempt.execution_summary ? [field('Execution summary', attempt.execution_summary)] : []),
+            ...(attempt.proof ?? []).flatMap(proof => [
+              ...(proof.before ? [field(`${proof.label || 'Action evidence'} - before`, proof.before)] : []),
+              ...(proof.after ? [field(`${proof.label || 'Action evidence'} - after`, proof.after)] : []),
+              ...(proof.status ? [field(`${proof.label || 'Action evidence'} - saved status`, proof.status)] : []),
+              ...(proof.meaning ? [field(`${proof.label || 'Action evidence'} - explanation`, proof.meaning)] : []),
+            ])],
+        })) : [{ title: 'Recorded action run', fields: [field('Run recorded', formatDate(run.created_at)),
+          field('Run status (saved)', cleanValue(run.status)), field('Run finished', formatDate(run.completed_at))],
+          notes: ['Detailed action attempts were not recorded.'] }]),
+      notes: ['A finished run does not confirm that every selected app exited or that a repair occurred. Later readings do not change these saved action observations.'],
+    });
+    else if (selected.last_action_summary || actionHistory?.unavailable) sections.push({
       title: 'Recorded action',
-      fields: [field('Last recorded action', selected.last_action_summary)],
-      notes: ['An action record does not, by itself, confirm a repair.'],
+      fields: selected.last_action_summary ? [field('Last recorded action summary', selected.last_action_summary)] : [],
+      notes: ['Detailed action history is unavailable. This summary does not verify the action outcome or confirm a repair.'],
     });
   } else sections.push({ title: 'Selected saved check', notes: ['No saved check is available. Run a device check to save a result.'] });
 

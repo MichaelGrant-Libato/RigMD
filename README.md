@@ -20,7 +20,7 @@ The system combines:
    Approved remediation actions, safety checks, resolution rechecking, verification, rollback, and pivot behavior.
 
 4. **Offline-First Persistence**
-   Local SQLite as the source of truth, with optional Supabase PostgreSQL synchronization.
+   Local SQLite is the source of truth. Legacy direct PostgreSQL history import is disabled; optional cloud AI/account access uses the authenticated proxy.
 
 5. **Constrained AI Explanations**
    AI (Google Gemini) may explain or summarize diagnostic results, but does not control system execution.
@@ -36,7 +36,7 @@ The system combines:
 | Desktop Shell | WPF + WebView2 (Auto-spawns and binds local API) |
 | Hardware Telemetry | Windows readings through supported interfaces; unavailable sensors are disclosed, not estimated from workload |
 | Diagnostic Engine | Deterministic C# Domain layer with strict component/scenario scoping |
-| Persistence | SQLite (Local Source of Truth with WAL mode) & Supabase PostgreSQL (Optional Sync) |
+| Persistence | SQLite (local source of truth with WAL mode and durable storage-action receipts); legacy raw database import disabled |
 | Remediation | 3-Tier Controlled Autonomous Remediation Engine with Dry-Run Previews |
 | Real-Time Streaming | SignalR WebSocket Hub (live telemetry and ReAct trace streaming) |
 | AI Integration | Multi-Turn ReAct Reasoning Agent (Google Gemini with Built-In Offline Fallback) |
@@ -213,7 +213,7 @@ RigMD employs a controlled, closed-loop remediation engine that executes explici
 
 | Action | Description | Tier |
 |---|---|---|
-| Clear User Temp Files | Removes temporary files from user TEMP folder with pre-calculation | Tier 1 |
+| Clear Temporary Files | Permanently removes only files in the approved, age-filtered TEMP snapshot; optional Windows Temp requires administrator access | Tier 2 |
 | Clear Browser Cache | Reviews and clears supported disk-cache locations; not a RAM or crash repair | Tier 2 |
 | Clear Windows Update Cache | Reviews Windows Update download cache; administrator requirements apply | Tier 2 |
 | Flush DNS Cache | Resets the Windows DNS resolver cache (`ipconfig /flushdns`) | Tier 1 |
@@ -221,7 +221,7 @@ RigMD employs a controlled, closed-loop remediation engine that executes explici
 | Run SFC Scan | Checks/repairs protected Windows files with administrator access; completion alone is not proof of repair | Tier 2 |
 | Close Reviewed Apps | Sends normal close requests only; apps may stay running; protected processes are blocked | Tier 2 |
 
-Write actions require an evidence-supported purpose, an impact preview, explicit approval and a single-use server-issued approval. A completed action, an app exiting and an original warning clearing are separate outcomes. Selected-app outcomes are saved in action history; the follow-up scan checks current measurements without claiming a permanent repair. Missing sensors stay unavailable. See [the consistency audit](Docs/SYSTEM_CONSISTENCY_AUDIT.md) for verified scope and remaining acceptance checks.
+Write actions require an evidence-supported purpose, an impact preview, explicit approval and a single-use server-issued approval. A completed action, an app exiting and an original warning clearing are separate outcomes. Selected-app outcomes are saved in action history; each follow-up scan is retained separately without replacing the original readings or claiming a permanent repair. Older builds' latest surviving follow-up is preserved, while previously overwritten observations cannot be reconstructed. Missing sensors stay unavailable. See [the consistency audit](Docs/SYSTEM_CONSISTENCY_AUDIT.md) and [0.2.14 candidate notes](Docs/RELEASE_CANDIDATE_0.2.14.md) for scope and remaining acceptance checks.
 
 ### Assisted (Non-Autonomous) Remediation Actions
 
@@ -379,6 +379,6 @@ Current automated test coverage includes:
 ### 3. Gemini Cloud Proxy & Offline Brain
 * **Zero User Configuration:** RigMD automatically routes through the team's secure Vercel serverless proxy (`https://www.rig-md.com/api/gemini`) where `GEMINI_API_KEY` is securely stored in Vercel Environment Variables. Users do not need to obtain or paste API keys.
 * **Dual-Mode Engine in Settings:** Users can toggle between **"Use Gemini when available"** (cloud AI proxy with silent local fallback) and **"Local-only mode"** (100% offline).
-* **Developer Local Override:** Developers can bypass the proxy by setting the `GEMINI_API_KEY` environment variable on their PC or using `appsettings.Local.json` (gitignored and excluded from installer).
+* **Cloud access:** The desktop Gemini clients use the authenticated proxy/session path. Provider credentials stay on the server. Local diagnostic history remains local and is not imported through a shared database connection string.
 * **Guaranteed Offline Reliability:** If the cloud proxy times out, encounters a rate limit (429), or the PC has no internet, RigMD automatically and silently switches to its built-in offline ReAct diagnostic engine with zero errors.
 

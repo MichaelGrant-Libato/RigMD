@@ -1,7 +1,14 @@
 #define MyAppName "RigMD"
-#define MyAppVersion "0.2.4"
+#define MyAppVersion "0.2.20"
 #define MyAppPublisher "RigMD"
 #define MyAppExeName "RigMD.Desktop.exe"
+
+#ifndef DesktopPublishDirectory
+  #define DesktopPublishDirectory "..\backend-dotnet\RigMD.Desktop\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
+#endif
+#ifndef ApiPublishDirectory
+  #define ApiPublishDirectory "..\backend-dotnet\RigMD.Api\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
+#endif
 
 [Setup]
 AppId={{9A9D9ED6-7B03-4C84-8A3D-8F6E6A2E6B1D}
@@ -12,6 +19,7 @@ DefaultDirName={autopf}\RigMD
 DefaultGroupName=RigMD
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
+MinVersion=10.0.19041
 ArchitecturesAllowed=x64compatible
 OutputBaseFilename=RigMD-Setup
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -33,14 +41,14 @@ Type: files; Name: "{app}\Api\LibreHardwareMonitorLib.dll"
 Type: files; Name: "{app}\Desktop\LibreHardwareMonitorLib.dll"
 
 [Files]
-Source: "..\backend-dotnet\RigMD.Desktop\bin\Release\net10.0-windows\win-x64\publish\*"; \
+Source: "{#DesktopPublishDirectory}\*"; \
     DestDir: "{app}\Desktop"; \
-    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
+    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
-Source: "..\backend-dotnet\RigMD.Api\bin\Release\net10.0-windows\win-x64\publish\*"; \
+Source: "{#ApiPublishDirectory}\*"; \
     DestDir: "{app}\Api"; \
-    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal"; \
+    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "Uninstall-RigMD.bat"; \

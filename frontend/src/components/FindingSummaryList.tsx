@@ -7,6 +7,7 @@ import { getFindingDetails } from '../lib/findingDetails';
 import FindingVisual from './FindingVisual';
 import { getFindingVisual, getUsageComparison } from '../lib/findingVisuals';
 import { MISSING_FOLLOW_UP } from '../lib/followUpReadings';
+import { resolveFindingGroup } from '../lib/findingGroupSelection';
 
 export default function FindingSummaryList({ readings, originalReadings, hasFollowUp, historical = false }: {
   readings: DiagnosticReading[]; originalReadings?: DiagnosticReading[]; hasFollowUp: boolean; historical?: boolean;
@@ -17,7 +18,11 @@ export default function FindingSummaryList({ readings, originalReadings, hasFoll
     { id: 'unknown', label: 'Not verified', rows: readings.filter(row => getFindingDetails(row).tone === 'unknown') },
     { id: 'other', label: 'Other readings', rows: readings.filter(row => !['attention', 'unknown'].includes(getFindingDetails(row).tone)) },
   ];
-  const [filter, setFilter] = useState(groups.find(group => group.rows.length)?.id ?? 'attention');
+  const groupCounts = groups.map(group => ({ id: group.id, count: group.rows.length }));
+  const revision = groupCounts.map(group => `${group.id}:${group.count}`).join('|');
+  const [selection, setSelection] = useState({ id: groups.find(group => group.rows.length)?.id ?? 'attention', revision });
+  const filter = resolveFindingGroup(groupCounts, selection, revision);
+  const setFilter = (id: string) => setSelection({ id, revision });
   const [selected, setSelected] = useState<DiagnosticReading | null>(null);
   const close = useCallback(() => setSelected(null), []);
   const group = groups.find(item => item.id === filter)!;

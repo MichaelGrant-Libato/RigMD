@@ -10,7 +10,7 @@ public static class PerformanceRules
     public const int RetainedRecords = 2000;
     public static bool IsClientOperation(string operation) => operation is
         "startup.desktop" or "startup.api_start.desktop" or "startup.api_ready.desktop" or
-        "startup.webview.desktop" or "startup.dashboard.desktop" or
+        "startup.webview.desktop" or "startup.dashboard.desktop" or "startup.summary.desktop" or
         "scan.ui" or "history.ui" or "report.ui" or "pdf.desktop" or "pdf_request.ui" or "text.ui";
     public static bool IsOperation(string operation) => IsClientOperation(operation) || operation is
         "scan.backend" or "history.backend" or "recheck.backend" or "action_request.backend";
@@ -19,6 +19,7 @@ public static class PerformanceRules
         && double.IsFinite(sample.DurationMs) && sample.DurationMs is >= 0 and <= 86_400_000
         && (sample.RecordCount is null or >= 0 and <= 100_000)
         && (sample.UnavailableCount is null or >= 0 and <= 100_000)
-        && sample.Mode is "normal" or "full" or "component" or "scenario" or "history_50"
+        && sample.Mode is "normal" or "full" or "component" or "scenario" or "history_50" or "essential_home"
+        && (sample.Mode != "essential_home" || sample.Operation.StartsWith("startup.", StringComparison.Ordinal))
         && sample.Engine is "unknown" or "local" or "gemini";
 }

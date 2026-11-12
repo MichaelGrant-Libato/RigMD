@@ -45,6 +45,7 @@ export function getRecommendedFindingSteps(check: CheckPresentationInput) {
     const finding = getFindingVisual(reading);
     return { label: finding.label, instruction: separateMemory && /^memory_(usage|app_warning)$/.test(reading.metric_id ?? '')
       ? 'Run a separate memory check before considering an app-closing action. This memory warning does not establish the cause of the selected problem.'
+      : reading.metric_id === 'network_adapter' ? 'Reconnect Wi-Fi or Ethernet, then use Check again. If the connection remains unavailable, review Windows network settings.'
       : finding.nextStep };
   });
   if (crash) steps.unshift({ label: 'Review crash details',
@@ -69,6 +70,11 @@ export function getResultHeading(check: CheckPresentationInput) {
   const active = getCheckNextSteps(check).attention;
   const originalWarnings = expandDiagnosticReadings(check.proof ?? []).filter(row => readingTone(getReadingPresentation(row).status) === 'attention');
   const originalTitle = getCheckOverview(check).title;
-  return originalWarnings.length && active.every(row => originalWarnings.some(before => row.metric_id ? before.metric_id === row.metric_id : before.label === row.label))
-    ? originalTitle : 'Readings need attention';
+  const remainingOriginal = originalWarnings.length > 0 && active.every(row => originalWarnings.some(before => row.metric_id ? before.metric_id === row.metric_id : before.label === row.label));
+  if (!remainingOriginal) return 'Readings need attention';
+  if (active.length === originalWarnings.length) return originalTitle;
+  if (active.every(row => /^storage_usage(?:_|$)/.test(row.metric_id ?? ''))) return 'Storage space needs attention';
+  if (active.every(row => /^memory_(usage|app_warning)$/.test(row.metric_id ?? ''))) return 'Memory needs attention';
+  if (active.every(row => row.metric_id === 'storage_health')) return 'A drive-health warning needs attention';
+  return active.length === 1 ? `${getFindingVisual(active[0]).label} needs attention` : 'Readings need attention';
 }

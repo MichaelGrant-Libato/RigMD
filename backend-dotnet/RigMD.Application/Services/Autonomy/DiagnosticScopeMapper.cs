@@ -92,7 +92,6 @@ public static class DiagnosticScopeMapper
                 case "thermal":
                     tier0.Add("inspect_cpu_and_thermals");
                     tier0.Add("inspect_gpu_and_displays");
-                    remediation.Add("terminate_processes");
                     break;
 
                 case "memory":
@@ -140,7 +139,6 @@ public static class DiagnosticScopeMapper
 
                 case "battery":
                     tier0.Add("inspect_battery_and_power");
-                    remediation.Add("terminate_processes");
                     break;
 
                 case "os":
@@ -198,12 +196,12 @@ public static class DiagnosticScopeMapper
             "storage-problem" => new[] { "clear_temp_files", "clear_browser_cache", "clear_windows_update_cache" },
             "slow-system" or "stuttering-freezing" => new[] { "terminate_processes", "clear_browser_cache", "clear_temp_files", "restart_windows_explorer" },
             "slow-boot" => new[] { "clear_temp_files", "restart_windows_explorer" },
-            "overheating-loud-fan" => new[] { "terminate_processes" },
-            "rapid-battery-drain" => new[] { "terminate_processes" },
+            "overheating-loud-fan" => Array.Empty<string>(),
+            "rapid-battery-drain" => Array.Empty<string>(),
             "driver-error" => new[] { "rescan_plug_and_play_devices", "run_system_file_checker" },
             "no-display" => new[] { "restart_windows_explorer", "rescan_plug_and_play_devices", "run_system_file_checker" },
-            "blue-screen-crash" => new[] { "run_system_file_checker" },
-            "app-crashes" => new[] { "run_system_file_checker", "restart_windows_explorer" },
+            "blue-screen-crash" => Array.Empty<string>(),
+            "app-crashes" => Array.Empty<string>(),
             _ => Array.Empty<string>()
         };
     }
@@ -211,6 +209,7 @@ public static class DiagnosticScopeMapper
     public static IReadOnlyList<string> GetAllowedRemediationToolsForCategory(string? diagnosedCategory)
     {
         var category = (diagnosedCategory ?? string.Empty).ToLowerInvariant();
+        if (RepairSupportPolicy.ReviewOnlyReason(category) != null) return Array.Empty<string>();
         if (IsMemoryFinding(category)) return new[] { "terminate_processes" };
 
         if (category.Contains("network") || category.Contains("dns") || category.Contains("internet"))

@@ -1,10 +1,9 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -69,12 +68,26 @@ public partial class App : System.Windows.Application
             ApiStartDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
 
             phaseWatch.Restart();
-            await WaitForApiReady();
-            ApiReadyDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
-
-            var window = new MainWindow(_localApiToken);
-            MainWindow = window;
-            window.Show();
+            using var startupCancellation = new CancellationTokenSource();
+            var readiness = Task.Run(async () =>
+            {
+                await WaitForApiReady(startupCancellation.Token).ConfigureAwait(false);
+                ApiReadyDurationMs = phaseWatch.Elapsed.TotalMilliseconds;
+            });
+            try
+            {
+                // Build WPF controls on the UI thread while the child service is preparing.
+                var window = new MainWindow(_localApiToken, readiness);
+                MainWindow = window;
+                window.Show();
+                await readiness;
+            }
+            catch
+            {
+                startupCancellation.Cancel();
+                try { await readiness; } catch { /* Preserve the original startup error. */ }
+                throw;
+            }
         }
         catch (Exception ex)
         {
@@ -93,7 +106,18 @@ public partial class App : System.Windows.Application
         var apiExe = DesktopApiLocation.Resolve(AppDomain.CurrentDomain.BaseDirectory);
         var apiDirectory = Path.GetDirectoryName(apiExe)!;
 
-        KillStaleApiProcesses();
+        using (var current = Process.GetCurrentProcess())
+        {
+            foreach (var helper in Process.GetProcessesByName("RigMD.Uninstall"))
+            {
+                using (helper)
+                {
+                    if (!helper.HasExited && helper.SessionId == current.SessionId)
+                        throw new InvalidOperationException("A storage cleanup or app removal started by RigMD is still running. Wait for it to finish before reopening RigMD. It will not be stopped automatically.");
+                }
+            }
+        }
+        KillStaleApiProcesses(apiExe);
 
         _apiProcess = new Process
         {
@@ -139,7 +163,7 @@ public partial class App : System.Windows.Application
     /// Cleans up any orphaned RigMD.Api processes from a prior crash before binding port 5273.
     /// Safe because the Single-Instance Mutex guarantees no other RigMD.Desktop instance is active.
     /// </summary>
-    private static void KillStaleApiProcesses()
+    private static void KillStaleApiProcesses(string expectedApiPath)
     {
         try
         {
@@ -149,7 +173,9 @@ public partial class App : System.Windows.Application
                 {
                     try
                     {
-                        if (!stale.HasExited)
+                        using var current = Process.GetCurrentProcess();
+                        if (!stale.HasExited && stale.SessionId == current.SessionId &&
+                            string.Equals(stale.MainModule?.FileName, expectedApiPath, StringComparison.OrdinalIgnoreCase))
                         {
                             stale.Kill(entireProcessTree: true);
                             stale.WaitForExit(3000);
@@ -187,7 +213,8 @@ public partial class App : System.Windows.Application
             {
                 BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION
                 {
-                    LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                    // Verified vendor uninstallers explicitly break away into a non-killing tracking job.
+                    LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | 0x800
                 }
             };
 
@@ -216,73 +243,17 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private async Task WaitForApiReady()
+    private async Task WaitForApiReady(CancellationToken cancellationToken)
     {
-        using var client = new HttpClient
+        // Loopback readiness should not wait on a system proxy or a long connection retry.
+        using var client = new HttpClient(new SocketsHttpHandler
         {
-            Timeout = TimeSpan.FromSeconds(2)
-        };
-
-        for (int i = 0; i < 30; i++)
-        {
-            if (_apiProcess == null || _apiProcess.HasExited)
-            {
-                throw new InvalidOperationException(
-                    "The local API process exited before startup completed.");
-            }
-
-            try
-            {
-                using var response =
-                    await client.GetAsync(ApiUrl);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var html =
-                        await response.Content.ReadAsStringAsync();
-
-                    var cssMatch =
-                        Regex.Match(
-                            html,
-                            "<link[^>]+href=\"([^\"]+\\.css)\"",
-                            RegexOptions.IgnoreCase);
-
-                    if (cssMatch.Success)
-                    {
-                        var cssPath =
-                            cssMatch.Groups[1].Value;
-
-                        var cssUrl =
-                            new Uri(
-                                new Uri(ApiUrl),
-                                cssPath);
-
-                        using var cssResponse =
-                            await client.GetAsync(cssUrl);
-
-                        if (cssResponse.IsSuccessStatusCode &&
-                            cssResponse.Content.Headers.ContentType
-                                ?.MediaType == "text/css")
-                        {
-                            return;
-                        }
-                    }
-                }
-            }
-            catch (HttpRequestException)
-            {
-                // API is not accepting connections yet.
-            }
-            catch (TaskCanceledException)
-            {
-                // Request timed out while API was starting.
-            }
-
-            await Task.Delay(1000);
-        }
-
-        throw new TimeoutException(
-            "The local API and frontend assets did not become ready within the startup timeout.");
+            UseProxy = false,
+            AllowAutoRedirect = false,
+            ConnectTimeout = TimeSpan.FromMilliseconds(250)
+        }) { Timeout = TimeSpan.FromSeconds(2) };
+        await DesktopApiReadiness.WaitAsync(client, new Uri(ApiUrl),
+            () => _apiProcess == null || _apiProcess.HasExited, cancellationToken: cancellationToken);
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -80,7 +81,7 @@ public class AgentToolLayerTests
             DedicatedMemoryGb = 12.0
         };
 
-        public int GetConnectedDisplays() => 1;
+        public int? GetConnectedDisplays() => 1;
 
         public List<DisplayStatsDto> GetDisplays() => new()
         {
@@ -120,34 +121,41 @@ public class AgentToolLayerTests
             new InspectBatteryAndPowerTool(providers, providers, providers),
             new QueryWindowsEventLogsTool(),
             new QueryStartupAppsTool(),
+            new InspectFullDeviceProfileTool(null!),
+            new QueryPastChecksAndRemediationsTool(null!, null!),
+            new QueryRecurringProblemsAndWarningsTool(null!, null!, null!),
             new TerminateProcessesTool(loggerFactory),
             new ClearTempFilesTool(loggerFactory),
             new ClearBrowserCacheTool(loggerFactory),
             new FlushDnsCacheTool(loggerFactory),
             new RestartWindowsExplorerTool(loggerFactory),
             new ClearWindowsUpdateCacheTool(loggerFactory),
-            new RunSystemFileCheckerTool(loggerFactory)
+            new RunSystemFileCheckerTool(loggerFactory),
+            new RescanPlugAndPlayDevicesTool()
         };
 
         return new RigMdAgentToolRegistry(tools);
     }
 
     [Fact]
-    public void Registry_RegistersAll15Tools_WithExpectedSafetyTiersAndDeclarations()
+    public void Registry_MatchesProductionRegistrations_WithExpectedSafetyTiersAndDeclarations()
     {
         var registry = CreateFullRegistry();
         var allTools = registry.GetAllTools();
 
-        Assert.Equal(15, allTools.Count);
-        Assert.Equal(8, registry.GetToolsByTier(ToolSafetyTier.Tier0_ReadOnly).Count);
-        Assert.Equal(3, registry.GetToolsByTier(ToolSafetyTier.Tier1_SafeReversible).Count);
-        Assert.Equal(4, registry.GetToolsByTier(ToolSafetyTier.Tier2_DestructiveOrAdmin).Count);
+        Assert.Equal(19, allTools.Count);
+        var production = new ServiceCollection().AddRigMdAgentTools().Where(row => row.ServiceType == typeof(IRigMdAgentTool))
+            .Select(row => row.ImplementationType!.FullName).Order().ToArray();
+        Assert.Equal(production, allTools.Select(tool => tool.GetType().FullName).Order().ToArray());
+        Assert.Equal(11, registry.GetToolsByTier(ToolSafetyTier.Tier0_ReadOnly).Count);
+        Assert.Equal(2, registry.GetToolsByTier(ToolSafetyTier.Tier1_SafeReversible).Count);
+        Assert.Equal(6, registry.GetToolsByTier(ToolSafetyTier.Tier2_DestructiveOrAdmin).Count);
 
         var readOnlyDeclarations = registry.GetFunctionDeclarations(includeWriteTools: false);
-        Assert.Equal(8, readOnlyDeclarations.Count);
+        Assert.Equal(11, readOnlyDeclarations.Count);
 
         var allDeclarations = registry.GetFunctionDeclarations(includeWriteTools: true);
-        Assert.Equal(15, allDeclarations.Count);
+        Assert.Equal(19, allDeclarations.Count);
 
         foreach (var decl in allDeclarations)
         {
@@ -184,9 +192,7 @@ public class AgentToolLayerTests
         Assert.Contains(appCrashTools, t => t.ToolName == "query_windows_event_logs" && t.ArgumentsJson.Contains("ApplicationCrash"));
 
         var appCrashRemediations = DiagnosticScopeMapper.GetAllowedRemediationToolsForScenario("app-crashes");
-        Assert.Contains("restart_windows_explorer", appCrashRemediations);
-        Assert.Contains("run_system_file_checker", appCrashRemediations);
-        Assert.DoesNotContain("clear_browser_cache", appCrashRemediations);
+        Assert.Empty(appCrashRemediations);
     }
 
     [Fact]
@@ -265,8 +271,8 @@ public class AgentToolLayerTests
         Assert.Contains("DNS", dnsPreview.WhatWillHappen);
 
         var browserPreview = await registry.GetTool("clear_browser_cache")!.PreviewImpactAsync(emptyArgs.RootElement);
-        Assert.True(browserPreview.CanExecute);
-        Assert.Equal(3, browserPreview.AffectedTargets.Count);
+        Assert.True(browserPreview.RequiresUserConfirmation);
+        Assert.Equal(browserPreview.AffectedItemsCount > 0, browserPreview.CanExecute);
 
         var sfcPreview = await registry.GetTool("run_system_file_checker")!.PreviewImpactAsync(emptyArgs.RootElement);
         Assert.True(sfcPreview.RequiresAdmin);

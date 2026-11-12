@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import {
@@ -26,9 +26,14 @@ import {
   cardTransition,
 } from '../lib/motion';
 import DiagnosticReadings from './DiagnosticReadings';
+import StorageReview from './StorageReview';
+import { getRemediationFindings } from '../lib/remediationFindings';
+import { getFindingDetails } from '../lib/findingDetails';
+import { RemediationReviewAccess } from '../lib/remediationReviewAccess';
 import { getAppObservationPresentation } from '../lib/appObservationPresentation';
 import { getActionDecision } from '../lib/actionDecision';
-import { hardwareInspectionNotice, requiresHardwareInspection, reviewOnlyNotice, memoryActionDisposition, crashCheckNotice, type ScanScope } from '../lib/repairSupport';
+import { getActionExecution, getCleanupProofPresentation, getRemediationState as getState, hasFailedExecution } from '../lib/remediationOutcome';
+import { hardwareInspectionNotice, requiresHardwareInspection, reviewOnlyNotice, workloadGuidanceNotice, memoryActionDisposition, crashCheckNotice, type ScanScope } from '../lib/repairSupport';
 import { friendlyToolName, getActionExplanation, getDiagnosticOverview, friendlyVerification,
   getSnapshotReadings, plainDiagnosticText, type DiagnosticReading } from '../lib/diagnosticLanguage';
 
@@ -50,6 +55,7 @@ import {
 } from '../services/autonomyService';
 
 interface AutonomyRemediationPanelProps {
+  onBusyChange?: (busy: boolean) => void;
   compact?: boolean;
   readings?: DiagnosticReading[];
   originalReadings?: DiagnosticReading[];
@@ -81,13 +87,6 @@ const ATTEMPT_STATE_LABELS: Record<number, string> = {
   15: 'Completed',
 };
 
-const VERIFICATION_STATUS_LABELS: Record<number, string> = {
-  0: 'Fixed',
-  1: 'Not fixed',
-  2: 'Needs help',
-  3: 'Could not confirm',
-};
-
 interface RemediationToolOption {
   id: string;
   label: string;
@@ -98,7 +97,7 @@ interface RemediationToolOption {
 const REMEDIATION_TOOL_OPTIONS: RemediationToolOption[] = [
   {
     id: 'clear_temp_files',
-    label: 'Clear Temporary Files (Tier 1)',
+    label: 'Clear Temporary Files (Tier 2)',
     userLabel: 'Clear temporary files',
     reason: 'Best for storage pressure, temp-cache buildup, and slow startup cleanup.',
   },
@@ -166,77 +165,6 @@ function getAttemptStateLabel(state?: string | number) {
   }
 
   return state ?? '';
-}
-
-function getVerificationLabel(verification?: string | number) {
-  if (typeof verification === 'number') {
-    return VERIFICATION_STATUS_LABELS[verification] ?? String(verification);
-  }
-
-  return verification ?? '';
-}
-
-function getState(result?: AutonomyResult | null) {
-  if (!result) {
-    return 'info';
-  }
-
-  const attempt = getLatestAttempt(result);
-  const attemptState = getAttemptStateLabel(attempt?.state);
-  const verificationState = getVerificationLabel(result.verification);
-  const verification = verificationState.toLowerCase();
-  const state = (attemptState || verificationState).toLowerCase();
-  const safety = result.safety;
-
-  if (verification.includes('not fixed') || verification.includes('unresolved')) {
-    return 'unresolved';
-  }
-
-  if (verification.includes('needs help') || verification.includes('worse')) {
-    return 'failed';
-  }
-
-  if (verification.includes('could not confirm') || verification.includes('unknown')) {
-    return 'info';
-  }
-
-  if (verification.includes('fixed') || verification.includes('resolved')) {
-    return 'success';
-  }
-
-  if (
-    state.includes('approval') ||
-    state.includes('consent') ||
-    (safety?.requiresUserConfirmation === true && safety?.isApproved === false)
-  ) {
-    return 'consent';
-  }
-
-  if (state.includes('reject') || safety?.isApproved === false) {
-    return 'rejected';
-  }
-
-  if (state.includes('not fixed') || state.includes('unresolved')) {
-    return 'unresolved';
-  }
-
-  if (
-    state.includes('failed') ||
-    state.includes('needs help') ||
-    result.execution?.success === false
-  ) {
-    return 'failed';
-  }
-
-  if (
-    state.includes('fixed') ||
-    state.includes('completed') ||
-    result.execution?.success === true
-  ) {
-    return 'success';
-  }
-
-  return 'info';
 }
 
 function getStatusStyle(state: string) {
@@ -348,7 +276,7 @@ function getDiagnosisMatchedToolIds(diagnosedCategory: string) {
     category.includes('fan') ||
     category.includes('cpu load')
   ) {
-    return ['close_selected_app'];
+    return [];
   }
 
   if (
@@ -361,7 +289,7 @@ function getDiagnosisMatchedToolIds(diagnosedCategory: string) {
   }
 
   if (category.includes('battery') || category.includes('power')) {
-    return ['close_selected_app'];
+    return [];
   }
 
   return [];
@@ -800,27 +728,28 @@ export function ProofList({ execution }: { execution?: AutonomyExecution }) {
   }
 
   return (
-    <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+    <div className="mt-4 grid grid-cols-1 gap-2 text-slate-300 md:grid-cols-2">
       {execution.proof.some(item => getAppObservationPresentation(item.status)) && (
-        <p className="col-span-full text-xs leading-relaxed opacity-80">
+        <p className="col-span-full text-xs leading-relaxed text-slate-400">
           Saved process observations after the close request, not live app status. Later memory checks do not refresh these observations.
         </p>
       )}
       {execution.proof.map((item, index) => {
         const observation = getAppObservationPresentation(item.status);
+        const cleanup = getCleanupProofPresentation(item);
         return (
         <div
           key={`${item.label}-${index}`}
           className="min-w-0 border-t border-current/15 py-3"
         >
-          <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">
-            {item.label === 'Directory size' ? 'Temporary-file storage' : item.label === 'File count' ? 'Temporary files' : plainDiagnosticText(item.label || 'Checked')}
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            {cleanup?.label ?? (item.label === 'Directory size' ? 'Temporary-file storage' : item.label === 'File count' ? 'Temporary files' : plainDiagnosticText(item.label || 'Checked'))}
           </p>
 
-          {observation ? (
+          {cleanup ? <p className="mt-1 text-xs font-semibold text-white">{cleanup.value}</p> : observation ? (
             <>
               <p className="mt-1 text-sm font-semibold text-white">{observation.status}</p>
-              <details className="mt-2 text-xs leading-relaxed opacity-80">
+              <details className="mt-2 text-xs leading-relaxed text-slate-300">
                 <summary className="cursor-pointer">App process details</summary>
                 <p className="mt-1 break-words">{item.before} &rarr; {item.after}</p>
               </details>
@@ -836,7 +765,7 @@ export function ProofList({ execution }: { execution?: AutonomyExecution }) {
           )}
 
           {(observation?.meaning || item.meaning) && (
-            <p className="mt-1 text-[11px] leading-relaxed opacity-80">
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
               {plainDiagnosticText(observation?.meaning || item.meaning)}
             </p>
           )}
@@ -943,9 +872,11 @@ function ResultCard({
   diagnosedCategory: string;
   followUpSummary?: string;
 }) {
-  const state = followUpSummary ? 'info' : getState(result);
+  const execution = getActionExecution(result);
+  const executionFailed = hasFailedExecution(result);
+  const state = executionFailed ? 'failed' : followUpSummary ? 'info' : getState(result);
   const attempt = getLatestAttempt(result);
-  const statusLabel = followUpSummary ? 'Follow-up checked' : friendlyVerification(result.verification ?? attempt?.verification ?? getAttemptStateLabel(attempt?.state));
+  const statusLabel = executionFailed ? 'Action not completed' : followUpSummary ? 'Follow-up checked' : friendlyVerification(result.verification ?? attempt?.verification ?? getAttemptStateLabel(attempt?.state));
   const verifiedResolved = statusLabel === 'Issue no longer detected';
   const style = getStatusStyle(state === 'success' && !verifiedResolved ? 'info' : state);
   const Icon = style.icon;
@@ -958,6 +889,7 @@ function ResultCard({
           ? 'The action finished, but the follow-up check could not confirm whether the issue improved.'
           : null;
   const displaySummary =
+    (executionFailed ? execution?.summary || attempt?.notes || 'The action could not be completed. Review the result before trying again.' : null) ||
     followUpSummary ||
     (result.execution?.success === true && result.verificationReport?.verificationToolName === 'query_windows_event_logs'
       ? result.verificationReport.summary : null) ||
@@ -980,7 +912,7 @@ function ResultCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-bold uppercase tracking-wider">
-                {followUpSummary ? 'Latest follow-up' : state === 'info' && statusLabel === 'Could not verify' ? statusLabel : state === 'success' && !verifiedResolved ? 'Action finished' : style.title}
+                {executionFailed ? 'Could not complete the action' : followUpSummary ? 'Latest follow-up' : state === 'info' && statusLabel === 'Could not verify' ? statusLabel : state === 'success' && !verifiedResolved ? 'Action finished' : style.title}
               </p>
 
             </div>
@@ -1009,7 +941,7 @@ function ResultCard({
           </div>
         </div>
 
-        <ProofList execution={result.execution || attempt?.execution} />
+        <ProofList execution={execution} />
       </div>
 
       <TechnicalCheckDetails steps={result.reasoningSteps} engine={result.engineMode}
@@ -1018,7 +950,32 @@ function ResultCard({
   );
 }
 
-export default function AutonomyRemediationPanel({
+export default function AutonomyRemediationPanel(props: AutonomyRemediationPanelProps) {
+  const permission = useContext(RemediationReviewAccess);
+  const findings = getRemediationFindings(props.readings ?? []);
+  const [selectedId, setSelectedId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const selected = findings.find(finding => finding.id === selectedId) ?? findings[0];
+  const primarySupported = selected?.kind === 'memory' || selected?.kind === 'storage' || findings.length === 1;
+  return <div className="space-y-4">
+    {findings.length > 1 && <label className="block text-sm font-semibold text-slate-200">Choose a finding to review
+      <select aria-label="Finding to review" disabled={busy || !permission.allowed} value={selected?.id ?? ''} onChange={event => setSelectedId(event.target.value)}
+        className="mt-2 block w-full rounded-lg border border-white/20 bg-[#101821] px-3 py-2 text-sm text-white">
+        {findings.map(finding => <option key={finding.id} value={finding.id}>{finding.label} — needs attention</option>)}
+      </select>
+    </label>}
+    {selected && !primarySupported ? <section className="space-y-3 border-l-2 border-amber-400 pl-4">
+      <DiagnosticReadings readings={selected.readings} technicalDetails={false} />
+      <p className="text-sm text-slate-300">{getFindingDetails(selected.readings[0]).nextStep}</p>
+      <p className="text-xs text-slate-400">This finding does not by itself authorize a software repair. Use a relevant check before choosing an action.</p>
+    </section> : null}
+    {(!selected || primarySupported) && <FindingRemediationPanel key={`${props.sessionId}:${selected?.id ?? 'primary'}:${props.followUpCheckedAt ?? ''}`}
+      {...props} onBusyChange={setBusy} readings={selected?.readings ?? props.readings} />}
+  </div>;
+}
+
+function FindingRemediationPanel({
+  onBusyChange,
   compact = false,
   readings = [],
   originalReadings,
@@ -1030,9 +987,11 @@ export default function AutonomyRemediationPanel({
   followUpSummary,
   followUpCheckedAt,
 }: AutonomyRemediationPanelProps) {
+  const permission = useContext(RemediationReviewAccess);
   const memoryDisposition = memoryActionDisposition(check ?? { diagnosed_category: diagnosedCategory }, readings);
   const memoryAction = memoryDisposition === 'direct';
-  const actionCategory = memoryAction ? 'High Memory Pressure' : diagnosedCategory;
+  const storageAction = readings.some(row => /^storage_usage(?:_|$)/.test(row.metric_id ?? '') && getFindingDetails(row).tone === 'attention');
+  const actionCategory = memoryAction ? 'High Memory Pressure' : storageAction ? 'Elevated Storage Utilization' : diagnosedCategory;
   const [executedAt, setExecutedAt] = useState<number | null>(null);
   const [previewResult, setPreviewResult] =
     useState<AutonomyResult | null>(null);
@@ -1064,12 +1023,16 @@ export default function AutonomyRemediationPanel({
 
   const [isExecuteLoading, setIsExecuteLoading] =
     useState(false);
+  const [storageBusy, setStorageBusy] = useState(false);
 
   const [reviewOpen, setReviewOpen] =
     useState(false);
 
   const [userConsentProvided, setUserConsentProvided] =
     useState(false);
+  useEffect(() => {
+    if (!permission.allowed) setUserConsentProvided(false);
+  }, [permission.allowed]);
 
   const [memoryApps, setMemoryApps] =
     useState<MemoryAppCandidate[]>([]);
@@ -1077,7 +1040,11 @@ export default function AutonomyRemediationPanel({
   const [selectedProcessNames, setSelectedProcessNames] =
     useState<string[]>([]);
 
-  const requestActive = isPreviewLoading || isExecuteLoading;
+  const requestActive = isPreviewLoading || isExecuteLoading || storageBusy;
+  useEffect(() => {
+    onBusyChange?.(requestActive);
+    return () => onBusyChange?.(false);
+  }, [requestActive, onBusyChange]);
   const reviewDialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1108,6 +1075,7 @@ export default function AutonomyRemediationPanel({
   }, [reviewOpen]);
 
   const isCloseSelectedAppMode = activeToolId === 'close_selected_app';
+  const isStorageReview = activeToolId === 'review_storage_apps';
 
   const primaryAction = getPrimaryAction(previewResult);
 
@@ -1116,7 +1084,7 @@ export default function AutonomyRemediationPanel({
     previewResult?.dryRunPreview ??
     previewResult?.proposedTool?.dryRunPreview;
 
-  const dynamicTitle = isCloseSelectedAppMode
+  const dynamicTitle = isStorageReview ? 'Free up storage space' : isCloseSelectedAppMode
     ? 'Close selected memory-heavy apps'
     : getToolDisplayName(
       activeToolId,
@@ -1145,7 +1113,9 @@ export default function AutonomyRemediationPanel({
         : ['Explicit user confirmation is required before executing system changes.'];
 
   const canProceed =
+    permission.allowed &&
     Boolean(previewResult) &&
+    !isStorageReview &&
     userConsentProvided &&
     !requestActive &&
     !previewError &&
@@ -1160,8 +1130,11 @@ export default function AutonomyRemediationPanel({
     selectedMemoryApps.map((app) => app.displayName || app.name);
 
   const contextualToolOptions = useMemo(
-    () => getContextualToolOptions(actionCategory, previewResult).filter(option => option.id !== 'close_selected_app' || memoryAction),
-    [actionCategory, previewResult, memoryAction],
+    () => [
+      ...(storageAction ? [{ id: 'review_storage_apps', label: 'Free up storage space', userLabel: 'Free up storage space', reason: 'Choose a cleanup and review it before approving any change.' }] : []),
+      ...getContextualToolOptions(actionCategory, previewResult).filter(option => option.id !== 'close_selected_app' || memoryAction),
+    ],
+    [actionCategory, previewResult, memoryAction, storageAction],
   );
 
   const activeToolOption = getToolOption(
@@ -1172,12 +1145,17 @@ export default function AutonomyRemediationPanel({
   );
 
   const handleToolSelectionChange = async (nextToolId: string) => {
+    if (!permission.allowed) return;
     const sequence = ++previewSequence.current;
     setActiveToolId(nextToolId);
     setIsPreviewLoading(false);
     setUserConsentProvided(false);
     setCustomDryRun(null);
     setPreviewError(null);
+    setExecuteError(null);
+    setSelectedProcessNames([]);
+
+    if (nextToolId === 'review_storage_apps') return;
 
     if (nextToolId === previewResult?.proposedTool?.toolName) {
       setCustomDryRun(null);
@@ -1199,7 +1177,7 @@ export default function AutonomyRemediationPanel({
 
     try {
       setIsPreviewLoading(true);
-      const preview = await previewAgentTool(nextToolId, {}, sessionId);
+      const preview = await previewAgentTool(nextToolId, {}, sessionId, storageAction ? readings[0]?.metric_id : undefined);
       if (sequence === previewSequence.current) setCustomDryRun(preview);
     } catch (error) {
       if (sequence === previewSequence.current) setPreviewError(getBackendErrorMessage(error));
@@ -1209,6 +1187,7 @@ export default function AutonomyRemediationPanel({
   };
 
   const handleAppSelectionChange = async (nextNames: string[]) => {
+    if (!permission.allowed) return;
     const sequence = ++previewSequence.current;
     setSelectedProcessNames(nextNames);
     setUserConsentProvided(false);
@@ -1227,7 +1206,7 @@ export default function AutonomyRemediationPanel({
   };
 
   const openReview = async () => {
-    if (requestActive || !sessionId || !diagnosedCategory) {
+    if (!permission.allowed || requestActive || !sessionId || !diagnosedCategory) {
       return;
     }
 
@@ -1241,6 +1220,15 @@ export default function AutonomyRemediationPanel({
     setCustomDryRun(null);
     setLiveSteps([]);
     setLiveProgressLine('Starting ReAct diagnostic tool investigation...');
+
+    if (storageAction) {
+      setPreviewResult({});
+      setActiveToolId('review_storage_apps');
+      setReviewOpen(true);
+      setIsPreviewLoading(false);
+      setLiveProgressLine(null);
+      return;
+    }
 
     if (memoryAction) {
       try {
@@ -1323,6 +1311,7 @@ export default function AutonomyRemediationPanel({
             confirmed: true,
           })
         : await runAutonomyExecution({
+            findingMetricId: storageAction ? readings[0]?.metric_id : undefined,
             approvalToken: effectiveDryRun?.approvalToken,
             sessionId,
             diagnosedCategory,
@@ -1360,7 +1349,7 @@ export default function AutonomyRemediationPanel({
       if (readings.length) observations.set(step.toolName, readings);
     }
   }
-  const reviewReadings = memoryAction ? readings.filter(row => row.metric_id === 'memory_usage' || row.metric_id === 'memory_app_warning')
+  const reviewReadings = memoryAction || storageAction ? readings
     : [...observations.values()].flat();
   const actionDecision = getActionDecision(activeToolId, reviewReadings);
 
@@ -1393,12 +1382,16 @@ export default function AutonomyRemediationPanel({
       </details>
     </div>
   );
-  const inactiveMemory = /memory|\bram\b/i.test(diagnosedCategory) && memoryDisposition === 'none';
-  if ((reviewNotice || inactiveMemory) && !memoryAction) return (
+  const inactiveMemory = /memory|\bram\b/i.test(diagnosedCategory) && memoryDisposition === 'none' && !storageAction;
+  if ((reviewNotice || inactiveMemory) && !memoryAction && !storageAction) return (
     <section aria-label="Investigation recommended" className="border-l-2 border-sky-400 pl-4 py-3">
       <h5 className="text-sm font-semibold text-sky-200">About this check</h5>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? (crashContext ? 'Crash records do not confirm a cause or a repair.' : inactiveMemory ? 'No app-closing action is available for the latest saved readings.' : 'Review the finding before making changes. No automatic repair is available.') : crashContext ? crashNotice : inactiveMemory
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? (crashContext ? 'Crash records do not confirm a cause or a repair.' : inactiveMemory ? 'No app-closing action is available for the latest saved readings.' : reviewNotice) : crashContext ? crashNotice : inactiveMemory
         ? 'The latest saved readings do not show a verified memory warning. No app-closing action is available. Check current status if symptoms continue.' : reviewNotice}</p>
+      {workloadGuidanceNotice(diagnosedCategory) && onOpenMemoryCheck && <button type="button" onClick={onOpenMemoryCheck}
+        className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-400/35 px-4 py-2 text-sm font-bold text-cyan-200">
+        <ArrowRight size={14} />Open a separate memory check
+      </button>}
       {executionResult && <div className="mt-4"><ResultCard result={executionResult} diagnosedCategory="High Memory Pressure"
         followUpSummary={executedAt !== null && followUpCheckedAt && Date.parse(followUpCheckedAt) >= executedAt ? followUpSummary : undefined} /></div>}
     </section>
@@ -1406,7 +1399,7 @@ export default function AutonomyRemediationPanel({
 
   return (
     <>
-      {reviewNotice && memoryAction && <section aria-label="About the crash check" className="mb-5 border-l-2 border-sky-400 py-2 pl-4">
+      {reviewNotice && memoryAction && crashContext && <section aria-label="About the crash check" className="mb-5 border-l-2 border-sky-400 py-2 pl-4">
         <h5 className="text-sm font-semibold text-sky-200">About the crash check</h5>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{compact ? 'Crash records do not confirm a cause or a repair.' : crashNotice}</p>
       </section>}
@@ -1427,7 +1420,7 @@ export default function AutonomyRemediationPanel({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h5 className="text-sm font-bold text-white">
-                  {memoryAction ? 'Help with memory use' : 'Review a software action'}
+                  {memoryAction ? 'Help with memory use' : storageAction ? 'Help with storage space' : 'Review a software action'}
                 </h5>
               </div>
 
@@ -1440,7 +1433,7 @@ export default function AutonomyRemediationPanel({
           <motion.button
             type="button"
             onClick={openReview}
-            disabled={requestActive || !sessionId || !diagnosedCategory}
+            disabled={!permission.allowed || requestActive || !sessionId || !diagnosedCategory}
             whileTap={buttonTap}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-400/35 bg-cyan-400/10 px-4 py-2.5 text-xs font-bold text-cyan-200 transition hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -1450,7 +1443,7 @@ export default function AutonomyRemediationPanel({
               <SlidersHorizontal size={14} />
             )}
 
-            {isPreviewLoading ? 'Checking your device...' : memoryAction ? 'Review apps using memory' : 'Review action options'}
+            {isPreviewLoading ? 'Checking your device...' : memoryAction ? 'Review apps using memory' : storageAction ? 'Review storage options' : 'Review action options'}
           </motion.button>
         </div>
 
@@ -1497,7 +1490,7 @@ export default function AutonomyRemediationPanel({
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            className="max-h-[92vh] w-full min-w-0 max-w-3xl overflow-y-auto rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-5 shadow-2xl [overflow-wrap:anywhere]"
+            className={`max-h-[92vh] w-full min-w-0 ${isStorageReview ? 'max-w-5xl' : 'max-w-3xl'} overflow-y-auto rounded-lg border border-[var(--rigmd-border)] bg-[#101821] p-5 shadow-2xl [overflow-wrap:anywhere]`}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -1512,14 +1505,14 @@ export default function AutonomyRemediationPanel({
                 </h3>
 
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  {actionExplanation.description}
+                  {isStorageReview ? 'Clean temporary files, remove apps you no longer need, or move selected personal files to the Recycle Bin. Every change needs your approval.' : actionExplanation.description}
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => setReviewOpen(false)}
-                disabled={requestActive}
+                disabled={requestActive && !isStorageReview}
                 aria-label="Close review"
                 title="Close review"
                 className="rounded-lg border border-[var(--rigmd-border)] p-2 text-slate-400 hover:text-white"
@@ -1529,20 +1522,26 @@ export default function AutonomyRemediationPanel({
             </div>
 
             <div className="mt-5 space-y-4">
+              {!permission.allowed && <p role="status" className="rounded-lg border border-amber-400/30 p-3 text-sm text-amber-200">{permission.message || 'Changes are unavailable until action eligibility is verified.'}</p>}
               {(previewError || executeError) && (
                 <p role="alert" className="break-words rounded-lg border border-red-400/30 p-3 text-sm text-red-200">
                   {previewError || executeError}
                 </p>
               )}
+              {isStorageReview ? <details className="border-t border-white/10 pt-3">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-300">Saved finding and why storage review is offered</summary>
+                <div className="mt-3"><DiagnosticReadings readings={reviewReadings} technicalDetails={false} /></div>
+              </details> : <>
               <section className="border-t border-white/10 pt-4">
                 <h4 className="text-sm font-semibold text-cyan-200">Why this action?</h4>
-                <p className="mt-2 text-sm leading-relaxed text-slate-300">{actionDecision.why}</p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-300">{storageAction ? 'This saved finding reports storage-space pressure. App size estimates are separate from working memory and do not establish what is safe to remove. Cleanup options require a backend-approved preview for this check.' : actionDecision.why}</p>
               </section>
               {reviewReadings.length > 3 ? <details className="border-t border-white/10 pt-3">
                 <summary className="cursor-pointer py-1 text-sm font-semibold text-slate-200">Readings supporting this action</summary>
                 <div className="mt-3"><DiagnosticReadings readings={reviewReadings} technicalDetails={false} /></div>
               </details> : <DiagnosticReadings readings={reviewReadings} technicalDetails={false} />}
               {!reviewReadings.length && <p className="text-sm leading-relaxed text-slate-300">{getDiagnosticOverview(diagnosedCategory).meaning}</p>}
+              </>}
 
               {/* 3. Tool Selection & Live Dry-Run Impact Metrics */}
               <section className="border-t border-white/10 pt-4">
@@ -1550,7 +1549,7 @@ export default function AutonomyRemediationPanel({
                   <div className="flex items-center gap-2">
                     <Wrench size={15} className="text-emerald-300" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
-                      What will change
+                      {isStorageReview ? 'Storage review options' : 'What will change'}
                     </h4>
                   </div>
 
@@ -1558,18 +1557,19 @@ export default function AutonomyRemediationPanel({
                     aria-label="Action to review"
                     value={activeToolId}
                     onChange={(e) => handleToolSelectionChange(e.target.value)}
-                    disabled={requestActive}
+                    disabled={requestActive || !permission.allowed}
                     className="w-full min-w-0 max-w-full rounded-lg border border-white/15 bg-[#101821] px-3 py-1.5 text-xs font-semibold text-white focus:border-cyan-400 focus:outline-none sm:w-auto sm:max-w-[65%]"
                   >
                     {contextualToolOptions.map((opt) => (
                       <option key={opt.id} value={opt.id}>
-                        {friendlyToolName(opt.id, opt.userLabel)}
+                        {opt.id === 'review_storage_apps' ? opt.userLabel : friendlyToolName(opt.id, opt.userLabel)}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {effectiveDryRun && !isCloseSelectedAppMode && (
+                {isStorageReview && <div className="mt-4"><StorageReview metricId={readings[0]?.metric_id ?? ''} onBusyChange={setStorageBusy} onReviewCleanup={tool => { void handleToolSelectionChange(tool); }} /></div>}
+                {effectiveDryRun && !isCloseSelectedAppMode && !isStorageReview && (
                   <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                     <div className="min-w-0 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -1604,7 +1604,7 @@ export default function AutonomyRemediationPanel({
                   </div>
                 )}
 
-                <p className="mt-3 text-sm leading-relaxed text-amber-100">{actionExplanation.caution}</p>
+                {!isStorageReview && <p className="mt-3 text-sm leading-relaxed text-amber-100">{actionExplanation.caution}</p>}
                 {effectiveDryRun &&
                   !isCloseSelectedAppMode && (
                     <details className="mt-3 min-w-0 border-t border-white/10 pt-2 text-xs text-slate-400">
@@ -1621,10 +1621,10 @@ export default function AutonomyRemediationPanel({
 
               <section className="border-t border-white/10 pt-4">
                 <h4 className="text-sm font-semibold text-cyan-200">How will we check?</h4>
-                <p className="mt-2 text-sm leading-relaxed text-slate-300">{actionDecision.check}</p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-300">{isStorageReview ? 'Browsing categories changes nothing. App removals and cleanup each require their own preview and approval. After making a change, use Check again to see whether the original storage warning has cleared.' : actionDecision.check}</p>
               </section>
               {/* 4. Safety & Warnings */}
-              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
+              {!isStorageReview && <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-200">
                   Before you continue
                 </h4>
@@ -1636,7 +1636,7 @@ export default function AutonomyRemediationPanel({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </div>}
               <TechnicalCheckDetails steps={displayedSteps} engine={previewResult?.engineMode}
                 analysis={previewResult?.rootCauseAnalysis} citations={previewResult?.proposedTool?.evidenceCitations} />
             </div>
@@ -1675,7 +1675,7 @@ export default function AutonomyRemediationPanel({
                             type="checkbox"
                             name="memory-app"
                             checked={selected}
-                            disabled={requestActive}
+                            disabled={requestActive || !permission.allowed}
                             onChange={() =>
                               void handleAppSelectionChange(
                                 selected
@@ -1739,10 +1739,11 @@ export default function AutonomyRemediationPanel({
               </div>
             )}
 
-            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] p-4 text-sm text-amber-100">
+            {!isStorageReview && <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] p-4 text-sm text-amber-100">
               <input
                 type="checkbox"
                 checked={userConsentProvided}
+                disabled={requestActive || !permission.allowed}
                 onChange={(event) =>
                   setUserConsentProvided(event.target.checked)
                 }
@@ -1755,7 +1756,7 @@ export default function AutonomyRemediationPanel({
                   This action runs only after approval and pressing the action button.
                 </span>
               </span>
-            </label>
+            </label>}
 
             {isExecuteLoading && liveProgressLine && (
               <div className="mt-3 flex items-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 p-3 font-mono text-xs text-cyan-200">
@@ -1770,10 +1771,10 @@ export default function AutonomyRemediationPanel({
                 onClick={() => setReviewOpen(false)}
                 className="rounded-lg border border-[var(--rigmd-border)] px-4 py-2.5 text-sm font-bold text-slate-300 hover:text-white"
               >
-                Cancel
+                {isStorageReview ? 'Done' : 'Cancel'}
               </button>
 
-              <motion.button
+              {!isStorageReview && <motion.button
                 type="button"
                 onClick={runExecution}
                 disabled={!canProceed}
@@ -1795,7 +1796,7 @@ export default function AutonomyRemediationPanel({
                       : userConsentProvided
                         ? isCloseSelectedAppMode ? 'Close selected apps' : 'Run this action'
                         : 'Approval required'}
-              </motion.button>
+              </motion.button>}
             </div>
           </motion.div>
         </div>, document.body

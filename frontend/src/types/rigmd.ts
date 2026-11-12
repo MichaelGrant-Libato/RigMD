@@ -30,7 +30,7 @@ export interface AgentHardwareSnapshot {
   deviceName: string;
   deviceType?: string;
   activePowerPlan?: string;
-  connectedDisplays?: number;
+  connectedDisplays?: number | null;
   presence?: HardwarePresenceProbe | null;
   battery?: {
     isCharging: boolean;
@@ -104,8 +104,8 @@ export interface AgentHardwareSnapshot {
     totalGb: number;
     usagePercent: number;
     speedMtps?: number;
-    slotsUsed?: number;
-    slotsTotal?: number;
+    slotsUsed?: number | null;
+    slotsTotal?: number | null;
     formFactor?: string;
     hardwareReservedMb?: number;
     committedGb?: number;
@@ -195,7 +195,7 @@ export interface HardwareStats {
   device_name: string;
   device_type?: string;
   active_power_plan?: string;
-  connected_displays?: number;
+  connected_displays?: number | null;
   battery?: {
     is_charging: boolean;
     charge_percent: number;
@@ -301,8 +301,8 @@ export interface HardwareStats {
     used_gb: number | null;
     usage_percent: number | null;
     speed_mtps?: number;
-    slots_used?: number;
-    slots_total?: number;
+    slots_used?: number | null;
+    slots_total?: number | null;
     form_factor?: string;
     hardware_reserved_mb?: number;
     committed_gb?: number;

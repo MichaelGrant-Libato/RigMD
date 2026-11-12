@@ -28,7 +28,9 @@ export function appSpeedSummary(records: PerformanceRecord[], context: string) {
       .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
     const eligible = attempts.filter(row => targetFor(row) !== null);
     const latest = eligible[0] ?? null;
-    return { ...task, latest, latestAttempt: attempts[0] ?? null, measured: eligible.length,
+    const description = task.operation === 'startup.desktop' && (latest ?? attempts[0])?.mode === 'essential_home'
+      ? 'From starting the app until Home essential readings are ready. Saved-check summary and full inventory load separately.' : task.description;
+    return { ...task, description, latest, latestAttempt: attempts[0] ?? null, measured: eligible.length,
       withinTarget: eligible.filter(row => row.durationMs <= task.targetMs).length,
       overTarget: eligible.filter(row => row.durationMs > task.targetMs).length,
       status: latest ? latest.durationMs <= task.targetMs ? 'within' : 'over' : 'unmeasured',

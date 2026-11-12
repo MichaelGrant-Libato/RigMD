@@ -295,3 +295,46 @@ test('unsupported or rejected rich clipboard falls back to readable text and rep
   }
   await assert.rejects(copyReport(document, { writeText: async () => { throw Error('Denied'); } }, FakeClipboardItem), /Denied/);
 });
+
+test('action completion, saved process observations and later readings remain separate in every export', () => {
+  const selected = {...original, resolution_status: 'resolved', resolution_checked_at: time,
+    resolution_proof: [{metric_id: 'memory_usage', label: 'Working memory', value: '70.8%', status: 'normal'}],
+    last_action_summary: 'The approved action finished.'};
+  const actionHistory = {runs: [{run_id: 'run-one', status: 'Completed', created_at: time, completed_at: time,
+    attempts: [{action_code: 'close_selected_app', created_at: time, verification_status: 'Unknown',
+      execution_summary: 'Normal close requests for Test Browser and Test Chat.',
+      proof: [{label: 'Test Browser', before: '22 processes', after: '10 processes remained',
+        status: 'still_running', meaning: 'Saved observation at action time.'}]}]}]};
+  const before = JSON.stringify({selected, actionHistory});
+  const document = documentReport({selectedSession: selected, actionHistory});
+  for (const output of [reportDocumentText(document), buildReportHtml(document)]) {
+    assert.match(output, /Choose apps to close/);
+    assert.match(output, /Completed/); assert.match(output, /Could not verify/);
+    assert.match(output, /10 processes remained/); assert.match(output, /70.8%/);
+    assert.match(output, /Later readings do not change these saved action observations/);
+    assert.doesNotMatch(output, /The approved action finished/);
+  }
+  assert.equal(JSON.stringify({selected, actionHistory}), before);
+});
+test('unavailable action history is explicit, including without a legacy summary', () => {
+  for (const selectedSession of [original, {...original, last_action_summary: 'Old saved summary'}]) {
+    const text = reportDocumentText(documentReport({selectedSession, actionHistory: {runs: [], unavailable: true}}));
+    assert.match(text, /Detailed action history is unavailable/);
+    assert.doesNotMatch(text, /Action verification.*Issue no longer detected/);
+  }
+});
+test('stored action evidence is escaped in HTML and preserved in plain text', () => {
+  const hostile = '<script>alert("test")</script>';
+  const document = documentReport({actionHistory: {runs: [{run_id: 'run', status: 'Failed', created_at: time,
+    attempts: [{action_code: 'flush_dns_cache', created_at: time, verification_status: null,
+      execution_summary: hostile, proof: [{label: hostile, after: hostile}]}]}]}});
+  assert.ok(reportDocumentText(document).includes(hostile));
+  assert.ok(buildReportHtml(document).includes(escapeReportHtml(hostile)));
+  assert.doesNotMatch(buildReportHtml(document), /<script>/);
+});
+test('unfinished or legacy action runs never invent completion or verification', () => {
+  const document = documentReport({actionHistory: {runs: [{run_id: 'run', status: 'Running', created_at: 'invalid', attempts: []}]}});
+  const text = reportDocumentText(document);
+  assert.match(text, /Running/); assert.match(text, /Run finished.*Not available/);
+  assert.match(text, /Detailed action attempts were not recorded/);
+});

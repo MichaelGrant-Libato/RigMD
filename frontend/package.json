@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.2.20",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,11 @@
     "test:ui-data": "node --test tests/storageTelemetry.test.mjs",
     "preview": "vite preview"
   },
+
+  "overrides": {
+  "minimatch@^10": "11.0.1"
+  },
+
   "dependencies": {
     "@microsoft/signalr": "^10.0.11",
     "@supabase/supabase-js": "^2.116.0",

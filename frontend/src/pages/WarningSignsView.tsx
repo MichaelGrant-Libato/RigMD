@@ -1,5 +1,5 @@
 import { plainDiagnosticText, friendlyActionCategory } from '../lib/diagnosticLanguage';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   AlertTriangle,
@@ -7,12 +7,15 @@ import {
   FileText,
   Info,
   Search,
+  RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
+import WarningCheckLinks from '../components/WarningCheckLinks';
+import DiagnosticSessionDetailView from './DiagnosticSessionDetailView';
 import FilterDropdown from '../components/FilterDropdown';
-import { hoverLift, buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
+import { hoverLift, cardFadeUp, cardTransition, pageFade, pageTransition, staggerContainer } from '../lib/motion';
 import { apiGet } from '../lib/api';
 
 interface WarningSummary {
@@ -121,7 +124,7 @@ function getAlertTone(counts: ReturnType<typeof getSeverityCounts>) {
   if (counts.escalate > 0) {
     return {
       tone: 'danger' as const,
-      title: 'Critical warning signs observed in recent sessions',
+      title: 'Critical warning signs recorded in saved checks',
       description: 'Review Escalate items first, then follow the recommended actions below.',
       iconClassName: 'text-red-300',
     };
@@ -131,7 +134,7 @@ function getAlertTone(counts: ReturnType<typeof getSeverityCounts>) {
     return {
       tone: 'warning' as const,
       title: 'Warning signs need review',
-      description: 'Troubleshoot items were observed recently. Check the recommended actions before they repeat.',
+      description: 'Troubleshoot items were recorded in saved checks. Check the recommended actions before they repeat.',
       iconClassName: 'text-amber-300',
     };
   }
@@ -147,7 +150,7 @@ function getAlertTone(counts: ReturnType<typeof getSeverityCounts>) {
 
   return {
     tone: 'info' as const,
-    title: 'No warning signs observed recently',
+    title: 'No warning signs recorded in saved checks',
     description: 'This reference guide is ready. Observed warning signs will be highlighted after diagnoses are saved.',
     iconClassName: 'text-cyan-300',
   };
@@ -318,34 +321,14 @@ function ObservedToggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <motion.button
-      type="button"
+    <button type="button" role="switch" aria-checked={checked} aria-label="Observed Only"
       onClick={() => onChange(!checked)}
-      whileTap={buttonTap}
-      className={`flex shrink-0 items-center gap-3 rounded-xl border px-4 py-2 text-sm font-semibold transition ${
-        checked
-          ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200'
-          : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-400 hover:border-[#2b5261] hover:bg-[var(--rigmd-card-hover)] hover:text-cyan-300'
-      }`}
-    >
-      <span
-        className={`flex h-5 w-9 items-center rounded-full border p-0.5 transition ${
-          checked
-            ? 'border-cyan-500/60 bg-cyan-500/20'
-            : 'border-slate-600 bg-[var(--rigmd-sidebar)]'
-        }`}
-      >
-        <motion.span
-          className={`h-3.5 w-3.5 rounded-full transition ${
-            checked ? 'translate-x-4 bg-cyan-400' : 'translate-x-0 bg-slate-500'
-          }`}
-          animate={{ x: checked ? 16 : 0 }}
-          transition={{ duration: 0.18 }}
-        />
+      className={`inline-flex min-h-11 shrink-0 items-center gap-3 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 ${checked ? 'border-cyan-300/55 bg-[#12343a] text-cyan-200' : 'border-[var(--rigmd-border)] bg-[var(--rigmd-card)] text-slate-300'}`}>
+      <span aria-hidden="true" style={{ width: 40, height: 24 }} className={`relative inline-block shrink-0 overflow-hidden rounded-full border ${checked ? 'border-cyan-500/60 bg-cyan-500/20' : 'border-slate-600 bg-[var(--rigmd-sidebar)]'}`}>
+        <span style={{ width: 16, height: 16, left: checked ? 19 : 3, top: 3 }} className={`absolute rounded-full motion-safe:transition-[left] motion-safe:duration-150 ${checked ? 'bg-cyan-300' : 'bg-slate-400'}`} />
       </span>
-
-      Observed Only
-    </motion.button>
+      <span>Observed Only</span><span aria-hidden="true" className="text-xs opacity-80">{checked ? 'On' : 'Off'}</span>
+    </button>
   );
 }
 
@@ -380,21 +363,19 @@ function friendlyAction(action: string) {
   return action;
 }
 
-function WarningSignCard({ row }: { row: WarningSignRow }) {
+function WarningSignCard({ row, onOpenSession, observationsAvailable }: { row: WarningSignRow; onOpenSession: (id: string) => void; observationsAvailable: boolean }) {
+  const [showChecks, setShowChecks] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
 
   return (
-    <motion.button
-      type="button"
+    <motion.section
       variants={cardFadeUp}
       whileHover={hoverLift}
       transition={{ duration: 0.18 }}
-      aria-expanded={expanded}
-      onClick={() => setExpanded(!expanded)}
-      className={`row-span-2 grid h-full w-full grid-rows-subgrid gap-0 overflow-hidden rounded-xl border bg-[var(--rigmd-card)] text-left transition-colors duration-200 hover:border-cyan-400/50 hover:bg-[var(--rigmd-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 ${expanded ? 'border-cyan-400/50' : 'border-[var(--rigmd-border)]'}`}
+      className={`flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border bg-[var(--rigmd-card)] text-left transition-colors duration-200 hover:border-cyan-400/50 hover:bg-[var(--rigmd-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 ${expanded ? 'border-cyan-400/50' : 'border-[var(--rigmd-border)]'}`}
     >
-      <span className="flex min-h-[184px] w-full flex-col p-5">
+      <button type="button" aria-expanded={expanded} aria-label={`${expanded ? 'Hide' : 'View'} details: ${plainDiagnosticText(row.warning_sign)}`} onClick={() => setExpanded(!expanded)} className="flex min-h-[184px] w-full flex-col p-5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-300">
         <span className="flex min-h-8 items-start justify-between gap-3">
           <span className="min-w-0 text-base font-bold text-white">{plainDiagnosticText(row.warning_sign)}</span>
           <ActionBadge action={row.action} />
@@ -412,7 +393,7 @@ function WarningSignCard({ row }: { row: WarningSignRow }) {
             <ChevronDown size={16} className={`transition-transform duration-300 motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} />
           </span>
         </span>
-      </span>
+      </button>
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.span
@@ -435,45 +416,64 @@ function WarningSignCard({ row }: { row: WarningSignRow }) {
           </motion.span>
         )}
       </AnimatePresence>
-    </motion.button>
+      {row.observed && observationsAvailable && <div className="border-t border-[var(--rigmd-border)] px-5 py-3">
+        <button type="button" aria-expanded={showChecks} onClick={() => setShowChecks(value => !value)} className="rounded-lg border border-cyan-400/35 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-200">
+          {showChecks ? 'Hide saved checks' : 'View saved checks'}
+        </button>
+      </div>}
+      {showChecks && observationsAvailable && <WarningCheckLinks referenceId={row.id} onOpenSession={onOpenSession} />}
+    </motion.section>
   );
 }
 
-export default function WarningSignsView() {
+export default function WarningSignsView({ onOpenMemoryCheck }: { onOpenMemoryCheck?: () => void } = {}) {
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [data, setData] = useState<WarningSignsResponse>(emptyWarningSigns);
   const [activeCategory, setActiveCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [observedOnly, setObservedOnly] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const request = useRef<AbortController | null>(null);
   const fetchWarningSigns = useCallback(async () => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setIsLoading(true);
-
     try {
-      const response = await apiGet<WarningSignsResponse>(
-        '/api/warning-signs/reference',
-        {
-          params: {
-            category: activeCategory,
-            search,
-            observed_only: observedOnly,
-          },
-        }
-      );
-
-      setData(response.data);
+      // Fetch the whole catalog so filters cannot hide the global warning summary.
+      const response = await apiGet<WarningSignsResponse>('/api/warning-signs/reference', {
+        signal: controller.signal, timeout: 10000,
+        params: { category: 'all', search: '', observed_only: false },
+      });
+      if (controller.signal.aborted) return;
+      const next = response.data;
+      const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+      if (!next || !Array.isArray(next.categories) || !next.categories.every(value => typeof value === 'string') ||
+          !next.summary || ![next.summary.observed_warning_signs, next.summary.total_observed_occurrences, next.summary.total_reference_items].every(count) ||
+          !Array.isArray(next.warning_signs) || !next.warning_signs.every(row => row &&
+            [row.id, row.warning_sign, row.meaning, row.threshold, row.action, row.category].every(value => typeof value === 'string') &&
+            Array.isArray(row.keywords) && row.keywords.every(value => typeof value === 'string') && typeof row.observed === 'boolean' && count(row.observed_count))) {
+        throw new Error('Saved warning observations could not be verified.');
+      }
+      setData(next);
       setLoadError(null);
     } catch {
+      if (controller.signal.aborted) return;
       setData(emptyWarningSigns);
-      setLoadError('Warning signs data is not available yet.');
+      setLoadError('Saved warning observations could not be loaded. Try Refresh alerts.');
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
-  }, [activeCategory, search, observedOnly]);
+  }, []);
 
   useEffect(() => {
-    fetchWarningSigns();
+    void fetchWarningSigns();
+    const refreshIfVisible = () => { if (document.visibilityState !== 'hidden') void fetchWarningSigns(); };
+    const timer = window.setInterval(refreshIfVisible, 30000);
+    window.addEventListener('focus', refreshIfVisible);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refreshIfVisible); request.current?.abort(); };
   }, [fetchWarningSigns]);
 
   const categories = ['all', ...data.categories];
@@ -495,11 +495,16 @@ export default function WarningSignsView() {
     [data.warning_signs]
   );
 
-  const alertTone = getAlertTone(severityCounts);
+  const unavailable = Boolean(loadError || data.database_warning);
+  const alertTone = unavailable ? { tone: 'warning' as const, title: 'Saved warning observations are unavailable', description: 'Refresh to try again. An unavailable reading does not mean there are no warnings.', iconClassName: 'text-amber-300' }
+    : isLoading ? { tone: 'info' as const, title: 'Loading saved warning observations…', description: 'Waiting for the saved checks. No absence-of-warning claim is made while loading.', iconClassName: 'text-cyan-300' }
+    : getAlertTone(severityCounts);
   const hasActiveFilters =
     activeCategory !== 'all' ||
     search.trim().length > 0 ||
     observedOnly;
+
+  if (selectedSessionId) return <DiagnosticSessionDetailView sessionId={selectedSessionId} onOpenMemoryCheck={onOpenMemoryCheck} onOpenSession={setSelectedSessionId} onBack={() => { setSelectedSessionId(null); void fetchWarningSigns(); }} backLabel="Back to Alerts" />;
 
   return (
     <>
@@ -523,7 +528,7 @@ export default function WarningSignsView() {
             title={alertTone.title}
             description={alertTone.description}
           >
-            <SeverityBreakdown counts={severityCounts} />
+            {!unavailable && !isLoading && <SeverityBreakdown counts={severityCounts} />}
           </AlertCard>
 
           <details className="group rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] px-5 py-4">
@@ -533,18 +538,16 @@ export default function WarningSignsView() {
               <ChevronDown size={16} className="ml-auto shrink-0 self-center text-slate-400 transition-transform duration-300 group-open:rotate-180 motion-reduce:transition-none" />
             </summary>
             <p className="mt-3 pl-6 text-sm leading-relaxed text-slate-400">
-              Warning signs suggest a possible problem. Follow the suggested step and check again if it continues.
+              Alerts combines a fixed reference guide with warning evidence from your saved checks. It refreshes when opened, every 30 seconds while visible, on window focus, or when you choose Refresh alerts. These are historical observations, including earlier resolved checks; they do not establish a current fault or confirm a repair. Normal and unavailable measurements are not warning evidence.
             </p>
           </details>
 
-          {(data.database_warning || loadError) && (
-            <AlertCard
-              icon={<AlertTriangle size={18} className="text-amber-300" />}
-              tone="warning"
-              title="Warning signs data is not available yet."
-              description="Check your backend or database connection."
-            />
-          )}
+          <div className="flex justify-end">
+            <button type="button" onClick={() => { void fetchWarningSigns(); }} disabled={isLoading}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-400/30 px-4 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-50">
+              <RefreshCw size={16} aria-hidden="true" className={isLoading ? 'motion-safe:animate-spin' : ''} />Refresh alerts
+            </button>
+          </div>
 
           <section className="rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -568,7 +571,7 @@ export default function WarningSignsView() {
           </section>
 
           <section className="overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[#101821]">
-            <div className="flex items-center justify-between gap-4 border-b border-[var(--rigmd-border)] px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--rigmd-border)] px-5 py-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle size={15} className="text-slate-400" />
                 <h3 className="font-bold uppercase tracking-wider text-white">
@@ -597,7 +600,7 @@ export default function WarningSignsView() {
             ) : visibleWarningSigns.length === 0 ? (
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={`${loadError ? 'error' : hasActiveFilters ? 'filtered' : 'empty'}-${observedOnly}`}
+                  key={`${unavailable ? 'error' : hasActiveFilters ? 'filtered' : 'empty'}-${observedOnly}`}
                   variants={cardFadeUp}
                   initial="hidden"
                   animate="visible"
@@ -607,19 +610,19 @@ export default function WarningSignsView() {
                 >
                 <FileText size={42} className="mb-4 text-slate-600" />
                 <h3 className="text-lg font-bold text-white">
-                  {loadError
-                    ? 'Warning signs data is not available yet.'
-                    : observedOnly && observedRows.length === 0
-                      ? 'No observed warning signs yet.'
+                  {unavailable
+                    ? 'Saved warning observations are unavailable.'
+                    : observedOnly && observedRows.length === 0 && activeCategory === 'all' && !search.trim()
+                      ? 'No warning signs recorded in saved checks.'
                       : hasActiveFilters
                         ? 'No warning signs match your filters.'
                         : 'No warning signs available.'}
                 </h3>
                 <p className="mt-2 max-w-md text-sm text-slate-500">
-                  {loadError
-                    ? 'Check your backend or database connection.'
-                    : observedOnly && observedRows.length === 0
-                      ? 'Run a diagnosis to check for warning indicators.'
+                  {unavailable
+                    ? 'Choose Refresh alerts to try again.'
+                    : observedOnly && observedRows.length === 0 && activeCategory === 'all' && !search.trim()
+                      ? 'Run a device check to collect evidence. This is not a clean bill of health.'
                       : hasActiveFilters
                         ? 'Try clearing the search or selecting All.'
                         : 'Warning signs will appear here once the reference data is loaded.'}
@@ -628,7 +631,7 @@ export default function WarningSignsView() {
               </AnimatePresence>
             ) : (
               <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid gap-3 p-4 sm:grid-cols-2">
-                {visibleWarningSigns.map((row) => <WarningSignCard key={row.id} row={row} />)}
+                {visibleWarningSigns.map((row) => <WarningSignCard key={row.id} row={row} onOpenSession={setSelectedSessionId} observationsAvailable={!unavailable} />)}
               </motion.div>
             )}
           </section>

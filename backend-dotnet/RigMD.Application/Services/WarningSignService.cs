@@ -1,4 +1,6 @@
 using RigMD.Application.Models;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace RigMD.Application.Services;
 
@@ -224,6 +226,62 @@ public class WarningSignService
                 "startup delay",
                 "startup slow"
             ]
+        },
+        new()
+        {
+            Id = "WS-011", WarningSign = "High Memory Use", Category = "Memory", Action = "Maintain",
+            Meaning = "A saved check flagged physical memory use for review. This does not establish a memory leak or faulty RAM.",
+            Threshold = "A supported memory-use reading was saved with a warning status.",
+            Keywords = ["memory usage", "RAM usage"]
+        },
+        new()
+        {
+            Id = "WS-012", WarningSign = "High Processor Activity", Category = "Performance", Action = "Monitor",
+            Meaning = "A saved check flagged processor activity. High activity can be expected for the workload and does not establish processor damage.",
+            Threshold = "A supported processor-activity reading was saved with a warning status.",
+            Keywords = ["CPU usage", "processor activity"]
+        },
+        new()
+        {
+            Id = "WS-013", WarningSign = "Elevated Storage Space Use", Category = "Storage", Action = "Maintain",
+            Meaning = "A saved check flagged used storage capacity. Space use is not drive health, disk activity or proof of drive failure.",
+            Threshold = "A supported storage-capacity reading was saved with a warning status.",
+            Keywords = ["storage space", "disk capacity"]
+        },
+        new()
+        {
+            Id = "WS-014", WarningSign = "Network Check Warning", Category = "Network", Action = "Troubleshoot",
+            Meaning = "A saved network check flagged configuration, lookup, signal or connection-test evidence. One failed test does not establish an internet outage.",
+            Threshold = "A supported network reading was saved with a warning status.",
+            Keywords = ["network", "DNS", "latency", "packet loss"]
+        },
+        new()
+        {
+            Id = "WS-015", WarningSign = "Device Manager Error Code", Category = "Devices / Drivers", Action = "Troubleshoot",
+            Meaning = "A saved check recorded a device status error. Review the exact code; it does not by itself establish a driver conflict or hardware fault.",
+            Threshold = "A supported device-error reading was saved with a warning status.",
+            Keywords = ["device status", "Device Manager"]
+        },
+        new()
+        {
+            Id = "WS-016", WarningSign = "Application Memory Warning", Category = "Memory", Action = "Troubleshoot",
+            Meaning = "A saved process inspection reported unusual application memory behavior. This is separate from total physical memory use and does not confirm a leak.",
+            Threshold = "An application-memory warning was saved by a supported check.",
+            Keywords = ["application memory", "process memory"]
+        },
+        new()
+        {
+            Id = "WS-017", WarningSign = "Low Battery Charge", Category = "Power", Action = "Maintain",
+            Meaning = "A saved check flagged battery charge. Charge alone does not establish battery wear, rapid drain or a faulty battery.",
+            Threshold = "A supported battery-charge reading was saved with a warning status.",
+            Keywords = ["battery charge", "power"]
+        },
+        new()
+        {
+            Id = "WS-018", WarningSign = "System Crash or Unexpected Restart Records", Category = "Crash / Stability", Action = "Troubleshoot",
+            Meaning = "A saved event-log check found system crash or unexpected restart records. These do not establish a blue screen, a cause or a fault happening now.",
+            Threshold = "A supported system-event history check was saved with a warning status.",
+            Keywords = ["system event", "crash history", "unexpected restart"]
         }
     };
 
@@ -233,10 +291,9 @@ public class WarningSignService
         string search = "",
         bool observedOnly = false)
     {
-        var observedList =
-            observedTexts
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .ToList();
+        // Each entry represents one saved session. Repeated text in different sessions
+        // must remain separate; multiple references/aliases in one session count once.
+        var observedSessions = observedTexts.Select(GetLegacyReferenceIds).ToArray();
 
         var categoryFilter =
             NormalizeText(category);
@@ -249,11 +306,7 @@ public class WarningSignService
 
         foreach (var reference in References)
         {
-            var observedCount =
-                GetObservedCount(
-                    reference,
-                    observedList
-                );
+            var observedCount = observedSessions.Count(ids => ids.Contains(reference.Id));
 
             var row =
                 new WarningSignRowDto
@@ -367,52 +420,106 @@ public class WarningSignService
         .warning_signs;
     }
 
-    private static int GetObservedCount(
-        WarningReference reference,
-        IEnumerable<string> observedTexts)
+    /// <summary>
+    /// Historical warning references for one saved check, never its current resolution.
+    /// Read original proof so existing automatic checks work without a backfill/write.
+    /// Labels, meanings, diagnosis text and search keywords are not warning evidence.
+    /// </summary>
+    public static string[] GetSessionReferenceIds(string? legacyWarningSigns, string? savedProof)
     {
-        var warningName =
-            NormalizeText(
-                reference.WarningSign
-            );
-
-        var keywords =
-            reference.Keywords
-                .Select(NormalizeText)
-                .ToArray();
-
-        var count = 0;
-
-        foreach (var observed in observedTexts)
+        var ids = GetLegacyReferenceIds(legacyWarningSigns);
+        if (!string.IsNullOrWhiteSpace(savedProof))
         {
-            var observedValue =
-                NormalizeText(observed);
-
-            if (string.IsNullOrWhiteSpace(observedValue))
-                continue;
-
-            if (
-                warningName.Contains(observedValue) ||
-                observedValue.Contains(warningName)
-            )
+            try
             {
-                count++;
-                continue;
+                using var document = JsonDocument.Parse(savedProof);
+                if (document.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in document.RootElement.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.Object) continue;
+                        var status = NormalizeText(ReadString(item, "status", "Status"));
+                        if (status is not ("high" or "elevated" or "warning" or "critical" or "still needs attention")) continue;
+                        var kind = NormalizeText(ReadString(item, "evidence_kind", "evidenceKind", "EvidenceKind"));
+                        // Older saved checks may lack evidence_kind. Explicit unavailable
+                        // or contextual evidence must never become a warning.
+                        if (kind.Length > 0 && kind is not ("measurement" or "event_log" or "reported_status")) continue;
+                        var id = ReferenceForMetric(NormalizeText(ReadString(item, "metric_id", "metricId", "MetricId")));
+                        if (id != null) ids.Add(id);
+                    }
+                }
             }
-
-            if (
-                keywords.Any(
-                    keyword =>
-                        !string.IsNullOrWhiteSpace(keyword) &&
-                        observedValue.Contains(keyword)
-                )
-            )
+            catch (JsonException)
             {
-                count++;
+                // Damaged/legacy proof cannot justify a warning; known legacy entries still can.
             }
         }
+        return References.Where(reference => ids.Contains(reference.Id)).Select(reference => reference.Id).ToArray();
+    }
 
-        return count;
+    private static string? ReferenceForMetric(string metric) => metric switch
+    {
+        "memory_usage" => "WS-011",
+        "cpu_usage" => "WS-012",
+        "storage_usage" => "WS-013",
+        "storage_health" => "WS-006",
+        "cpu_temperature" or "gpu_temperature" or "cpu_throttling" => "WS-007",
+        "application_crash_history" => "WS-009",
+        "system_crash_history" => "WS-018",
+        "memory_app_warning" => "WS-016",
+        "battery_charge" => "WS-017",
+        "network_connectivity" or "network_adapter" or "network_address" or "network_gateway" or
+            "network_dns_config" or "network_dns" or "network_latency" or "network_loss" or "network_signal" => "WS-014",
+        _ when Regex.IsMatch(metric, @"^storage_usage_[a-z]:\\?$", RegexOptions.CultureInvariant) => "WS-013",
+        // Numeric IDs were used by older checks; identity is not used here to infer
+        // a continuing fault, only to record that the check reported a device error.
+        _ when Regex.IsMatch(metric, @"^device_error_(?:[0-9a-f]{24}|[0-9]+)$", RegexOptions.CultureInvariant) => "WS-015",
+        _ => null
+    };
+
+    private static string ReadString(JsonElement item, params string[] names)
+    {
+        foreach (var name in names)
+            if (item.TryGetProperty(name, out var value))
+                return value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
+        return "";
+    }
+
+    private static HashSet<string> GetLegacyReferenceIds(string? raw)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in SplitWarningSigns(raw))
+        {
+            var phrase = Regex.Replace(NormalizeText(value).TrimEnd('.', '!'), @"\s+", " ");
+            // Exact names/IDs and an explicit phrase allowlist only. In particular,
+            // "No blue screen", "SMART OK", "startup delay" and arbitrary prose
+            // cannot acquire extra warnings through substring/keyword matching.
+            var known = References.FirstOrDefault(reference =>
+                NormalizeText(reference.Id) == phrase || NormalizeText(reference.WarningSign) == phrase);
+            var id = known?.Id ?? (phrase switch
+            {
+                "stuttering" or "stutter" or "freezing" or "system is stuttering" or "system is freezing" or
+                    "system freezing" or "slow system" or "app hangs" or "system hangs" => "WS-001",
+                "blue screen" or "bsod" or "stop code" or "blue screen crash" or "system crash" or
+                    "unexpected restart" or "critical crash" => "WS-002",
+                "display driver warning" or "display driver error" or "screen flicker" or "screen flickering" or
+                    "flickering" or "visual artifacts" or "screen tearing" or "black screen recovery" or "visual glitch" => "WS-003",
+                "no signal" => "WS-004",
+                "no boot device" or "startup repair" or "startup repair loop" or "boot loop" or
+                    "automatic repair" or "automatic repair loop" or "won't start" => "WS-005",
+                "smart caution" or "smart warning" or "smart failure" or "smart failed" or "smart bad" or
+                    "storage warning" or "disk health warning" or "file access error" or "file access errors" or
+                    "access denied" or "save error" or "file not found" => "WS-006",
+                "loud fan" or "loud fan noise" or "fan noise" or "overheat" or "overheating" or
+                    "thermal throttling" or "high temperature" => "WS-007",
+                "windows update failed" or "update failed" or "update failure" => "WS-008",
+                "app crash" or "application crash" or "program crash" or "app crashes" or "program crashes" => "WS-009",
+                "slow boot" or "startup delay" or "startup slow" => "WS-010",
+                _ => null
+            });
+            if (id != null) ids.Add(id);
+        }
+        return ids;
     }
 
     public static string[] SplitWarningSigns(
@@ -428,7 +535,9 @@ public class WarningSignService
                 '\n',
                 StringSplitOptions.RemoveEmptyEntries |
                 StringSplitOptions.TrimEntries
-            );
+            )
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string NormalizeText(

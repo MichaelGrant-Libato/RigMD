@@ -53,7 +53,7 @@ public interface IDiagnosticSessionRepository
     /// </summary>
     Task<DiagnosticOutput?> GetDiagnosticOutputAsync(Guid sessionId);
 
-    /// <summary>Updates the resolution outcome fields on an existing session.</summary>
+    /// <summary>Appends a durable follow-up observation and updates the latest outcome on an owned session.</summary>
     Task<bool> UpdateResolutionAsync(
         Guid sessionId,
         string resolutionStatus,
@@ -85,6 +85,9 @@ public interface IDiagnosticSessionRepository
 
     /// <summary>Returns all observed warning sign text values across sessions.</summary>
     Task<IEnumerable<string>> GetObservedWarningTextsAsync();
+
+    /// <summary>Returns paged saved checks behind a warning reference, using original evidence and current-client isolation.</summary>
+    Task<WarningChecksResponseDto> GetWarningChecksAsync(string referenceId, int offset, int limit) => throw new NotSupportedException();
 
     /// <summary>Returns remediation run history for a given session ID.</summary>
     Task<IReadOnlyList<RemediationRunDto>> GetRemediationHistoryAsync(Guid sessionId);

@@ -4,6 +4,24 @@ namespace RigMD.Tests.Api;
 
 public class RemediationApprovalStoreTests
 {
+    [Fact]
+    public void ApprovalReturnsOnlyItsOwnServerContextOnce()
+    {
+        var store = new RemediationApprovalStore(TimeProvider.System); var context = new object();
+        var approval = store.Issue(Scope(), context);
+        Assert.True(store.TryConsume(approval.Token, Scope(), out var bound)); Assert.Same(context, bound);
+        Assert.False(store.TryConsume(approval.Token, Scope(), out bound)); Assert.Null(bound);
+        approval = store.Issue(Scope(), context);
+        Assert.False(store.TryConsume(approval.Token, Scope() with { ToolName = "other" }, out bound)); Assert.Null(bound);
+    }
+
+    [Fact]
+    public void ApprovalContextIsNeverIncludedInJson()
+    {
+        var preview = new RigMD.Application.Models.ToolDryRunPreview { ApprovalContext = new { PrivateFilePath = "secret-path" } };
+        var json = System.Text.Json.JsonSerializer.Serialize(preview);
+        Assert.DoesNotContain("secret-path", json); Assert.DoesNotContain("ApprovalContext", json);
+    }
     private static readonly Guid SessionId = Guid.NewGuid();
     private static RemediationApprovalStore.Scope Scope() =>
         RemediationApprovalStore.CreateScope("remediation", SessionId, "clear_temp_files", "{\"target\":\"original\"}");

@@ -23,6 +23,7 @@ import { getLocalApiToken } from '../lib/localApiSession';
 import { formatTemperature, validTemperature } from '../lib/temperatureTelemetry';
 import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
 import { storageReviewStatus } from '../lib/storageTelemetry';
+import { desktopDisplayCount } from '../lib/hardwareInventory';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
 import type { HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
@@ -459,7 +460,7 @@ export default function SystemProfileView({
                     ['Total Storage Space', stats.storage_drives?.map(d => `${d.model} (${formatStorageSize(d.size_gb)})`).join(', ') || 'Not available'],
                     ['System Storage Breakdown', stats.storage_drives?.flatMap(d => d.volumes?.map(v => `${v.drive} (${formatStorageSize(v.total_gb)})`)).join(', ') || 'Not available'],
                     ['Windows version', cleanValue(stats.os_version)],
-                    ['Connected displays', stats.connected_displays ? `${stats.connected_displays}` : '1'],
+                    ['Active desktop screens', desktopDisplayCount(stats.connected_displays)],
                     ['Graphics driver', cleanValue(stats.gpu.driver)],
                     ['Motherboard model', stats.chipset_driver === 'Standard/Auto-Managed' ? 'Not available' : cleanValue(stats.chipset_driver).replace(/\s*\(Auto-Managed\)$/, '')],
                     ['Time since Windows installation (estimate)', cleanValue(stats.system_age).replace(/^~/, 'About ').replace(/\b1 years\b/, '1 year')],

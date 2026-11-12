@@ -1,8 +1,18 @@
 using Microsoft.AspNetCore.SignalR;
+using RigMD.Api.Services;
 
 namespace RigMD.Api.Hubs;
 
-public class TelemetryHub : Hub
+public sealed class TelemetryHub(TelemetrySubscriptions subscriptions) : Hub
 {
-    // Clients just subscribe and listen to "ReceiveTelemetry"
+    public override async Task OnConnectedAsync()
+    {
+        await base.OnConnectedAsync();
+        subscriptions.Add(Context.ConnectionId);
+    }
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        subscriptions.Remove(Context.ConnectionId);
+        await base.OnDisconnectedAsync(exception);
+    }
 }

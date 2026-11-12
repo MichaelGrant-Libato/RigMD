@@ -1,5 +1,8 @@
 namespace RigMD.Application.Models;
 
+public sealed record WarningCheckDto(string session_id, DateTimeOffset created_at, string action_category, string resolution_status);
+public sealed record WarningChecksResponseDto(string reference_id, int total_checks, int offset, int limit, IReadOnlyList<WarningCheckDto> checks);
+
 public class WarningSummaryDto
 {
     public int observed_warning_signs { get; set; }

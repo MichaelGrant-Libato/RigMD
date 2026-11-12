@@ -72,6 +72,7 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
 
         var gpu = _gpuProvider.GetGpuStats();
         var displays = _displayProvider.GetDisplays();
+        var displayCount = _displayProvider.GetConnectedDisplays();
 
         double? gpuLoadPercent = null;
         double? vramUsedGb = null;
@@ -110,13 +111,13 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
                 coreLoadPercent = gpuLoadPercent.HasValue ? Math.Round(gpuLoadPercent.Value, 1) : (double?)null,
                 temperatureCelsius = gpu.TemperatureCelsius
             },
-            connectedDisplaysCount = displays.Count,
+            connectedDisplaysCount = displayCount,
             displays
         };
 
         var tempStr = gpu.TemperatureCelsius.HasValue ? $"{gpu.TemperatureCelsius.Value:F1}°C" : "N/A";
         var summary =
-            $"GPU '{gpu.Name}' ({gpu.Type}, Driver {gpu.Driver} [{gpu.DriverDate}]), VRAM: {gpu.VramGb:F1} GB, Temp: {tempStr}, Connected Displays: {displays.Count}.";
+            $"GPU '{gpu.Name}' ({gpu.Type}, Driver {gpu.Driver} [{gpu.DriverDate}]), VRAM: {gpu.VramGb:F1} GB, Temp: {tempStr}, Active desktop displays: {(displayCount.HasValue ? displayCount.Value.ToString() : "Unavailable")}. Adapter configuration records are not a screen count.";
 
         return Task.FromResult(new AgentToolExecutionResult
         {

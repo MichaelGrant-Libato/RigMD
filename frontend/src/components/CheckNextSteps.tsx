@@ -1,12 +1,16 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { openReliabilityMonitor } from '../services/autonomyService';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import FindingSummaryList from './FindingSummaryList';
+import WindowsToolGuide from './WindowsToolGuide';
 import { getActionEligibilityMessage, getCheckNextSteps, getRecommendedFindingSteps, getResultHeading, getShortCheckSummary } from '../lib/checkNextSteps';
 import { crashMetric, getCheckStatus, getOriginalResultStatus, type CheckPresentationInput } from '../lib/checkPresentation';
 import { getCoverageMessage } from '../lib/findingDetails';
 import { getSessionCheckLabel } from '../lib/pastChecksFormatting';
 import { getResultActionAccess } from '../lib/remediationEligibility';
 import { useRemediationEligibility } from '../lib/useRemediationEligibility';
+import { RemediationReviewAccess } from '../lib/remediationReviewAccess';
+import { dnsCacheReviewReason } from '../lib/networkActionReview';
 
 type ResultCheck = CheckPresentationInput & { session_id?: string; resolution_checked_at?: string | null };
 
@@ -14,16 +18,41 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
   check: ResultCheck; checking: boolean; onCheckAgain: () => void; onOpenSession?: (id: string) => void; children?: ReactNode;
 }) {
   const view = getCheckNextSteps(check);
+  const networkReview = /network|dns|internet/i.test(check.diagnosed_category ?? '') ? dnsCacheReviewReason(view.readings) : null;
   const status = view.hasFollowUp ? getCheckStatus(check) : getOriginalResultStatus(check);
   const scope = getSessionCheckLabel(check);
   const recordedAt = view.hasFollowUp ? check.resolution_checked_at : check.proof?.find(row => row.captured_at)?.captured_at;
-  const { eligibility, pending, error, refresh } = useRemediationEligibility(check.session_id, `${check.resolution_checked_at ?? ''}:${check.resolution_status ?? ''}`);
+  const { eligibility, reviewEligibility, pending, error, refresh } = useRemediationEligibility(check.session_id, `${check.resolution_checked_at ?? ''}:${check.resolution_status ?? ''}`);
   const access = getResultActionAccess(check, eligibility);
+  const reviewAccess = getResultActionAccess(check, reviewEligibility);
+  const reviewPermission = {
+    sessionId: check.session_id ?? '',
+    allowed: access.remediation && !checking && !networkReview,
+    message: pending ? 'Rechecking action eligibility. Your review is kept open.' : error
+      ? 'Could not verify action eligibility. Changes are unavailable. Close this review and try again.'
+      : checking ? 'A new check is running. Changes are unavailable until it finishes.' : '',
+  };
+  const [openingReliability, setOpeningReliability] = useState(false);
+  const [reliabilityMessage, setReliabilityMessage] = useState('');
+
+  async function handleReliabilityReview() {
+    setOpeningReliability(true);
+    setReliabilityMessage('');
+
+    try {
+      const result = await openReliabilityMonitor();
+      setReliabilityMessage(result.summary || 'Windows Reliability Monitor request completed.');
+    } catch (error) {
+      setReliabilityMessage(error instanceof Error ? error.message : 'Could not open Windows Reliability Monitor.');
+    } finally {
+      setOpeningReliability(false);
+    }
+  }
   const historical = eligibility?.state === 'superseded';
   const title = historical ? scope : getResultHeading(check);
   const recommendedSteps = getRecommendedFindingSteps(check);
   const crash = Boolean(crashMetric(check));
-  const showGuidance = access.remediation || crash && Boolean(check.session_id) &&
+  const showGuidance = reviewAccess.remediation || crash && Boolean(check.session_id) &&
     (eligibility?.state === 'recheck_required' || eligibility?.state === 'not_indicated');
   return <div className="min-w-0 space-y-5">
     <section aria-label="Result and next steps" data-testid="result-next-steps" className="min-w-0 space-y-4 rounded-2xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card)] p-4 sm:p-5">
@@ -62,9 +91,9 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
         className="space-y-4 border-t border-[var(--rigmd-border)] pt-4">
         <div>
           <h3 className="text-lg font-bold text-cyan-200">Recommended next steps</h3>
-          <p className="mt-1 text-sm text-slate-400">{access.remediation
+          <p className="mt-1 text-sm text-slate-400">{reviewAccess.remediation
             ? 'Start with the guidance for the findings below. Review any proposed change before approving it.'
-            : 'These steps are investigation guidance. Software actions remain unavailable from this result.'}</p>
+            : 'These steps are investigation guidance. Repair actions remain unavailable from this result.'}</p>
         </div>
         {recommendedSteps.length > 0 && <ol className="space-y-3">
           {recommendedSteps.map((step, index) => <li key={`${step.label}-${index}`} className="flex min-w-0 items-start gap-3">
@@ -75,7 +104,14 @@ export default function CheckNextSteps({ check, checking, onCheckAgain, onOpenSe
             </div>
           </li>)}
         </ol>}
-        {access.remediation && children}
+        {networkReview && <p role="status" className="text-sm leading-relaxed text-slate-300">{networkReview}</p>}
+        {reviewAccess.remediation && !networkReview && <RemediationReviewAccess.Provider value={reviewPermission}>{children}</RemediationReviewAccess.Provider>}
+        {crash && <div className="space-y-3 border-t border-[var(--rigmd-border)] pt-4">
+          <h4 className="font-semibold text-white">Review crash details in Windows</h4>
+          <p className="text-sm text-slate-300">Review the affected app, event time and error details. Opening Reliability Monitor does not run a repair or confirm a crash cause.</p>
+          <WindowsToolGuide target="reliability_monitor" onOpen={handleReliabilityReview} busy={openingReliability} disabled={checking || pending} />
+          {reliabilityMessage && <p role="status" className="text-sm text-slate-300">{reliabilityMessage}</p>}
+        </div>}
         {access.remediation && access.recheck && <p className="border-t border-[var(--rigmd-border)] pt-3 text-sm leading-relaxed text-slate-400">
           <strong className="text-slate-200">Check again afterward.</strong> After making a change, use Check again to compare new readings with this result. Completing an action alone does not confirm a repair.
         </p>}

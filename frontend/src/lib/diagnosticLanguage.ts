@@ -127,8 +127,8 @@ export function friendlyToolName(id?: string, fallback?: string): string {
 
 export function getActionExplanation(id?: string) {
   const descriptions: Record<string, [string, string]> = {
-    clear_temp_files: ['Remove temporary files that are not currently in use.', 'This frees storage space. It does not close apps or directly free their working memory.'],
-    clear_user_temp_files: ['Remove temporary files that are not currently in use.', 'This frees storage space, not the working memory used by running apps.'],
+    clear_temp_files: ['Remove only the temporary files included in your approved preview.', 'Files are permanently deleted, without using the Recycle Bin. RigMD cannot restore them. Recheck storage afterward to see the available space. This does not close apps or directly free their working memory.'],
+    clear_user_temp_files: ['Remove only the temporary files included in your approved preview.', 'Files are permanently deleted, without using the Recycle Bin. RigMD cannot restore them. Recheck storage afterward to see the available space.'],
     clear_browser_cache: ['Remove saved website files from browser storage.', 'Websites may need to download these files again. This is not the same as closing browser tabs.'],
     clear_windows_update_cache: ['Clear downloaded Windows Update files.', 'Windows may need to download update files again.'],
     flush_dns_cache: ['Ask Windows to look up website addresses again instead of using saved answers.', 'This may help address-lookup problems, but it does not guarantee that the internet connection will be restored.'],
@@ -142,7 +142,7 @@ export function getActionExplanation(id?: string) {
   const diskCleanup = ['clear_temp_files', 'clear_user_temp_files', 'clear_browser_cache', 'clear_windows_update_cache', 'run_disk_cleanup'].includes(id ?? '');
   const closesApps = ['terminate_processes', 'close_selected_app'].includes(id ?? '');
   return { description, caution, itemsLabel: closesApps ? 'Apps or app parts affected' : diskCleanup ? 'Files affected' : 'Items affected',
-    bytesLabel: diskCleanup ? 'Estimated storage space to recover' : closesApps ? 'Memory used by these apps' : 'Estimated size affected' };
+    bytesLabel: ['clear_temp_files', 'clear_user_temp_files'].includes(id ?? '') ? 'Storage size of files in this preview' : diskCleanup ? 'Estimated storage space to recover' : closesApps ? 'Memory used by these apps' : 'Estimated size affected' };
 }
 
 export function friendlyVerification(value?: string | number | null): string {
@@ -347,7 +347,7 @@ function readSnapshotReadings(tool: string, input: unknown): DiagnosticReading[]
   }
   if (tool === 'inspect_full_device_profile' || tool === 'inspect_gpu_and_displays')
     return [{ label: 'Windows device warnings', value: tool === 'inspect_full_device_profile' ? metric(number(source, 'deviceErrorsCount')) : 'Not included in this check' },
-      { label: 'Connected screens', value: metric(number(source, tool === 'inspect_full_device_profile' ? 'connectedDisplays' : 'connectedDisplaysCount')) }];
+      { label: 'Active desktop screens', value: metric(number(source, tool === 'inspect_full_device_profile' ? 'connectedDisplays' : 'connectedDisplaysCount')) }];
   if (tool === 'query_windows_event_logs') {
     const warning = typeof source.warning === 'string' ? source.warning.trim() : '';
     const count = number(source, 'eventCount');

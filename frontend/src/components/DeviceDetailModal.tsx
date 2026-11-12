@@ -7,6 +7,7 @@ import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
 import { formatTemperature } from '../lib/temperatureTelemetry';
+import { memorySlotSummary } from '../lib/hardwareInventory';
 import type { HardwareStats } from '../types/rigmd';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
@@ -413,8 +414,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   <div><p className="text-xs text-slate-400">In use</p><p className="text-xl text-white">{formatTelemetryValue(latestData ? latestData.RamUsedGb : stats.ram.used_gb, 'GB')}</p></div>
                   <div><p className="text-xs text-slate-400">Available</p><p className="text-xl text-white">{formatTelemetryValue((latestData ? latestData.RamUsedGb : stats.ram.used_gb) == null ? null : stats.ram.total_gb - (latestData ? latestData.RamUsedGb! : stats.ram.used_gb!), 'GB')}</p></div>
                   <div><p className="text-xs text-slate-400">Speed</p><p className="text-xl text-white">{stats.ram.speed_mtps || 0} MT/s</p></div>
-                  <div><p className="text-xs text-slate-400">Slots used</p><p className="text-xl text-white">{stats.ram.slots_used || 0} of {stats.ram.slots_total || 4}</p></div>
-                  <div><p className="text-xs text-slate-400">Form factor</p><p className="text-xl text-white">{stats.ram.form_factor || 'DIMM'}</p></div>
+                  <div><p className="text-xs text-slate-400">Memory slots (Windows report)</p><p className="text-xl text-white">{memorySlotSummary(stats.ram.slots_used, stats.ram.slots_total)}</p><p className="mt-1 text-xs text-slate-400">Some memory may be built into the device. This count does not confirm that you can add or replace RAM.</p></div>
+                  <div><p className="text-xs text-slate-400">Form factor</p><p className="text-xl text-white">{stats.ram.form_factor || 'Unavailable'}</p></div>
                   <div><p className="text-xs text-slate-400">Hardware reserved</p><p className="text-xl text-white">{stats.ram.hardware_reserved_mb || 0} MB</p></div>
                   <div><p className="text-xs text-slate-400">Committed</p><p className="text-xl text-white">{stats.ram.committed_gb || 0} GB</p></div>
                   <div><p className="text-xs text-slate-400">Cached</p><p className="text-xl text-white">{stats.ram.cached_gb || 0} GB</p></div>

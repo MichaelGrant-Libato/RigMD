@@ -3,8 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="RigMD" Height="768" Width="1024" WindowStartupLocation="CenterScreen"
+        Background="#070C12"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
+        <Storyboard x:Key="StartupActivityMotion" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="NativeActivitySegment"
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                             From="-64" To="240" Duration="0:0:1.8" />
+        </Storyboard>
         <Style x:Key="ZoomButton" TargetType="Button">
             <Setter Property="Width" Value="32" />
             <Setter Property="Height" Value="28" />
@@ -56,10 +62,34 @@
                         Click="ZoomIn_Click" />
             </StackPanel>
         </Border>
-        <TextBlock Name="LoadingText" Text="Starting RigMD..."
-                   Grid.Row="1"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   FontSize="20" Foreground="Gray" />
+        <Grid Name="NativeStartupSplash" Grid.Row="1" Background="#070C12"
+              AutomationProperties.Name="Getting RigMD ready">
+            <StackPanel Width="400" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid Width="320" Height="156" HorizontalAlignment="Center" IsHitTestVisible="False">
+                    <Canvas Width="320" Height="156">
+                        <Path Data="M18 54 H62 L82 74 H116 M18 102 H62 L82 82 H116 M204 74 H238 L258 54 H302 M204 82 H238 L258 102 H302 M142 12 V34 M160 12 V34 M178 12 V34 M142 122 V144 M160 122 V144 M178 122 V144" Stroke="#294451" StrokeThickness="1" />
+                        <Rectangle Canvas.Left="116" Canvas.Top="34" Width="88" Height="88"
+                                   RadiusX="12" RadiusY="12" Stroke="#294451" StrokeThickness="1" />
+                        <Path Data="M106 54 H116 M106 66 H116 M106 90 H116 M106 102 H116 M204 54 H214 M204 66 H214 M204 90 H214 M204 102 H214" Stroke="#294451" StrokeThickness="1" />
+                    </Canvas>
+                    <Image Width="64" Height="64" Stretch="Uniform"
+                           Source="pack://application:,,,/RigMD.Desktop;component/Assets/rigmd-logo.png"
+                           AutomationProperties.Name="RigMD logo" />
+                </Grid>
+                <TextBlock Text="RigMD" FontSize="32" FontWeight="SemiBold" Foreground="#F1F5F9"
+                           HorizontalAlignment="Center" Margin="0,16,0,7" />
+                <TextBlock Text="Windows diagnostic support" FontSize="13" Foreground="#91A4B5"
+                           HorizontalAlignment="Center" />
+                <Grid Width="240" Height="2" Background="#1C2D3A" ClipToBounds="True" Margin="0,32,0,16">
+                    <Rectangle Name="NativeActivitySegment" Width="64" Height="2" Fill="#2DD4BF"
+                               HorizontalAlignment="Left" IsHitTestVisible="False">
+                        <Rectangle.RenderTransform><TranslateTransform X="88" /></Rectangle.RenderTransform>
+                    </Rectangle>
+                </Grid>
+                <TextBlock Name="LoadingText" Text="Starting RigMD…" FontSize="13" Foreground="#B2C2CF"
+                           TextAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
         <wv2:WebView2 Name="Browser" Grid.Row="1" Visibility="Collapsed" />
     </Grid>
 </Window>

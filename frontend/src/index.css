@@ -204,7 +204,8 @@ button {
 summary { cursor: pointer; }
 .rigmd-print-report { display: none; }
 @media print {
-  @page { margin: 16mm; }
+  @page { margin: 16mm; background: #fff; }
+  html { color-scheme: light !important; }
   html, body { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; }
   body > :not(.rigmd-print-report) { display: none !important; }
   .rigmd-print-report { display: block; width: 100%; color: #000; background: #fff; }

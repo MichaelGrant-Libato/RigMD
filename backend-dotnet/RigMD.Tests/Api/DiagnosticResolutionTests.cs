@@ -105,6 +105,8 @@ public class DiagnosticResolutionTests
         var response = Assert.IsType<OkObjectResult>(await controller.CheckResolution(id.ToString()));
         var returned = JsonSerializer.SerializeToElement(response.Value);
         Assert.Equal(expectedStatus, returned.GetProperty("resolution_status").GetString());
+        Assert.Equal("complete", returned.GetProperty("follow_up_history_status").GetString());
+        Assert.Single(returned.GetProperty("follow_up_history").EnumerateArray());
         Assert.Contains(returned.GetProperty("resolution_proof").EnumerateArray(),
             p => p.GetProperty("metric_id").GetString() == "memory_usage");
         db.ChangeTracker.Clear();

@@ -713,8 +713,10 @@ function PatternTimelineTable({ rows }: { rows: PatternTimelineRow[] }) {
 
 export default function RecurringPatternsView({
   setActivePage,
+  onOpenMemoryCheck,
 }: {
   setActivePage?: (page: PageKey) => void;
+  onOpenMemoryCheck?: () => void;
 }) {
   const [data, setData] = useState<RecurringResponse>(emptyRecurring);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
@@ -879,7 +881,7 @@ export default function RecurringPatternsView({
   const occurrencesTone = getSummaryCardTone(visibleMetrics.total_occurrences, 'cyan');
 
   if (selectedSessionId) return <DiagnosticSessionDetailView sessionId={selectedSessionId}
-    onOpenSession={setSelectedSessionId} onBack={() => setSelectedSessionId(null)} backLabel="Back to problem timeline" />;
+    onOpenSession={setSelectedSessionId} onOpenMemoryCheck={onOpenMemoryCheck} onBack={() => setSelectedSessionId(null)} backLabel="Back to problem timeline" />;
 
   return (
     <>

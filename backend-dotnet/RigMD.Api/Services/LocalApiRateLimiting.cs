@@ -37,7 +37,11 @@ public static class LocalApiRateLimiting
                 var eligibilityRead = readOnly &&
                     path.Split('/') is ["", "api", "autonomy", var sessionId, "remediation-eligibility"] &&
                     Guid.TryParse(sessionId, out _);
-                var metadataRead = readOnly && (path == "/api/autonomy/settings" || path == "/api/autonomy/tools" || eligibilityRead);
+                var uninstallStatusRead = readOnly && (path == "/api/autonomy/storage-apps/uninstall/operations" ||
+                    path.Split('/') is ["", "api", "autonomy", "storage-apps", "uninstall", "operations", var operationId] && Guid.TryParseExact(operationId, "N", out _));
+                var cleanupStatusRead = readOnly && (path == "/api/autonomy/storage-cleanup/operations" ||
+                    path.Split('/') is ["", "api", "autonomy", "storage-cleanup", "operations", var cleanupId] && Guid.TryParseExact(cleanupId, "N", out _));
+                var metadataRead = readOnly && (path == "/api/autonomy/settings" || path == "/api/autonomy/tools" || eligibilityRead || uninstallStatusRead || cleanupStatusRead);
                 // Navigation must not spend scan/action permits or prevent signing out.
                 var group = path switch
                 {

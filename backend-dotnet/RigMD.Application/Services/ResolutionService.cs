@@ -376,7 +376,7 @@ public class ResolutionService
             var graphicsOnly = parsedComponents.Overlaps(new[] { "gpu", "display" }) &&
                 !parsedComponents.Overlaps(new[] { "drivers", "peripherals", "audio" });
             return CheckDriverAndDisplayResolution(hardware, graphicsOnly,
-                includeMonitors: parsedComponents.Contains("display"));
+                includeMonitors: parsedComponents.Contains("display") || category.Contains("display"));
         }
 
         return CheckSevereResourceResolution(hardware);
@@ -442,12 +442,22 @@ public class ResolutionService
         var graphicsErrors = DeviceErrorAttribution.Select(hardware.DeviceErrors, graphicsOnly: true, includeMonitors: includeMonitors).Count;
         var graphicsOk = graphicsErrors == 0 && gpuTempOk && displaysOk;
 
+        if (includeMonitors && hardware.ConnectedDisplays is not > 0 && driversOk && gpuTempOk)
+            return new ResolutionResultDto
+            {
+                resolution_status = "needs_recheck",
+                resolution_summary = "The active desktop display count could not be verified. This is not proof that a screen is disconnected or repaired.",
+                resolution_proof = [new { metric_id = "display_count", label = "Active desktop displays", value = "Unavailable",
+                    status = "unknown", evidence_kind = "unavailable",
+                    meaning = "Windows did not provide a usable desktop monitor count. A picture, cable or panel test is still separate." }]
+            };
+
         var gpuSummaryValue = gpuTemp.HasValue
             ? $"{hardware.Gpu.Name} ({gpuTemp.Value:0.#}°C, Driver {hardware.Gpu.Driver})"
             : $"{hardware.Gpu.Name} (Driver {hardware.Gpu.Driver})";
 
         var unresolvedSummary = !displaysOk
-            ? "Fresh scan does not detect a connected display; the display issue cannot be marked resolved."
+            ? "The active desktop display count is unavailable; review recorded device or temperature warnings separately."
             : !driversOk && !gpuTempOk
                 ? $"Fresh scan still shows {errCount} device error code(s) for {errorScope} and elevated graphics adapter temperature."
                 : !driversOk
@@ -471,7 +481,9 @@ public class ResolutionService
                     "Graphics adapter",
                     gpuSummaryValue,
                     graphicsOk,
-                    $"No active graphics-class error or elevated temperature was reported; {hardware.ConnectedDisplays} connected display(s) detected.",
+                    hardware.ConnectedDisplays is > 0
+                        ? $"No active graphics-class error or elevated temperature was reported; Windows reports {hardware.ConnectedDisplays} active desktop display(s)."
+                        : "No active graphics-class error or elevated temperature was reported; the active desktop display count is unavailable.",
                     "A graphics-class device error, elevated temperature, or missing display still requires review.")
             });
     }

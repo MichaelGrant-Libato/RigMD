@@ -13,7 +13,7 @@ public enum ToolSafetyTier
     Tier0_ReadOnly = 0,
 
     /// <summary>
-    /// Low-risk, reversible or non-destructive OS maintenance (e.g., DNS flush, temp cleanup, Explorer restart).
+    /// Low-risk, reversible or non-destructive OS maintenance (e.g., DNS flush, Explorer restart).
     /// </summary>
     Tier1_SafeReversible = 1,
 
@@ -51,6 +51,8 @@ public class AgentToolFunctionDeclaration
 /// </summary>
 public class ToolDryRunPreview
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public object? ApprovalContext { get; set; }
     public string? ApprovalToken { get; set; }
     public DateTimeOffset? ApprovalExpiresAt { get; set; }
     public string ToolName { get; set; } = string.Empty;

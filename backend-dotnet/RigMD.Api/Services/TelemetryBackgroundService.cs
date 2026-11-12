@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.SignalR;
 using RigMD.Api.Hubs;
 using RigMD.Application.Models;
 using System.Diagnostics;
@@ -10,7 +10,8 @@ namespace RigMD.Api.Services;
 public class TelemetryBackgroundService : BackgroundService
 {
     private readonly IHubContext<TelemetryHub> _hubContext;
-    private readonly IHardwareMonitorService _hardwareMonitor;
+    private readonly Lazy<IHardwareMonitorService> _hardwareMonitor;
+    private readonly TelemetrySubscriptions _subscriptions;
     private readonly ILogger<TelemetryBackgroundService> _logger;
     
     private PerformanceCounter? _threadCounter;
@@ -24,16 +25,22 @@ public class TelemetryBackgroundService : BackgroundService
 
     public TelemetryBackgroundService(
         IHubContext<TelemetryHub> hubContext, 
-        IHardwareMonitorService hardwareMonitor,
+        Lazy<IHardwareMonitorService> hardwareMonitor,
+        TelemetrySubscriptions subscriptions,
         ILogger<TelemetryBackgroundService> logger)
     {
         _hubContext = hubContext;
         _hardwareMonitor = hardwareMonitor;
+        _subscriptions = subscriptions;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Home uses fast native readings. Start full sensor streaming only for a subscriber.
+        await _subscriptions.WaitAsync(stoppingToken);
+        // .NET 10 runs ExecuteAsync on a worker; expensive sensor setup must stay here.
+        var hardwareMonitor = _hardwareMonitor.Value;
         try 
         {
             _threadCounter = new PerformanceCounter("System", "Threads");
@@ -49,10 +56,11 @@ public class TelemetryBackgroundService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            await _subscriptions.WaitAsync(stoppingToken);
             try
             {
                 // Tick LHM to read new sensor values
-                _hardwareMonitor.Tick();
+                hardwareMonitor.Tick();
 
                 var dto = new TelemetryUpdateDto();
                 
@@ -62,7 +70,7 @@ public class TelemetryBackgroundService : BackgroundService
                 dto.CpuUsageCapturedAtUtc = WmiCpuProvider.UsageCapturedAt;
                 dto.CpuUsageWindowSeconds = WmiCpuProvider.UsageWindowSeconds;
 
-                var cpuTemperature = _hardwareMonitor.GetCpuTemperatureReading();
+                var cpuTemperature = hardwareMonitor.GetCpuTemperatureReading();
                 dto.CpuTempCelsius = cpuTemperature?.Celsius;
                 dto.CpuTemperatureSource = cpuTemperature?.Source ?? "Unavailable";
                 dto.CpuTemperatureSensorIdentifier = cpuTemperature?.SensorIdentifier;
@@ -78,10 +86,10 @@ public class TelemetryBackgroundService : BackgroundService
                 dto.RamTotalGb = memory.UsageAvailable == true ? memory.TotalGb : null;
 
                 // GPU
-                dto.GpuUsagePercent = Math.Round(_hardwareMonitor.GetGpuLoad() ?? 0, 1);
-                dto.GpuTempCelsius = _hardwareMonitor.GetGpuTemperature();
-                dto.GpuMemoryUsedGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryUsedGb() ?? 0, 1);
-                dto.GpuMemoryTotalGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryTotalGb() ?? 0, 1);
+                dto.GpuUsagePercent = Math.Round(hardwareMonitor.GetGpuLoad() ?? 0, 1);
+                dto.GpuTempCelsius = hardwareMonitor.GetGpuTemperature();
+                dto.GpuMemoryUsedGb = Math.Round(hardwareMonitor.GetGpuDedicatedMemoryUsedGb() ?? 0, 1);
+                dto.GpuMemoryTotalGb = Math.Round(hardwareMonitor.GetGpuDedicatedMemoryTotalGb() ?? 0, 1);
 
                 // Disks (Persistent performance counters for real live activity & rates)
                 UpdateDisks(dto);
