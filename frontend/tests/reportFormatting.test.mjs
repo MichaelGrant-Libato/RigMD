@@ -250,9 +250,10 @@ test('HTML exports escape hostile device names and stored notes, leaving no exec
   const document = documentReport({ stats: { ...stats, device_name: hostile },
     selectedSession: { ...original, last_action_summary: hostile } });
   const html = buildReportHtml(document);
-  assert.ok(html.includes(escapeReportHtml(hostile)));
+  const encoded = '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &lt;/style&gt;&lt;script&gt;bad()&lt;/script&gt;';
+  assert.ok(html.includes(encoded));
   assert.ok(reportDocumentText(document).includes(hostile));
-  assert.doesNotMatch(html, /<img|<script|onerror="alert/);
+  assert.ok(!html.includes(hostile));
 });
 
 test('a partial follow-up labels omitted metrics without reusing original values', () => {
@@ -324,13 +325,15 @@ test('unavailable action history is explicit, including without a legacy summary
   }
 });
 test('stored action evidence is escaped in HTML and preserved in plain text', () => {
-  const hostile = '<script>alert("test")</script>';
+  const hostile = '<ScRiPt>test & "notes"</ScRiPt>';
+  const encoded = '&lt;ScRiPt&gt;test &amp; &quot;notes&quot;&lt;/ScRiPt&gt;';
   const document = documentReport({actionHistory: {runs: [{run_id: 'run', status: 'Failed', created_at: time,
     attempts: [{action_code: 'flush_dns_cache', created_at: time, verification_status: null,
       execution_summary: hostile, proof: [{label: hostile, after: hostile}]}]}]}});
   assert.ok(reportDocumentText(document).includes(hostile));
-  assert.ok(buildReportHtml(document).includes(escapeReportHtml(hostile)));
-  assert.doesNotMatch(buildReportHtml(document), /<script>/);
+  const html = buildReportHtml(document);
+  assert.equal(html.split(encoded).length - 1, 3, 'encode the summary, proof label, and proof value');
+  assert.ok(!html.includes(hostile));
 });
 test('unfinished or legacy action runs never invent completion or verification', () => {
   const document = documentReport({actionHistory: {runs: [{run_id: 'run', status: 'Running', created_at: 'invalid', attempts: []}]}});
