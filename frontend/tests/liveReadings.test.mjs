@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeLiveUsage, measuredPercent } from '../src/lib/liveReadings.ts';
+import { fileURLToPath } from 'node:url';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createServer } from 'vite';
+import { gpuUsagePercent, mergeLiveUsage, measuredPercent } from '../src/lib/liveReadings.ts';
 import { readingPercent, readingTone, explanationSourceLabel } from '../src/lib/diagnosticReadingVisuals.ts';
 import { requiresHardwareInspection } from '../src/lib/repairSupport.ts';
 
@@ -28,6 +32,85 @@ test('measured zero and 100 are real values; missing or invalid samples are unav
   for (const input of [null, undefined, NaN, Infinity, -1, 101, '53']) assert.equal(measuredPercent(input), null);
   assert.equal(measuredPercent(0), 0);
   assert.equal(measuredPercent(100), 100);
+});
+
+const gpuCapturedAt = '2026-11-17T08:15:00Z';
+const gpuNow = Date.parse(gpuCapturedAt);
+const integrated = { id: 'adapter-1', name: 'Intel Graphics', type: 'Integrated', usagePercent: 74, capturedAtUtc: gpuCapturedAt };
+const dedicated = { id: 'adapter-2', name: 'GeForce', type: 'Dedicated', usagePercent: 16, capturedAtUtc: gpuCapturedAt };
+
+test('GPU usage requires an independently timestamped, valid adapter measurement', () => {
+  assert.equal(gpuUsagePercent(integrated, gpuNow + 5000), 74);
+  assert.equal(gpuUsagePercent(integrated, gpuNow - 2000), 74);
+  assert.equal(gpuUsagePercent(integrated, gpuNow + 5001), null);
+  assert.equal(gpuUsagePercent(integrated, gpuNow - 2001), null);
+  for (const capturedAtUtc of [null, undefined, '', 'invalid']) {
+    assert.equal(gpuUsagePercent({ ...integrated, capturedAtUtc }, gpuNow), null);
+  }
+  for (const usagePercent of [null, undefined, NaN, Infinity, -1, 101, '0']) {
+    assert.equal(gpuUsagePercent({ ...dedicated, usagePercent }, gpuNow), null);
+  }
+});
+
+test('adapter-specific updates keep idle and busy GPUs distinct while CPU and RAM continue updating', () => {
+  const stats = { cpu: {}, ram: { total_gb: 16 }, gpu: { adapters: [integrated, dedicated] } };
+  const idleIntegrated = { ...integrated, usagePercent: 0 };
+  const busyDedicated = { ...dedicated, usagePercent: 100 };
+  const next = mergeLiveUsage(stats, {
+    cpuUsagePercent: 32, ramUsagePercent: 75, ramUsedGb: 12,
+    gpuAdapters: [busyDedicated, idleIntegrated],
+  }, gpuNow);
+
+  assert.deepEqual(next.gpu.adapters.find(a => a.id === integrated.id), idleIntegrated);
+  assert.deepEqual(next.gpu.adapters.find(a => a.id === dedicated.id), busyDedicated);
+  assert.equal(stats.gpu.adapters[0].usagePercent, 74);
+  assert.equal(next.cpu.usage_percent, 32);
+  assert.equal(next.ram.usage_percent, 75);
+  assert.equal(next.ram.used_gb, 12);
+
+  const partial = mergeLiveUsage(next, { gpuAdapters: [
+    { ...integrated, capturedAtUtc: '2026-11-17T08:14:00Z' }, dedicated,
+  ] }, gpuNow);
+  assert.equal(partial.gpu.adapters.find(a => a.id === integrated.id).usagePercent, null);
+  assert.equal(partial.gpu.adapters.find(a => a.id === dedicated.id).usagePercent, 16);
+});
+
+test('a legacy aggregate preserves adapter identities without assigning usage, and an empty inventory clears them', () => {
+  const stats = { cpu: {}, ram: { total_gb: 16 }, gpu: { name: 'GeForce', adapters: [integrated, dedicated] } };
+  const legacy = mergeLiveUsage(stats, { gpuUsagePercent: 93 }, gpuNow);
+  assert.deepEqual(legacy.gpu.adapters, [
+    { ...integrated, usagePercent: null, capturedAtUtc: null },
+    { ...dedicated, usagePercent: null, capturedAtUtc: null },
+  ]);
+  assert.equal(legacy.gpu.name, 'GeForce');
+  assert.deepEqual(mergeLiveUsage(legacy, { gpuAdapters: [], gpuUsagePercent: 93 }, gpuNow).gpu.adapters, []);
+});
+
+test('GPU card labels each adapter’s own activity and distinguishes measured idle from unavailable', async () => {
+  const vite = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)), configFile: false, appType: 'custom',
+    server: { middlewareMode: true, hmr: false, watch: null, ws: false }, optimizeDeps: { noDiscovery: true },
+  });
+  try {
+    const { default: GpuCard } = await vite.ssrLoadModule('/src/components/dashboard/GpuCard.tsx');
+    const capturedAtUtc = new Date().toISOString();
+    const adapters = [
+      { ...integrated, usagePercent: 0, capturedAtUtc },
+      { ...dedicated, usagePercent: 82, capturedAtUtc },
+    ];
+    const render = stats => renderToStaticMarkup(createElement(GpuCard, { stats }));
+    const hybrid = render({ gpu: { adapters } });
+    assert.match(hybrid, /aria-label="Intel Graphics activity"[^>]*aria-valuenow="0"/);
+    assert.match(hybrid, /aria-label="GeForce activity"[^>]*aria-valuenow="82"/);
+    assert.match(hybrid, /Integrated graphics/);
+    assert.match(hybrid, /Dedicated graphics/);
+
+    const unavailable = render({ gpu: { name: 'GeForce', adapters: [] } });
+    assert.match(unavailable, /Usage unavailable/i);
+    assert.doesNotMatch(unavailable, /aria-valuenow=|>0%<|>82%<|Intel Graphics/);
+  } finally {
+    await vite.close();
+  }
 });
 
 test('reading bars use identified measured percentages only, without inventing temperatures or diagnoses', () => {

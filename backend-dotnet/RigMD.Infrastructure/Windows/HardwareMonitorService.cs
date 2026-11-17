@@ -20,6 +20,7 @@ public interface IHardwareMonitorService
     double? GetCpuLoad();
     double? GetRamLoad();
     double? GetGpuLoad();
+    IReadOnlyList<GpuAdapterReading> GetGpuAdapters() => [];
 }
 
 /// <summary>
@@ -47,6 +48,8 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
     private double? _cpuLoadPercent;
     private double? _ramLoadPercent;
     private double? _gpuLoadPercent;
+    private readonly GpuActivityReader _gpuActivityReader = new();
+    private IReadOnlyList<GpuAdapterReading> _gpuAdapters = [];
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct MEMORYSTATUSEX
@@ -107,11 +110,10 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
                 return;
             }
             _lastTickUtc = now;
+            UpdateCpuAndRamMetrics();
+            UpdateGpuMetrics(now);
+            UpdateCpuTemperature();
         }
-
-        UpdateCpuAndRamMetrics();
-        UpdateGpuMetrics(now);
-        UpdateCpuTemperature();
     }
 
     public double? GetCpuTemperature() => _cpuTemperatureReading?.Celsius;
@@ -129,6 +131,8 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
     public double? GetRamLoad() => _ramLoadPercent;
 
     public double? GetGpuLoad() => _gpuLoadPercent;
+
+    public IReadOnlyList<GpuAdapterReading> GetGpuAdapters() => _gpuAdapters;
 
     private void UpdateCpuAndRamMetrics()
     {
@@ -190,6 +194,8 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     private void UpdateGpuMetrics(DateTime nowUtc)
     {
+        // Always sample every Windows adapter, including integrated graphics on hybrid systems.
+        _gpuAdapters = _gpuActivityReader.Read();
         bool gotNvidiaMetrics = false;
 
         if (!_nvidiaSmiUnavailable && _nvidiaSmiPath != null)
@@ -209,6 +215,7 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
         {
             UpdateGpuFromWindowsPerformanceCounters();
         }
+        _gpuLoadPercent = _gpuAdapters.Select(adapter => adapter.UsagePercent).Max();
     }
 
     private bool TryProbeNvidiaSmi(string exePath)
@@ -317,44 +324,6 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
             // Ignore if GPU adapter memory counters are unavailable
         }
 
-        // 2. GPU Utilization % via Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine
-        try
-        {
-            using var engineSearcher = new ManagementObjectSearcher(
-                @"root\CIMV2",
-                "SELECT Name, UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine");
-
-            var sumsByEngineType = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            foreach (ManagementObject obj in engineSearcher.Get())
-            {
-                var util = TryParseDouble(obj["UtilizationPercentage"]);
-                if (util <= 0)
-                {
-                    continue;
-                }
-
-                var name = obj["Name"]?.ToString() ?? string.Empty;
-                var idx = name.IndexOf("engtype_", StringComparison.OrdinalIgnoreCase);
-                var engineKey = idx >= 0 ? name.Substring(idx) : "default";
-
-                sumsByEngineType.TryGetValue(engineKey, out var current);
-                sumsByEngineType[engineKey] = current + util;
-            }
-
-            if (sumsByEngineType.Count > 0)
-            {
-                var maxEngineLoad = sumsByEngineType.Values.Max();
-                _gpuLoadPercent = Math.Round(Math.Clamp(maxEngineLoad, 0.0, 100.0), 1);
-            }
-            else
-            {
-                _gpuLoadPercent ??= 0.0;
-            }
-        }
-        catch
-        {
-            // Ignore if GPU engine performance counters are unavailable
-        }
     }
 
     private static string? ResolveNvidiaSmiPath()

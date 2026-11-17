@@ -1,5 +1,13 @@
 //rigmd.ts
 
+export interface GpuAdapterReading {
+  id: string;
+  name: string;
+  type: 'Integrated' | 'Dedicated' | 'Unknown';
+  usagePercent: number | null;
+  capturedAtUtc: string | null;
+}
+
 export interface AgentStatus {
   agentId: string;
   clientId: string;
@@ -96,6 +104,7 @@ export interface AgentHardwareSnapshot {
     directxVersion?: string;
     physicalLocation?: string;
     temperatureCelsius?: number;
+    adapters?: GpuAdapterReading[];
   };
 
   ram: {
@@ -295,6 +304,7 @@ export interface HardwareStats {
     directx_version?: string;
     physical_location?: string;
     temperature_celsius?: number;
+    adapters?: GpuAdapterReading[];
   };
   ram: {
     total_gb: number;

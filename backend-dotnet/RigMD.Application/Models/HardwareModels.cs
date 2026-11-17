@@ -60,8 +60,11 @@ public class HardwarePresenceProbeDto
     public Dictionary<string, ComponentPresenceInfoDto> Components { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
+public sealed record GpuAdapterReading(string Id, string Name, string Type, double? UsagePercent, DateTimeOffset? CapturedAtUtc);
+
 public class GpuStatsDto
 {
+    public IReadOnlyList<GpuAdapterReading> Adapters { get; set; } = [];
     public bool HasGpu { get; set; } = true;
     public bool HasDedicatedGpu { get; set; }
     public string Name { get; set; } = string.Empty;

@@ -78,10 +78,11 @@ public class TelemetryBackgroundService : BackgroundService
                 dto.RamTotalGb = memory.UsageAvailable == true ? memory.TotalGb : null;
 
                 // GPU
-                dto.GpuUsagePercent = Math.Round(_hardwareMonitor.GetGpuLoad() ?? 0, 1);
+                dto.GpuAdapters = _hardwareMonitor.GetGpuAdapters();
+                dto.GpuUsagePercent = _hardwareMonitor.GetGpuLoad();
                 dto.GpuTempCelsius = _hardwareMonitor.GetGpuTemperature();
-                dto.GpuMemoryUsedGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryUsedGb() ?? 0, 1);
-                dto.GpuMemoryTotalGb = Math.Round(_hardwareMonitor.GetGpuDedicatedMemoryTotalGb() ?? 0, 1);
+                dto.GpuMemoryUsedGb = _hardwareMonitor.GetGpuDedicatedMemoryUsedGb();
+                dto.GpuMemoryTotalGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();
 
                 // Disks (Persistent performance counters for real live activity & rates)
                 UpdateDisks(dto);

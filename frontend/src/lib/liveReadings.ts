@@ -1,4 +1,4 @@
-import type { HardwareStats } from '../types/rigmd';
+import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
 
 export interface LiveUsageSample {
   cpuUsagePercent?: number | null;
@@ -8,10 +8,17 @@ export interface LiveUsageSample {
   ramUsagePercent?: number | null;
   ramUsedGb?: number | null;
   ramTotalGb?: number | null;
+  gpuAdapters?: GpuAdapterReading[];
 }
 
 export function measuredPercent(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+}
+
+export function gpuUsagePercent(adapter: GpuAdapterReading, now = Date.now()): number | null {
+  const captured = adapter.capturedAtUtc ? Date.parse(adapter.capturedAtUtc) : NaN;
+  const fresh = Number.isFinite(captured) && now - captured <= 5000 && captured - now <= 2000;
+  return fresh ? measuredPercent(adapter.usagePercent) : null;
 }
 
 export function mergeLiveUsage(stats: HardwareStats, sample: LiveUsageSample, now = Date.now()): HardwareStats {
@@ -26,5 +33,13 @@ export function mergeLiveUsage(stats: HardwareStats, sample: LiveUsageSample, no
       usage_source: cpuFresh ? sample.cpuUsageSource ?? 'Unavailable' : 'Unavailable',
       usage_captured_at_utc: sample.cpuUsageCapturedAtUtc, usage_window_seconds: sample.cpuUsageWindowSeconds },
     ram: { ...stats.ram, usage_percent: memory, used_gb: memory !== null && used !== null && used <= total ? used : null, total_gb: total },
+    gpu: {
+      ...stats.gpu,
+      adapters: (sample.gpuAdapters ?? stats.gpu?.adapters ?? []).map(adapter => ({
+        ...adapter,
+        usagePercent: sample.gpuAdapters ? gpuUsagePercent(adapter, now) : null,
+        capturedAtUtc: sample.gpuAdapters ? adapter.capturedAtUtc : null,
+      })),
+    },
   };
 }

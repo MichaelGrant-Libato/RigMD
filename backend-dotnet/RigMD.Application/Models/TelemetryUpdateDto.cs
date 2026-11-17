@@ -27,8 +27,9 @@ public class TelemetryUpdateDto
     public double? RamUsedGb { get; set; }
     public double? RamTotalGb { get; set; }
     
-    public double GpuUsagePercent { get; set; }
-    public double GpuMemoryUsedGb { get; set; }
+    public IReadOnlyList<GpuAdapterReading> GpuAdapters { get; set; } = [];
+    public double? GpuUsagePercent { get; set; }
+    public double? GpuMemoryUsedGb { get; set; }
     public double? GpuMemoryTotalGb { get; set; }
     public double? GpuTempCelsius { get; set; }
     

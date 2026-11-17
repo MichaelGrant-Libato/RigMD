@@ -72,6 +72,7 @@ public class HardwareController : ControllerBase
                 },
                 gpu = new
                 {
+                    adapters = profile.Gpu.Adapters,
                     name = profile.Gpu.Name,
                     driver = profile.Gpu.Driver,
                     type = profile.Gpu.Type,

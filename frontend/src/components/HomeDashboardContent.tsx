@@ -5,6 +5,7 @@ import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 // import HealthScoreRing from './dashboard/HealthScoreRing';
 import StatusPill from './dashboard/StatusPill';
 import { CpuCard, MemoryCard, StorageCard, NetworkCard } from './dashboard/MetricCards';
+import GpuCard from './dashboard/GpuCard';
 import RecentDiagnosticsTimeline from './dashboard/RecentDiagnosticsTimeline';
 import AlertsSummaryCard from './dashboard/AlertsSummaryCard';
 import { REVIEW_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
@@ -187,8 +188,9 @@ export default function HomeDashboardContent({ stats, dashboard, setActivePage, 
       </motion.section>
 
       {/* ═══════ METRIC CARDS ═══════ */}
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <CpuCard stats={stats} />
+        <GpuCard stats={stats} />
         <MemoryCard stats={stats} />
         <StorageCard stats={stats} />
         <NetworkCard stats={stats} />
