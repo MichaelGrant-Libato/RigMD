@@ -34,6 +34,32 @@ test('measured zero and 100 are real values; missing or invalid samples are unav
   assert.equal(measuredPercent(100), 100);
 });
 
+test('CPU temperature refreshes independently and clears lost sensors without changing CPU identity', () => {
+  const stamp = '2026-11-17T08:15:00Z';
+  const now = Date.parse(stamp);
+  const sample = { cpuTempCelsius: 58.5, cpuTemperatureSource: 'LibreHardwareMonitor 0.9.6 / PawnIO',
+    cpuTemperatureSensorIdentifier: '/intelcpu/0/temperature/0', cpuTemperatureCapturedAtUtc: stamp };
+  const original = { cpu: { name: 'Intel Processor', cores: 12 }, ram: { total_gb: 16 }, gpu: { adapters: [] } };
+  const current = mergeLiveUsage(original, { ...sample, cpuUsagePercent: 45, ramUsagePercent: 50, ramUsedGb: 8 }, now);
+  assert.equal(current.cpu.name, 'Intel Processor');
+  assert.equal(current.cpu.cores, 12);
+  assert.equal(current.cpu.usage_percent, 45);
+  assert.equal(current.ram.used_gb, 8);
+  assert.equal(current.cpu.temperature_celsius, 58.5);
+  assert.equal(current.cpu.temperature_sensor_identifier, '/intelcpu/0/temperature/0');
+  assert.equal(current.cpu.temperature_source, sample.cpuTemperatureSource);
+  assert.equal(original.cpu.temperature_celsius, undefined);
+
+  for (const payload of [{}, { ...sample, cpuTempCelsius: null }, { ...sample, cpuTemperatureCapturedAtUtc: '2026-11-17T08:14:54Z', cpuUsagePercent: 20 }]) {
+    const missing = mergeLiveUsage(current, payload, now);
+    assert.equal(missing.cpu.temperature_celsius, null);
+    assert.equal(missing.cpu.temperature_source, 'Unavailable');
+    assert.equal(missing.cpu.temperature_sensor_identifier, null);
+    assert.equal(missing.cpu.temperature_captured_at_utc, null);
+    assert.equal(missing.cpu.name, 'Intel Processor');
+  }
+});
+
 const gpuCapturedAt = '2026-11-17T08:15:00Z';
 const gpuNow = Date.parse(gpuCapturedAt);
 const unavailableTemperature = { temperatureCelsius: null, temperatureSource: 'Unavailable', temperatureCapturedAtUtc: null };

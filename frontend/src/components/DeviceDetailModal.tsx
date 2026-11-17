@@ -6,7 +6,7 @@ import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
-import { formatTemperature, selectedGpuTemperature } from '../lib/temperatureTelemetry';
+import { formatTemperature, selectedCpuTemperature, selectedGpuTemperature, type CpuTemperatureSample } from '../lib/temperatureTelemetry';
 import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
@@ -35,8 +35,7 @@ interface TelemetryPoint {
   CpuSpeedMhz: number;
   RamUsedGb: number | null;
   GpuMemoryUsedGb: number;
-  CpuTempCelsius?: number | null;
-  CpuTemperatureSource?: string;
+  CpuTemperature: CpuTemperatureSample;
   CpuProcesses?: number;
   CpuThreads?: number;
   CpuHandles?: number;
@@ -45,7 +44,7 @@ interface TelemetryPoint {
   Disks: DiskTelemetryPoint[];
 }
 
-interface RawTelemetryPayload {
+interface RawTelemetryPayload extends CpuTemperatureSample {
   cpuUsagePercent?: number | null;
   ramUsagePercent?: number | null;
   gpuUsagePercent?: number;
@@ -54,8 +53,6 @@ interface RawTelemetryPayload {
   cpuSpeedMhz?: number;
   ramUsedGb?: number | null;
   gpuMemoryUsedGb?: number;
-  cpuTempCelsius?: number | null;
-  cpuTemperatureSource?: string;
   cpuProcesses?: number;
   cpuThreads?: number;
   cpuHandles?: number;
@@ -86,7 +83,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   const dialogRef = useRef<HTMLDivElement>(null);
   const [lastReadingAt, setLastReadingAt] = useState<number | null>(null);
   const [clock, setClock] = useState(Date.now());
-  const [gpuStreamUnavailable, setGpuStreamUnavailable] = useState(false);
+  const [temperatureStreamUnavailable, setTemperatureStreamUnavailable] = useState(false);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
 
   useEffect(() => {
@@ -94,7 +91,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
     setData([]);
     setLastReadingAt(null);
-    setGpuStreamUnavailable(false);
+    setTemperatureStreamUnavailable(false);
     setSelectedDiskIndex(0);
     let disposed = false;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -110,7 +107,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
       connection.on('ReceiveTelemetry', (telemetry: RawTelemetryPayload) => {
         if (disposed) return;
         setLastReadingAt(Date.now());
-        setGpuStreamUnavailable(false);
+        setTemperatureStreamUnavailable(false);
         setData((prevData) => {
           const newData = [...prevData.slice(-59)];
           newData.push({
@@ -123,8 +120,12 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             CpuSpeedMhz: telemetry.cpuSpeedMhz || 0,
             RamUsedGb: telemetry.ramUsedGb ?? null,
             GpuMemoryUsedGb: telemetry.gpuMemoryUsedGb || 0,
-            CpuTempCelsius: telemetry.cpuTempCelsius,
-            CpuTemperatureSource: telemetry.cpuTemperatureSource,
+            CpuTemperature: {
+              cpuTempCelsius: telemetry.cpuTempCelsius,
+              cpuTemperatureSource: telemetry.cpuTemperatureSource,
+              cpuTemperatureSensorIdentifier: telemetry.cpuTemperatureSensorIdentifier,
+              cpuTemperatureCapturedAtUtc: telemetry.cpuTemperatureCapturedAtUtc,
+            },
             CpuProcesses: telemetry.cpuProcesses,
             CpuThreads: telemetry.cpuThreads,
             CpuHandles: telemetry.cpuHandles,
@@ -140,9 +141,9 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           return newData;
         });
       });
-      const clearGpuTemperature = () => { if (!disposed) setGpuStreamUnavailable(true); };
-      connection.onreconnecting(clearGpuTemperature);
-      connection.onclose(clearGpuTemperature);
+      const clearTemperatures = () => { if (!disposed) setTemperatureStreamUnavailable(true); };
+      connection.onreconnecting(clearTemperatures);
+      connection.onclose(clearTemperatures);
 
       try {
         await connection.start();
@@ -227,7 +228,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   }
 
   const latestData = data[data.length - 1];
-  const gpuTemperature = selectedGpuTemperature(stats.gpu, gpuStreamUnavailable ? [] : latestData?.GpuAdapters, clock);
+  const cpuTemperature = selectedCpuTemperature(stats.cpu, temperatureStreamUnavailable ? {} : latestData?.CpuTemperature, clock);
+  const gpuTemperature = selectedGpuTemperature(stats.gpu, temperatureStreamUnavailable ? [] : latestData?.GpuAdapters, clock);
 
   return (
     <AnimatePresence>
@@ -404,7 +406,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   <div><p className="text-xs text-slate-400">Threads</p><p className="text-xl text-white">{latestData?.CpuThreads || stats.cpu.threads || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Handles</p><p className="text-xl text-white">{latestData?.CpuHandles || stats.cpu.handles || 0}</p></div>
                   <div><p className="text-xs text-slate-400">Base speed</p><p className="text-xl text-white">{(stats.cpu.max_frequency_mhz ? stats.cpu.max_frequency_mhz / 1000 : 0).toFixed(2)} GHz</p></div>
-                  <div title={`Source: ${(latestData ? latestData.CpuTemperatureSource : stats.cpu.temperature_source) || 'Unavailable'}`}><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(stats.cpu.temperature_celsius, latestData?.CpuTempCelsius, Boolean(latestData))}</p></div>
+                  <div title={cpuTemperature ? `${cpuTemperature.source} · ${cpuTemperature.sensorIdentifier} · ${new Date(cpuTemperature.capturedAtUtc).toLocaleTimeString()}` : 'A current CPU temperature reading could not be collected.'}><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(cpuTemperature?.celsius)}</p></div>
                   <div><p className="text-xs text-slate-400">Sockets</p><p className="text-xl text-white">{stats.cpu.sockets || 1}</p></div>
                   <div><p className="text-xs text-slate-400">Cores</p><p className="text-xl text-white">{stats.cpu.cores}</p></div>
                   <div><p className="text-xs text-slate-400">Logical processors</p><p className="text-xl text-white">{stats.cpu.threads}</p></div>

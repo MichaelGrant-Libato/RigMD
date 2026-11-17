@@ -2,13 +2,13 @@ import { motion } from 'motion/react';
 import type { HardwareStats } from '../../types/rigmd';
 import { Cpu, MemoryStick, HardDrive, Wifi, Cable, Network, Thermometer } from 'lucide-react';
 import { formatStorageCapacity, storageCapacitySummary, storageUsagePercent, validReading } from '../../lib/storageTelemetry';
-import { validTemperature } from '../../lib/temperatureTelemetry';
+import { selectedCpuTemperature } from '../../lib/temperatureTelemetry';
 import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../../lib/reviewThresholds';
 
 /* ─── CPU Card ─── */
 export function CpuCard({ stats }: { stats: HardwareStats | null }) {
   const usage = stats?.cpu?.usage_percent ?? null;
-  const temp = validTemperature(stats?.cpu?.temperature_celsius);
+  const temperature = selectedCpuTemperature(stats?.cpu);
   const name = stats?.cpu?.name ?? 'CPU';
   const shortName = name.replace(/\(R\)|\(TM\)|CPU|@.*$/gi, '').trim();
 
@@ -29,10 +29,10 @@ export function CpuCard({ stats }: { stats: HardwareStats | null }) {
           </div>
           <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">CPU</span>
         </div>
-        {temp !== null && (
-          <span title={`Source: ${stats?.cpu?.temperature_source || 'Unavailable'}`} className="flex items-center gap-1 text-xs text-slate-400">
+        {temperature !== null && (
+          <span title={`${temperature.source} · ${temperature.sensorIdentifier} · ${new Date(temperature.capturedAtUtc).toLocaleTimeString()}`} className="flex items-center gap-1 text-xs text-slate-400">
             <Thermometer size={12} />
-            {Math.round(temp)}°C
+            {Math.round(temperature.celsius)}°C
           </span>
         )}
       </div>

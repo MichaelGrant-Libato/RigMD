@@ -24,10 +24,10 @@ public interface IHardwareMonitorService
 }
 
 /// <summary>
-/// 100% user-mode hardware telemetry service.
-/// Uses Windows Performance Counters, the installed display driver's temperature query, identified CPU WMI sensors,
+/// Windows telemetry service with optional CPU-only LibreHardwareMonitor/PawnIO sensor access.
+/// Uses Windows Performance Counters, the installed display driver's temperature query, identified CPU sensors,
 /// Registry 64-bit VRAM lookup, GlobalMemoryStatusEx, and signed user-mode nvidia-smi CLI when available.
-/// Never loads kernel drivers (such as WinRing0.sys).
+/// PawnIO setup is performed explicitly outside the telemetry loop.
 /// </summary>
 public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 {
@@ -484,6 +484,7 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     public void Dispose()
     {
+        CpuTemperatureSensorReader.Close();
         try
         {
             _cpuCounter?.Dispose();

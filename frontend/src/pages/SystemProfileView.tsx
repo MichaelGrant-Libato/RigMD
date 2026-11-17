@@ -20,7 +20,7 @@ import {
 import TopHeader from '../components/TopHeader';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
-import { formatTemperature, selectedGpuTemperature, validTemperature } from '../lib/temperatureTelemetry';
+import { formatTemperature, selectedCpuTemperature, selectedGpuTemperature, type CpuTemperatureSample } from '../lib/temperatureTelemetry';
 import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
 import { storageReviewStatus } from '../lib/storageTelemetry';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
@@ -162,7 +162,7 @@ export default function SystemProfileView({
   isRefreshingHardware,
   onRefreshHardware,
 }: SystemProfileViewProps) {
-  const [liveCpuTemp, setLiveCpuTemp] = useState<number | null | undefined>(undefined);
+  const [liveCpuTemperature, setLiveCpuTemperature] = useState<CpuTemperatureSample | undefined>(undefined);
   const [liveGpuAdapters, setLiveGpuAdapters] = useState<GpuAdapterReading[] | undefined>(undefined);
   const [temperatureClock, setTemperatureClock] = useState(Date.now());
   const connectionRef = useRef<signalR.HubConnection | null>(null);
@@ -180,15 +180,19 @@ export default function SystemProfileView({
       .withAutomaticReconnect()
       .build();
 
-    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number | null; gpuAdapters?: GpuAdapterReading[] }) => {
+    connection.on('ReceiveTelemetry', (telemetry: CpuTemperatureSample & { gpuAdapters?: GpuAdapterReading[] }) => {
       if (disposed) return;
-      setLiveCpuTemp(validTemperature(telemetry.cpuTempCelsius));
+      setLiveCpuTemperature(telemetry);
       setLiveGpuAdapters(telemetry.gpuAdapters ?? []);
       setTemperatureClock(Date.now());
     });
-    const clearGpuTemperature = () => { if (!disposed) setLiveGpuAdapters([]); };
-    connection.onreconnecting(clearGpuTemperature);
-    connection.onclose(clearGpuTemperature);
+    const clearTemperatures = () => {
+      if (disposed) return;
+      setLiveCpuTemperature({});
+      setLiveGpuAdapters([]);
+    };
+    connection.onreconnecting(clearTemperatures);
+    connection.onclose(clearTemperatures);
 
     connectionRef.current = connection;
 
@@ -208,6 +212,7 @@ export default function SystemProfileView({
     };
   }, [hasStats]);
 
+  const cpuTemperature = selectedCpuTemperature(stats?.cpu, liveCpuTemperature, temperatureClock);
   const gpuTemperature = selectedGpuTemperature(stats?.gpu, liveGpuAdapters, temperatureClock);
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -356,7 +361,8 @@ export default function SystemProfileView({
                     icon={Cpu}
                     title="Processor"
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
-                    helper={`Temperature: ${formatTemperature(stats.cpu.temperature_celsius, liveCpuTemp, liveCpuTemp !== undefined)}`}
+                    helper={`Temperature: ${formatTemperature(cpuTemperature?.celsius)}`}
+                    helperTitle={cpuTemperature ? `${cpuTemperature.source} · ${cpuTemperature.sensorIdentifier} · ${new Date(cpuTemperature.capturedAtUtc).toLocaleTimeString()}` : 'A current CPU temperature reading could not be collected.'}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={(stats.cpu.usage_percent ?? -1) >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}

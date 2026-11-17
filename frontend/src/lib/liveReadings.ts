@@ -1,7 +1,7 @@
 import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
-import { gpuTemperatureReading } from './temperatureTelemetry.ts';
+import { cpuTemperatureReading, gpuTemperatureReading, type CpuTemperatureSample } from './temperatureTelemetry.ts';
 
-export interface LiveUsageSample {
+export interface LiveUsageSample extends CpuTemperatureSample {
   cpuUsagePercent?: number | null;
   cpuUsageSource?: string;
   cpuUsageCapturedAtUtc?: string | null;
@@ -23,6 +23,7 @@ export function gpuUsagePercent(adapter: GpuAdapterReading, now = Date.now()): n
 }
 
 export function mergeLiveUsage(stats: HardwareStats, sample: LiveUsageSample, now = Date.now()): HardwareStats {
+  const cpuTemperature = cpuTemperatureReading(sample, now);
   const captured = sample.cpuUsageCapturedAtUtc ? Date.parse(sample.cpuUsageCapturedAtUtc) : null;
   const cpuFresh = captured === null || (Number.isFinite(captured) && now - captured <= 5000 && captured - now <= 2000);
   const memory = measuredPercent(sample.ramUsagePercent);
@@ -32,7 +33,11 @@ export function mergeLiveUsage(stats: HardwareStats, sample: LiveUsageSample, no
     ...stats,
     cpu: { ...stats.cpu, usage_percent: cpuFresh ? measuredPercent(sample.cpuUsagePercent) : null,
       usage_source: cpuFresh ? sample.cpuUsageSource ?? 'Unavailable' : 'Unavailable',
-      usage_captured_at_utc: sample.cpuUsageCapturedAtUtc, usage_window_seconds: sample.cpuUsageWindowSeconds },
+      usage_captured_at_utc: sample.cpuUsageCapturedAtUtc, usage_window_seconds: sample.cpuUsageWindowSeconds,
+      temperature_celsius: cpuTemperature?.celsius ?? null,
+      temperature_source: cpuTemperature?.source ?? 'Unavailable',
+      temperature_sensor_identifier: cpuTemperature?.sensorIdentifier ?? null,
+      temperature_captured_at_utc: cpuTemperature?.capturedAtUtc ?? null },
     ram: { ...stats.ram, usage_percent: memory, used_gb: memory !== null && used !== null && used <= total ? used : null, total_gb: total },
     gpu: {
       ...stats.gpu,

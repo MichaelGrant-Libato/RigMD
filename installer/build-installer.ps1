@@ -72,6 +72,18 @@ Write-Host "Inno Setup compiler found: $InnoCompiler"
 Write-Host "Required tools found."
 Write-Host ""
 
+Write-Host "Preparing the pinned signed PawnIO driver installer..."
+& (Join-Path $PSScriptRoot 'Manage-PawnIO.ps1') -Action Prepare
+if ($LASTEXITCODE -ne 0)
+{
+    throw "PawnIO setup verification failed."
+}
+& (Join-Path $PSScriptRoot 'Prepare-CpuSensorSources.ps1')
+if ($LASTEXITCODE -ne 0)
+{
+    throw "CPU sensor source preparation failed."
+}
+
 Write-Host "[2/7] Building React frontend..."
 
 Push-Location $FrontendDirectory
@@ -209,8 +221,7 @@ $SensitivePatterns = @(
     "*.db-shm",
     "*.db-wal",
     "*.pdb",
-    "*.sys",
-    "LibreHardwareMonitorLib.dll"
+    "*.sys"
 )
 
 foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory))
