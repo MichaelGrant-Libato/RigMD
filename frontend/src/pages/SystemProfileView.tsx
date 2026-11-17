@@ -20,11 +20,11 @@ import {
 import TopHeader from '../components/TopHeader';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
-import { formatTemperature, validTemperature } from '../lib/temperatureTelemetry';
+import { formatTemperature, selectedGpuTemperature, validTemperature } from '../lib/temperatureTelemetry';
 import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
 import { storageReviewStatus } from '../lib/storageTelemetry';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
-import type { HardwareStats } from '../types/rigmd';
+import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
 import { saveHardwareProfile } from '../services/profileService';
 import DeviceDetailModal, { HardwareType } from '../components/DeviceDetailModal';
 
@@ -41,6 +41,7 @@ interface FriendlyInfoCardProps {
   title: string;
   value: string;
   helper?: string;
+  helperTitle?: string;
   warningLabel?: string;
   tone?: 'good' | 'watch' | 'danger' | 'neutral';
   onClick?: () => void;
@@ -114,7 +115,7 @@ function usageLabel(value: number | null | undefined) {
     : 'Usage unavailable';
 }
 
-function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone = 'neutral', onClick }: FriendlyInfoCardProps) {
+function FriendlyInfoCard({ icon: Icon, title, value, helper, helperTitle, warningLabel, tone = 'neutral', onClick }: FriendlyInfoCardProps) {
   const Component = onClick ? motion.button : motion.section;
   const interactiveProps = onClick ? {
     whileHover: { scale: 1.02, backgroundColor: 'rgba(255,255,255,0.02)' },
@@ -142,7 +143,7 @@ function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone
 
       <div className="mt-auto">
         {helper && (
-          <p className="text-sm font-medium text-slate-300 mb-1">{helper}</p>
+          <p title={helperTitle} className="text-sm font-medium text-slate-300 mb-1">{helper}</p>
         )}
         {warningLabel && tone !== 'neutral' && tone !== 'good' && (
           <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider opacity-90">
@@ -162,7 +163,8 @@ export default function SystemProfileView({
   onRefreshHardware,
 }: SystemProfileViewProps) {
   const [liveCpuTemp, setLiveCpuTemp] = useState<number | null | undefined>(undefined);
-  const [liveGpuTemp, setLiveGpuTemp] = useState<number | null | undefined>(undefined);
+  const [liveGpuAdapters, setLiveGpuAdapters] = useState<GpuAdapterReading[] | undefined>(undefined);
+  const [temperatureClock, setTemperatureClock] = useState(Date.now());
   const connectionRef = useRef<signalR.HubConnection | null>(null);
   const hasStats = Boolean(stats);
 
@@ -170,6 +172,7 @@ export default function SystemProfileView({
     if (!hasStats) return;
 
     let disposed = false;
+    const timer = window.setInterval(() => setTemperatureClock(Date.now()), 1000);
     const hubUrl = `${API_BASE_URL}/hubs/telemetry`;
 
     const connection = new signalR.HubConnectionBuilder()
@@ -177,11 +180,15 @@ export default function SystemProfileView({
       .withAutomaticReconnect()
       .build();
 
-    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number | null; gpuTempCelsius?: number | null }) => {
+    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number | null; gpuAdapters?: GpuAdapterReading[] }) => {
       if (disposed) return;
       setLiveCpuTemp(validTemperature(telemetry.cpuTempCelsius));
-      setLiveGpuTemp(validTemperature(telemetry.gpuTempCelsius));
+      setLiveGpuAdapters(telemetry.gpuAdapters ?? []);
+      setTemperatureClock(Date.now());
     });
+    const clearGpuTemperature = () => { if (!disposed) setLiveGpuAdapters([]); };
+    connection.onreconnecting(clearGpuTemperature);
+    connection.onclose(clearGpuTemperature);
 
     connectionRef.current = connection;
 
@@ -193,12 +200,15 @@ export default function SystemProfileView({
 
     return () => {
       disposed = true;
+      window.clearInterval(timer);
       if (connectionRef.current) {
         connectionRef.current.stop();
         connectionRef.current = null;
       }
     };
   }, [hasStats]);
+
+  const gpuTemperature = selectedGpuTemperature(stats?.gpu, liveGpuAdapters, temperatureClock);
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -378,7 +388,8 @@ export default function SystemProfileView({
                     icon={Monitor}
                     title="Graphics"
                     value={cleanValue(stats.gpu.name)}
-                    helper={`Temperature: ${formatTemperature(stats.gpu.temperature_celsius, liveGpuTemp, liveGpuTemp !== undefined)}`}
+                    helper={`Temperature: ${formatTemperature(gpuTemperature?.celsius)}`}
+                    helperTitle={gpuTemperature ? `${gpuTemperature.source} · ${new Date(gpuTemperature.capturedAtUtc).toLocaleTimeString()}` : undefined}
                     tone="neutral"
                     onClick={() => handleCardClick('GPU')}
                   />

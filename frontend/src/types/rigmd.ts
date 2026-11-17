@@ -6,6 +6,9 @@ export interface GpuAdapterReading {
   type: 'Integrated' | 'Dedicated' | 'Unknown';
   usagePercent: number | null;
   capturedAtUtc: string | null;
+  temperatureCelsius?: number | null;
+  temperatureSource?: string;
+  temperatureCapturedAtUtc?: string | null;
 }
 
 export interface AgentStatus {
@@ -93,6 +96,7 @@ export interface AgentHardwareSnapshot {
 
   gpu: {
     name: string;
+    adapterId?: string | null;
     type: string;
     driver: string;
     vramGb: number;
@@ -103,7 +107,9 @@ export interface AgentHardwareSnapshot {
     driverDate?: string;
     directxVersion?: string;
     physicalLocation?: string;
-    temperatureCelsius?: number;
+    temperatureCelsius?: number | null;
+    temperatureSource?: string;
+    temperatureCapturedAtUtc?: string | null;
     adapters?: GpuAdapterReading[];
   };
 
@@ -295,6 +301,7 @@ export interface HardwareStats {
   };
   gpu: {
     name: string;
+    adapter_id?: string | null;
     driver: string;
     type: string;
     vram_gb: number;
@@ -303,7 +310,9 @@ export interface HardwareStats {
     driver_date?: string;
     directx_version?: string;
     physical_location?: string;
-    temperature_celsius?: number;
+    temperature_celsius?: number | null;
+    temperature_source?: string;
+    temperature_captured_at_utc?: string | null;
     adapters?: GpuAdapterReading[];
   };
   ram: {

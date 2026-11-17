@@ -1,4 +1,5 @@
 import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
+import { gpuTemperatureReading } from './temperatureTelemetry.ts';
 
 export interface LiveUsageSample {
   cpuUsagePercent?: number | null;
@@ -35,11 +36,17 @@ export function mergeLiveUsage(stats: HardwareStats, sample: LiveUsageSample, no
     ram: { ...stats.ram, usage_percent: memory, used_gb: memory !== null && used !== null && used <= total ? used : null, total_gb: total },
     gpu: {
       ...stats.gpu,
-      adapters: (sample.gpuAdapters ?? stats.gpu?.adapters ?? []).map(adapter => ({
-        ...adapter,
-        usagePercent: sample.gpuAdapters ? gpuUsagePercent(adapter, now) : null,
-        capturedAtUtc: sample.gpuAdapters ? adapter.capturedAtUtc : null,
-      })),
+      adapters: (sample.gpuAdapters ?? stats.gpu?.adapters ?? []).map(adapter => {
+        const temperature = sample.gpuAdapters ? gpuTemperatureReading(adapter, now) : null;
+        return {
+          ...adapter,
+          usagePercent: sample.gpuAdapters ? gpuUsagePercent(adapter, now) : null,
+          capturedAtUtc: sample.gpuAdapters ? adapter.capturedAtUtc : null,
+          temperatureCelsius: temperature?.celsius ?? null,
+          temperatureSource: temperature?.source ?? 'Unavailable',
+          temperatureCapturedAtUtc: temperature?.capturedAtUtc ?? null,
+        };
+      }),
     },
   };
 }

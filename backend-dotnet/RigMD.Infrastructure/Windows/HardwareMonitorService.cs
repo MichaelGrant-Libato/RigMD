@@ -25,7 +25,7 @@ public interface IHardwareMonitorService
 
 /// <summary>
 /// 100% user-mode hardware telemetry service.
-/// Uses Windows Performance Counters, identified CPU WMI sensors/GPUPerformanceCounters,
+/// Uses Windows Performance Counters, the installed display driver's temperature query, identified CPU WMI sensors,
 /// Registry 64-bit VRAM lookup, GlobalMemoryStatusEx, and signed user-mode nvidia-smi CLI when available.
 /// Never loads kernel drivers (such as WinRing0.sys).
 /// </summary>
@@ -50,6 +50,7 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
     private double? _gpuLoadPercent;
     private readonly GpuActivityReader _gpuActivityReader = new();
     private IReadOnlyList<GpuAdapterReading> _gpuAdapters = [];
+    private GpuAdapterReading? _nvidiaTemperatureFallback;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct MEMORYSTATUSEX
@@ -215,11 +216,14 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
         {
             UpdateGpuFromWindowsPerformanceCounters();
         }
+        _gpuAdapters = GpuActivityReader.ApplyTemperatureFallback(_gpuAdapters, _nvidiaTemperatureFallback, DateTimeOffset.UtcNow);
         _gpuLoadPercent = _gpuAdapters.Select(adapter => adapter.UsagePercent).Max();
+        _gpuTempCelsius = _gpuAdapters.Count == 1 ? _gpuAdapters[0].TemperatureCelsius : null;
     }
 
     private bool TryProbeNvidiaSmi(string exePath)
     {
+        _nvidiaTemperatureFallback = null;
         try
         {
             using var proc = new Process
@@ -227,7 +231,7 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = exePath,
-                    Arguments = "--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits",
+                    Arguments = "--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits",
                     CreateNoWindow = true,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
@@ -241,12 +245,15 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
                 return false;
             }
 
-            string output = proc.StandardOutput.ReadToEnd();
-            if (!proc.WaitForExit(1200) || proc.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+            var outputTask = proc.StandardOutput.ReadToEndAsync();
+            var errorTask = proc.StandardError.ReadToEndAsync();
+            if (!proc.WaitForExit(1200) || proc.ExitCode != 0)
             {
                 try { if (!proc.HasExited) proc.Kill(); } catch { }
                 return false;
             }
+            var output = outputTask.GetAwaiter().GetResult();
+            _ = errorTask.GetAwaiter().GetResult();
 
             var firstLine = output
                 .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
@@ -260,10 +267,20 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
             var parts = firstLine.Split(',');
             if (parts.Length >= 4)
             {
-                if (double.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var tempC) &&
+                if (parts.Length >= 5 && double.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var tempC) &&
                     tempC > 0 && tempC < 130)
                 {
-                    _gpuTempCelsius = Math.Round(tempC, 1);
+                    var name = string.Join(',', parts.Skip(4)).Trim();
+                    var matches = _gpuAdapters.Where(adapter => string.Equals(adapter.Name, name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+                    if (matches.Length == 1)
+                    {
+                        _nvidiaTemperatureFallback = matches[0] with
+                        {
+                            TemperatureCelsius = Math.Round(tempC, 1),
+                            TemperatureSource = "NVIDIA display-driver utility",
+                            TemperatureCapturedAtUtc = DateTimeOffset.UtcNow
+                        };
+                    }
                 }
 
                 if (double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var utilPct) &&

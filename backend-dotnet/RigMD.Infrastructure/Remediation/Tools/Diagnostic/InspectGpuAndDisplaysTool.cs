@@ -82,7 +82,7 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
             try
             {
                 _hardwareMonitor.Tick();
-                gpu.TemperatureCelsius ??= _hardwareMonitor.GetGpuTemperature();
+                gpu.SetAdapterReadings(_hardwareMonitor.GetGpuAdapters());
                 gpuLoadPercent = _hardwareMonitor.GetGpuLoad();
                 vramUsedGb = _hardwareMonitor.GetGpuDedicatedMemoryUsedGb();
                 vramTotalGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();
@@ -108,7 +108,10 @@ public class InspectGpuAndDisplaysTool : IRigMdAgentTool
                 dedicatedMemoryUsedGb = vramUsedGb.HasValue ? Math.Round(vramUsedGb.Value, 2) : (double?)null,
                 sharedMemoryGb = Math.Round(gpu.SharedMemoryGb, 2),
                 coreLoadPercent = gpuLoadPercent.HasValue ? Math.Round(gpuLoadPercent.Value, 1) : (double?)null,
-                temperatureCelsius = gpu.TemperatureCelsius
+                adapterId = gpu.AdapterId,
+                temperatureCelsius = gpu.TemperatureCelsius,
+                temperatureSource = gpu.TemperatureSource,
+                temperatureCapturedAtUtc = gpu.TemperatureCapturedAtUtc
             },
             connectedDisplaysCount = displays.Count,
             displays

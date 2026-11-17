@@ -89,9 +89,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             try
             {
                 _hardwareMonitor.Tick();
-                gpuStats.Adapters = _hardwareMonitor.GetGpuAdapters();
+                gpuStats.SetAdapterReadings(_hardwareMonitor.GetGpuAdapters());
                 cpuStats.SetTemperatureReading(_hardwareMonitor.GetCpuTemperatureReading());
-                gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature() ?? gpuStats.TemperatureCelsius;
 
                 var totalVramGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();
                 if (totalVramGb.HasValue && totalVramGb.Value > gpuStats.VramGb)

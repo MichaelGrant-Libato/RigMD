@@ -33,7 +33,10 @@ internal sealed partial class GpuActivityReader
                 using (row)
                 {
                     if (Stopwatch.GetElapsedTime(started) > TimeSpan.FromSeconds(2) || samples.Count >= 32_768)
-                        return BuildReadings(_inventory, [], DateTimeOffset.UtcNow);
+                    {
+                        samples.Clear();
+                        break;
+                    }
                     if (row["Name"] is string name && double.TryParse(row["UtilizationPercentage"]?.ToString(),
                             NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                         samples.Add((name, value));
@@ -46,7 +49,40 @@ internal sealed partial class GpuActivityReader
             samples.Clear();
         }
 
-        return BuildReadings(_inventory, samples, DateTimeOffset.UtcNow);
+        return ReadTemperatures(BuildReadings(_inventory, samples, DateTimeOffset.UtcNow));
+    }
+
+    internal static IReadOnlyList<GpuAdapterReading> ReadTemperatures(IReadOnlyList<GpuAdapterReading> adapters,
+        Func<ulong, double?>? readTemperature = null)
+    {
+        readTemperature ??= WindowsGpuTemperatureReader.Read;
+        return adapters.Select(adapter =>
+        {
+            var temperature = readTemperature(ulong.Parse(adapter.Id, NumberStyles.HexNumber));
+            return adapter with
+            {
+                TemperatureCelsius = temperature,
+                TemperatureSource = temperature.HasValue ? WindowsGpuTemperatureReader.Source : "Unavailable",
+                TemperatureCapturedAtUtc = temperature.HasValue ? DateTimeOffset.UtcNow : null
+            };
+        }).ToArray();
+    }
+
+    internal static IReadOnlyList<GpuAdapterReading> ApplyTemperatureFallback(IReadOnlyList<GpuAdapterReading> adapters,
+        GpuAdapterReading? fallback, DateTimeOffset now)
+    {
+        if (fallback?.TemperatureCelsius == null || fallback.TemperatureCapturedAtUtc is not { } captured ||
+            now - captured > TimeSpan.FromSeconds(5) || captured > now)
+            return adapters;
+
+        return adapters.Select(adapter => adapter.TemperatureCelsius == null && adapter.Id == fallback.Id
+            ? adapter with
+            {
+                TemperatureCelsius = fallback.TemperatureCelsius,
+                TemperatureSource = fallback.TemperatureSource,
+                TemperatureCapturedAtUtc = captured
+            }
+            : adapter).ToArray();
     }
 
     [GeneratedRegex(@"^pid_\d+_luid_0x(?<high>[0-9a-f]{1,8})_0x(?<low>[0-9a-f]{1,8})_phys_(?<physical>\d+)_eng_(?<engine>\d+)_engtype_.+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

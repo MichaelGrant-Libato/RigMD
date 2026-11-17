@@ -6,8 +6,8 @@ import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '../lib/api';
 import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
-import { formatTemperature } from '../lib/temperatureTelemetry';
-import type { HardwareStats } from '../types/rigmd';
+import { formatTemperature, selectedGpuTemperature } from '../lib/temperatureTelemetry';
+import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
 
@@ -40,7 +40,7 @@ interface TelemetryPoint {
   CpuProcesses?: number;
   CpuThreads?: number;
   CpuHandles?: number;
-  GpuTempCelsius?: number | null;
+  GpuAdapters?: GpuAdapterReading[];
   GpuMemoryTotalGb?: number;
   Disks: DiskTelemetryPoint[];
 }
@@ -59,7 +59,7 @@ interface RawTelemetryPayload {
   cpuProcesses?: number;
   cpuThreads?: number;
   cpuHandles?: number;
-  gpuTempCelsius?: number | null;
+  gpuAdapters?: GpuAdapterReading[];
   gpuMemoryTotalGb?: number;
   disks?: Array<{
     deviceId: string;
@@ -86,6 +86,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   const dialogRef = useRef<HTMLDivElement>(null);
   const [lastReadingAt, setLastReadingAt] = useState<number | null>(null);
   const [clock, setClock] = useState(Date.now());
+  const [gpuStreamUnavailable, setGpuStreamUnavailable] = useState(false);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
 
   useEffect(() => {
@@ -93,6 +94,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
     setData([]);
     setLastReadingAt(null);
+    setGpuStreamUnavailable(false);
     setSelectedDiskIndex(0);
     let disposed = false;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -108,6 +110,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
       connection.on('ReceiveTelemetry', (telemetry: RawTelemetryPayload) => {
         if (disposed) return;
         setLastReadingAt(Date.now());
+        setGpuStreamUnavailable(false);
         setData((prevData) => {
           const newData = [...prevData.slice(-59)];
           newData.push({
@@ -125,7 +128,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             CpuProcesses: telemetry.cpuProcesses,
             CpuThreads: telemetry.cpuThreads,
             CpuHandles: telemetry.cpuHandles,
-            GpuTempCelsius: telemetry.gpuTempCelsius,
+            GpuAdapters: telemetry.gpuAdapters ?? [],
             GpuMemoryTotalGb: telemetry.gpuMemoryTotalGb,
             Disks: (telemetry.disks || []).map((d) => ({
               DeviceId: d.deviceId,
@@ -137,6 +140,9 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           return newData;
         });
       });
+      const clearGpuTemperature = () => { if (!disposed) setGpuStreamUnavailable(true); };
+      connection.onreconnecting(clearGpuTemperature);
+      connection.onclose(clearGpuTemperature);
 
       try {
         await connection.start();
@@ -221,6 +227,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   }
 
   const latestData = data[data.length - 1];
+  const gpuTemperature = selectedGpuTemperature(stats.gpu, gpuStreamUnavailable ? [] : latestData?.GpuAdapters, clock);
 
   return (
     <AnimatePresence>
@@ -425,7 +432,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                 <>
                   <div><p className="text-xs text-slate-400">Utilization</p><p className="text-xl text-white">{latestData?.GpuUsagePercent || 0}%</p></div>
                   <div><p className="text-xs text-slate-400">GPU Memory</p><p className="text-xl text-white">{latestData?.GpuMemoryUsedGb || 0} / {stats.gpu.dedicated_memory_gb || stats.gpu.vram_gb} GB</p></div>
-                  <div><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(stats.gpu.temperature_celsius, latestData?.GpuTempCelsius, Boolean(latestData))}</p></div>
+                  <div title={gpuTemperature ? `${gpuTemperature.source} · ${new Date(gpuTemperature.capturedAtUtc).toLocaleTimeString()}` : undefined}><p className="text-xs text-slate-400">Temperature</p><p className="text-xl text-white">{formatTemperature(gpuTemperature?.celsius)}</p></div>
                   <div><p className="text-xs text-slate-400">Driver version</p><p className="text-sm text-white">{stats.gpu.driver}</p></div>
                   <div><p className="text-xs text-slate-400">Driver date</p><p className="text-sm text-white">{stats.gpu.driver_date || 'Unknown'}</p></div>
                   <div><p className="text-xs text-slate-400">DirectX version</p><p className="text-sm text-white">{stats.gpu.directx_version || 'Unknown'}</p></div>

@@ -8,6 +8,28 @@ namespace RigMD.Tests.Api;
 
 public class HardwareControllerTests
 {
+    [Fact]
+    public void LiveGpuTemperatureIncludesTheSelectedAdapterAndItsOwnProvenance()
+    {
+        var captured = DateTimeOffset.UtcNow;
+        var profile = new HardwareProfileDto { Gpu = new() { Name = "Radeon" } };
+        profile.Gpu.SetAdapterReadings([
+            new("radeon", "Radeon", "Dedicated", 25, captured)
+            {
+                TemperatureCelsius = 51,
+                TemperatureSource = "Windows display-driver sensor",
+                TemperatureCapturedAtUtc = captured
+            }
+        ]);
+        var result = Assert.IsType<OkObjectResult>(new HardwareController(new StubProfileService(profile)).GetLiveHardware());
+        var gpu = JsonSerializer.SerializeToElement(result.Value).GetProperty("gpu");
+        Assert.Equal("radeon", gpu.GetProperty("adapter_id").GetString());
+        Assert.Equal(51, gpu.GetProperty("temperature_celsius").GetDouble());
+        Assert.Equal("Windows display-driver sensor", gpu.GetProperty("temperature_source").GetString());
+        Assert.Equal(captured, gpu.GetProperty("temperature_captured_at_utc").GetDateTimeOffset());
+        Assert.Single(gpu.GetProperty("adapters").EnumerateArray());
+    }
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(true, false)]

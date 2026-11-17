@@ -60,11 +60,17 @@ public class HardwarePresenceProbeDto
     public Dictionary<string, ComponentPresenceInfoDto> Components { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-public sealed record GpuAdapterReading(string Id, string Name, string Type, double? UsagePercent, DateTimeOffset? CapturedAtUtc);
+public sealed record GpuAdapterReading(string Id, string Name, string Type, double? UsagePercent, DateTimeOffset? CapturedAtUtc)
+{
+    public double? TemperatureCelsius { get; init; }
+    public string TemperatureSource { get; init; } = "Unavailable";
+    public DateTimeOffset? TemperatureCapturedAtUtc { get; init; }
+}
 
 public class GpuStatsDto
 {
     public IReadOnlyList<GpuAdapterReading> Adapters { get; set; } = [];
+    public string? AdapterId { get; set; }
     public bool HasGpu { get; set; } = true;
     public bool HasDedicatedGpu { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -77,6 +83,19 @@ public class GpuStatsDto
     public string DirectXVersion { get; set; } = string.Empty;
     public string PhysicalLocation { get; set; } = string.Empty;
     public double? TemperatureCelsius { get; set; }
+    public string TemperatureSource { get; set; } = "Unavailable";
+    public DateTimeOffset? TemperatureCapturedAtUtc { get; set; }
+
+    public void SetAdapterReadings(IReadOnlyList<GpuAdapterReading> adapters)
+    {
+        Adapters = adapters;
+        var matches = adapters.Where(adapter => string.Equals(adapter.Name, Name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        var selected = matches.Length == 1 ? matches[0] : null;
+        AdapterId = selected?.Id;
+        TemperatureCelsius = selected?.TemperatureCelsius;
+        TemperatureSource = selected?.TemperatureSource ?? "Unavailable";
+        TemperatureCapturedAtUtc = selected?.TemperatureCapturedAtUtc;
+    }
 }
 
 public class MemoryStatsDto

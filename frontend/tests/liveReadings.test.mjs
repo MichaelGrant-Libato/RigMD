@@ -36,8 +36,9 @@ test('measured zero and 100 are real values; missing or invalid samples are unav
 
 const gpuCapturedAt = '2026-11-17T08:15:00Z';
 const gpuNow = Date.parse(gpuCapturedAt);
-const integrated = { id: 'adapter-1', name: 'Intel Graphics', type: 'Integrated', usagePercent: 74, capturedAtUtc: gpuCapturedAt };
-const dedicated = { id: 'adapter-2', name: 'GeForce', type: 'Dedicated', usagePercent: 16, capturedAtUtc: gpuCapturedAt };
+const unavailableTemperature = { temperatureCelsius: null, temperatureSource: 'Unavailable', temperatureCapturedAtUtc: null };
+const integrated = { id: 'adapter-1', name: 'Intel Graphics', type: 'Integrated', usagePercent: 74, capturedAtUtc: gpuCapturedAt, ...unavailableTemperature };
+const dedicated = { id: 'adapter-2', name: 'GeForce', type: 'Dedicated', usagePercent: 16, capturedAtUtc: gpuCapturedAt, ...unavailableTemperature };
 
 test('GPU usage requires an independently timestamped, valid adapter measurement', () => {
   assert.equal(gpuUsagePercent(integrated, gpuNow + 5000), 74);
@@ -84,6 +85,23 @@ test('a legacy aggregate preserves adapter identities without assigning usage, a
   ]);
   assert.equal(legacy.gpu.name, 'GeForce');
   assert.deepEqual(mergeLiveUsage(legacy, { gpuAdapters: [], gpuUsagePercent: 93 }, gpuNow).gpu.adapters, []);
+});
+
+test('GPU temperature clears on absent or expired telemetry independently of fresh activity', () => {
+  const warm = { ...dedicated, temperatureCelsius: 51, temperatureSource: 'Windows graphics driver', temperatureCapturedAtUtc: gpuCapturedAt };
+  const stats = { cpu: {}, ram: { total_gb: 16 }, gpu: { adapters: [warm] } };
+  const fresh = mergeLiveUsage(stats, { gpuAdapters: [warm] }, gpuNow);
+  assert.equal(fresh.gpu.adapters[0].temperatureCelsius, 51);
+  assert.equal(fresh.gpu.adapters[0].temperatureSource, 'Windows graphics driver');
+  const expired = mergeLiveUsage(stats, { gpuAdapters: [{ ...warm, capturedAtUtc: '2026-11-17T08:15:06Z' }] }, gpuNow + 6000);
+  assert.equal(expired.gpu.adapters[0].usagePercent, 16);
+  assert.equal(expired.gpu.adapters[0].temperatureCelsius, null);
+  for (const sample of [{}, { gpuAdapters: [{ ...warm, temperatureCelsius: null }] }]) {
+    const missing = mergeLiveUsage(stats, sample, gpuNow).gpu.adapters[0];
+    assert.equal(missing.temperatureCelsius, null);
+    assert.equal(missing.temperatureCapturedAtUtc, null);
+    assert.equal(missing.temperatureSource, 'Unavailable');
+  }
 });
 
 test('GPU card labels each adapter’s own activity and distinguishes measured idle from unavailable', async () => {

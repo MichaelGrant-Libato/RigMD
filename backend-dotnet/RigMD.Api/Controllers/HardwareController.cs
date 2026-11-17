@@ -73,11 +73,14 @@ public class HardwareController : ControllerBase
                 gpu = new
                 {
                     adapters = profile.Gpu.Adapters,
+                    adapter_id = profile.Gpu.AdapterId,
                     name = profile.Gpu.Name,
                     driver = profile.Gpu.Driver,
                     type = profile.Gpu.Type,
                     vram_gb = profile.Gpu.VramGb,
-                    temperature_celsius = profile.Gpu.TemperatureCelsius
+                    temperature_celsius = profile.Gpu.TemperatureCelsius,
+                    temperature_source = profile.Gpu.TemperatureSource,
+                    temperature_captured_at_utc = profile.Gpu.TemperatureCapturedAtUtc
                 },
                 ram = new
                 {
