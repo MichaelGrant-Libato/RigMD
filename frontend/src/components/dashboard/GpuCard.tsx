@@ -1,7 +1,24 @@
 import { motion } from 'motion/react';
-import { Gpu } from 'lucide-react';
+import { Gpu, Thermometer } from 'lucide-react';
 import type { GpuAdapterReading, HardwareStats } from '../../types/rigmd';
 import { gpuUsagePercent } from '../../lib/liveReadings';
+import { gpuTemperatureReading } from '../../lib/temperatureTelemetry';
+
+function GpuTemperature({ adapter }: { adapter: GpuAdapterReading }) {
+  const temperature = gpuTemperatureReading(adapter);
+  if (!temperature) return null;
+
+  return (
+    <span
+      aria-label={`${adapter.name} temperature`}
+      title={`${temperature.source} · ${new Date(temperature.capturedAtUtc).toLocaleTimeString()}`}
+      className="flex shrink-0 items-center gap-1 text-xs text-slate-400"
+    >
+      <Thermometer size={12} />
+      {Math.round(temperature.celsius)}°C
+    </span>
+  );
+}
 
 export default function GpuCard({ stats }: { stats: HardwareStats | null }) {
   const adapters: GpuAdapterReading[] = stats?.gpu?.adapters?.length
@@ -21,11 +38,14 @@ export default function GpuCard({ stats }: { stats: HardwareStats | null }) {
       className="rigmd-card-surface flex min-w-0 flex-col justify-between rounded-xl border p-5 min-h-[166px]"
       data-testid="gpu-card"
     >
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-400/[0.08]">
-          <Gpu size={16} className="text-cyan-300" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-400/[0.08]">
+            <Gpu size={16} className="text-cyan-300" />
+          </div>
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">GPU</span>
         </div>
-        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">GPU</span>
+        {adapters.length === 1 && <GpuTemperature adapter={adapters[0]} />}
       </div>
 
       <div className="mt-4 space-y-4">
@@ -33,11 +53,14 @@ export default function GpuCard({ stats }: { stats: HardwareStats | null }) {
           const usage = gpuUsagePercent(adapter);
           return (
             <div key={adapter.id} data-testid="gpu-adapter">
-              <div className="flex items-baseline gap-1.5">
-                <span className={`${adapters.length === 1 ? 'text-3xl' : 'text-2xl'} font-bold tabular-nums ${usage === null ? 'text-slate-400' : 'text-emerald-300'}`} data-testid="gpu-usage">
-                  {usage === null ? '—' : `${Math.round(usage)}%`}
-                </span>
-                <span className="text-xs text-slate-500">activity</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-baseline gap-1.5">
+                  <span className={`${adapters.length === 1 ? 'text-3xl' : 'text-2xl'} font-bold tabular-nums ${usage === null ? 'text-slate-400' : 'text-emerald-300'}`} data-testid="gpu-usage">
+                    {usage === null ? '—' : `${Math.round(usage)}%`}
+                  </span>
+                  <span className="text-xs text-slate-500">activity</span>
+                </div>
+                {adapters.length > 1 && <GpuTemperature adapter={adapter} />}
               </div>
               <p className="mt-1.5 break-words text-xs text-slate-400" title={adapter.name}>{adapter.name}</p>
               <p className="mt-1 text-[11px] text-slate-400">
