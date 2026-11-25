@@ -92,6 +92,7 @@ builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMemoryProvider
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IOperatingSystemProvider,  RigMD.Infrastructure.Windows.WmiOperatingSystemProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IStorageProvider,          RigMD.Infrastructure.Windows.WmiStorageProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.ISoftwareInventoryProvider, RigMD.Infrastructure.Windows.WindowsSoftwareInventory>();
+builder.Services.AddSingleton<RigMD.Application.Contracts.Providers.IAppUninstallService, RigMD.Infrastructure.Windows.WindowsAppUninstallService>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IMotherboardProvider,      RigMD.Infrastructure.Windows.WmiMotherboardProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IProcessProvider,          RigMD.Infrastructure.Windows.ProcessProvider>();
 builder.Services.AddScoped<RigMD.Application.Contracts.Providers.IBatteryProvider,          RigMD.Infrastructure.Windows.WmiBatteryProvider>();

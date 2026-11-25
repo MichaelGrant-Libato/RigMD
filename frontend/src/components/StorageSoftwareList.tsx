@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Cpu, ExternalLink, HardDrive, Package, RefreshCw } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { sortInstalledApps } from '../lib/softwareInventory';
+import AppUninstallAction, { type AppUninstallResult } from './AppUninstallAction';
 
 interface InventoryEntry {
   id: string;
@@ -15,6 +16,8 @@ interface InventoryEntry {
   volume?: string | null;
   diskIndex?: number | null;
   iconPng?: string | null;
+  uninstallAvailability?: string;
+  uninstallReason?: string | null;
   inf?: string | null;
   status?: string | null;
   details?: string | null;
@@ -69,6 +72,8 @@ export default memo(function StorageSoftwareList({
   const [sort, setSort] = useState<'name' | 'size'>('name');
   const [opening, setOpening] = useState(false);
   const [launchError, setLaunchError] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallResult, setUninstallResult] = useState<AppUninstallResult | null>(null);
   const settingsVisit = useRef<{ opened: boolean; away: boolean; returned: boolean } | null>(null);
   const apps = kind === 'apps';
 
@@ -153,6 +158,20 @@ export default memo(function StorageSoftwareList({
     }
   }
 
+  async function uninstallApp(approvalId: string) {
+    setUninstalling(true);
+    setUninstallResult(null);
+    try {
+      const { data } = await apiPost<AppUninstallResult>('/api/software-inventory/apps/uninstall', { approvalId });
+      setUninstallResult(data);
+    } catch {
+      setUninstallResult({ status: 'unverified', message: 'RigMD lost contact with the uninstaller. Check Windows Settings for the result.' });
+    } finally {
+      setUninstalling(false);
+      refresh();
+    }
+  }
+
   const drives = inventory?.drives ?? [];
   const selectedDrive = drives.find(drive => drive.diskIndex === location);
   const visibleLocation = typeof location === 'number' && inventory && !selectedDrive ? 'all' : location;
@@ -208,7 +227,7 @@ export default memo(function StorageSoftwareList({
         <button type="button" className={buttonClass} onClick={refresh} disabled={loading}>
           <RefreshCw size={14} aria-hidden="true" /> Refresh
         </button>
-        <button type="button" className={buttonClass} onClick={() => void openWindows()} disabled={opening}>
+        <button type="button" className={buttonClass} onClick={() => void openWindows()} disabled={opening || uninstalling}>
           <ExternalLink size={14} aria-hidden="true" /> {windowsLabel}
         </button>
       </div>
@@ -216,6 +235,21 @@ export default memo(function StorageSoftwareList({
         <p role="alert" className="text-sm text-amber-300">
           {apps ? 'Open Settings → Apps → Installed apps to uninstall.' : 'Search for Device Manager in the Windows Start menu.'}
         </p>
+      )}
+      {apps && (uninstalling || uninstallResult) && (
+        <div className="rounded-lg border border-slate-700 bg-[#101821] px-3 py-2 text-sm text-slate-300">
+          <p role="status">
+            {uninstalling ? 'WinGet is handling the uninstall. Follow the app’s prompts.'
+              : [uninstallResult?.name, uninstallResult?.message].filter(Boolean).join(' · ')}
+          </p>
+          {uninstallResult?.productCode && (
+            <details className="mt-1 text-xs text-slate-400">
+              <summary className="cursor-pointer">Uninstall details</summary>
+              <p className="mt-1 break-all">WinGet · {uninstallResult.productCode}</p>
+              {uninstallResult.exitCode && <p>Exit code · {uninstallResult.exitCode}</p>}
+            </details>
+          )}
+        </div>
       )}
       {inventory?.partial && (
         <p role="status" className="text-sm text-amber-300">Some Windows records could not be read.</p>
@@ -273,6 +307,12 @@ export default memo(function StorageSoftwareList({
                       </>
                     )}
                   </dl>
+                  {apps && (
+                    <div className="px-4 pb-3 text-xs">
+                      <AppUninstallAction appId={entry.id} availability={entry.uninstallAvailability}
+                        reason={entry.uninstallReason} busy={uninstalling} onUninstall={uninstallApp} />
+                    </div>
+                  )}
                 </details>
               </li>
             );

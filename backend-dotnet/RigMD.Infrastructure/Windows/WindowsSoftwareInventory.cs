@@ -15,8 +15,7 @@ namespace RigMD.Infrastructure.Windows;
 
 public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) : ISoftwareInventoryProvider
 {
-    private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
-    private const string AppxQuery = """
+    private const string AppxQuery = $$"""
         [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         $ErrorActionPreference = 'Stop'
         $names = @{}
@@ -34,6 +33,8 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
             @{
                 Id = $_.PackageFullName; Name = $name; Publisher = $_.Publisher
                 Version = $_.Version.ToString(); InstallPath = $_.InstallLocation
+                NonRemovable = ($_.NonRemovable -eq $true)
+                OfficialAppInstaller = ({{WindowsAppUninstallPlatform.OfficialAppInstallerPredicate}})
             }
         })
         ConvertTo-Json -InputObject $packages -Compress
@@ -52,7 +53,7 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
             try
             {
                 using var root = RegistryKey.OpenBaseKey(hive, view);
-                using var uninstall = root.OpenSubKey(UninstallKey);
+                using var uninstall = root.OpenSubKey(MachineMsiRegistration.UninstallKey);
                 foreach (var keyName in uninstall?.GetSubKeyNames() ?? [])
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -71,8 +72,11 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
                             continue;
 
                         var source = hive == RegistryHive.LocalMachine ? "Desktop app · This PC" : "Desktop app · Current user";
-                        entries.Add(new($"registry/{hive}/{view}/{keyName}", name, publisher, version, path, bytes,
-                            source, IconPng: icons.ReadDesktopIcon(RegistryText(key, "DisplayIcon"))));
+                        var appId = $"registry/{hive}/{view}/{keyName}";
+                        var (availability, reason) = MachineMsiRegistration.Availability(key, appId, name);
+                        entries.Add(new(appId, name, publisher, version, path, bytes,
+                            source, IconPng: icons.ReadDesktopIcon(RegistryText(key, "DisplayIcon")),
+                            UninstallAvailability: availability, UninstallReason: reason));
                     }
                     catch (Exception ex) when (IsRegistryReadError(ex)) { partial = true; }
                 }
@@ -80,6 +84,7 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
             catch (Exception ex) when (IsRegistryReadError(ex)) { partial = true; }
         }
 
+        var winGetRegistrations = 0;
         try
         {
             var json = await RunInventoryCommandAsync(
@@ -90,8 +95,12 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
                 if (Clean(package.Name) is not { } name || Clean(package.Id) is not { } id) continue;
                 cancellationToken.ThrowIfCancellationRequested();
                 var path = NormalizeInstallPath(package.InstallPath);
+                if (package.OfficialAppInstaller && path is not null && File.Exists(Path.Combine(path, "winget.exe")))
+                    winGetRegistrations++;
                 entries.Add(new($"package/{id}", name, Clean(package.Publisher), Clean(package.Version),
-                    path, null, "Windows package · Current user", IconPng: icons.ReadPackageIcon(path)));
+                    path, null, "Windows package · Current user", IconPng: icons.ReadPackageIcon(path),
+                    UninstallAvailability: package.NonRemovable ? "protected" : "settings",
+                    UninstallReason: package.NonRemovable ? "Windows marks this package as non-removable." : MachineMsiRegistration.SettingsReason));
             }
         }
         catch (Exception ex) when (IsInventoryCommandError(ex) || ex is JsonException) { partial = true; }
@@ -103,12 +112,15 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
         {
             cancellationToken.ThrowIfCancellationRequested();
             var app = entries[i];
+            if (winGetRegistrations != 1 && app.UninstallAvailability == "review")
+                app = app with { UninstallAvailability = "settings", UninstallReason = "WinGet is unavailable. Use Manage in Windows." };
             // Windows can mount a different volume under a directory on C:. Ask for the actual mount point.
             if (app.InstallPath is { } path && volumes.ContainsKey(Path.GetPathRoot(path)!)
                 && ReadVolumeRoot(path) is { } root && volumes.TryGetValue(root, out var diskIndex))
             {
-                entries[i] = app with { Volume = root.TrimEnd('\\').ToUpperInvariant(), DiskIndex = diskIndex };
+                app = app with { Volume = root.TrimEnd('\\').ToUpperInvariant(), DiskIndex = diskIndex };
             }
+            entries[i] = app;
         }
         var drives = localVolumes.Where(volume => volume.DiskIndex.HasValue)
             .GroupBy(volume => volume.DiskIndex!.Value)
@@ -228,7 +240,7 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
         return GetVolumePathNameW(path, buffer, (uint)buffer.Capacity) ? buffer.ToString() : null;
     }
 
-    private static async Task<string> RunInventoryCommandAsync(
+    internal static async Task<string> RunInventoryCommandAsync(
         string executable, string[] arguments, Encoding? encoding, CancellationToken cancellationToken)
     {
         using var process = new Process
@@ -272,7 +284,8 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
     private static bool IsRegistryReadError(Exception ex) => ex is UnauthorizedAccessException or SecurityException or IOException;
     private static bool IsInventoryCommandError(Exception ex) => ex is Win32Exception or InvalidOperationException or TimeoutException or IOException;
 
-    private sealed record AppPackage(string? Id, string? Name, string? Publisher, string? Version, string? InstallPath);
+    private sealed record AppPackage(string? Id, string? Name, string? Publisher, string? Version, string? InstallPath,
+        bool NonRemovable, bool OfficialAppInstaller);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

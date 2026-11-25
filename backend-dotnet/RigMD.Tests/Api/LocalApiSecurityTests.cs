@@ -47,6 +47,8 @@ public class LocalApiSecurityTests
     [InlineData("/api/profile")]
     [InlineData("/api/software-inventory/apps")]
     [InlineData("/api/software-inventory/drivers")]
+    [InlineData("/api/software-inventory/apps/uninstall-review")]
+    [InlineData("/api/software-inventory/apps/uninstall")]
     [InlineData("/hubs/telemetry")]
     [InlineData("/hubs/remediation/negotiate")]
     public async Task MissingCredential_IsRejected_EvenWithSpoofedClientId(string path)

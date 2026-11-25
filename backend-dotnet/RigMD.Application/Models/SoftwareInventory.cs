@@ -2,7 +2,8 @@ namespace RigMD.Application.Models;
 
 public sealed record InstalledApp(
     string Id, string Name, string? Publisher, string? Version, string? InstallPath, long? EstimatedSizeBytes,
-    string Source, string? Volume = null, int? DiskIndex = null, string? IconPng = null);
+    string Source, string? Volume = null, int? DiskIndex = null, string? IconPng = null,
+    string UninstallAvailability = "settings", string? UninstallReason = null);
 
 public sealed record SoftwareInventoryDrive(int DiskIndex, IReadOnlyList<string> Volumes, double? FreeGb);
 
@@ -14,3 +15,9 @@ public sealed record InstalledDriver(
     string? Details);
 
 public sealed record SoftwareInventory<T>(IReadOnlyList<T> Entries, bool Partial);
+
+public sealed record AppUninstallReview(
+    Guid? ApprovalId, string Message, string? Name = null, string? Version = null, string? ProductCode = null);
+
+public sealed record AppUninstallResult(
+    string Status, string Message, string? Name = null, string? ProductCode = null, string? ExitCode = null);

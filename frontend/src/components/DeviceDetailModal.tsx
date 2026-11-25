@@ -186,7 +186,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onClose(); }
       if (event.key !== 'Tab' || !dialog) return;
-      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], summary, [tabindex="0"]')];
+      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], summary, [tabindex="0"]')]
+        .filter(control => control.getClientRects().length > 0);
       const first = controls[0];
       const last = controls[controls.length - 1];
       if (!first) { event.preventDefault(); return; }
