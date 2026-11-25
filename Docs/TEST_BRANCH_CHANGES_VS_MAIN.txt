@@ -1,0 +1,282 @@
+RigMD experiment changes for reviewer testing
+============================================
+
+Branch      codex/my-device-info-telemetry-testing
+Code tip    410df761b19969da5934233a7690907e1e336678
+GitHub main dc5ba0ad1b1298ba019190c9d1aace0be72e376a
+Shared base c8fc16e3f80e95074b45c329cf246a4b217d5a41
+Compared    November 25, 2026
+
+The nine experiment commits change 69 files from the shared base. The counts
+include the Storage uninstall change log and exclude this report. GitHub main
+has 33 commits of its own after the split. The test branch uses the earlier
+baseline from the local verification. Local working edits and generated preview
+assets are outside the committed comparison.
+
+Reproduce the comparison from a clone with both refs:
+
+  git log --oneline dc5ba0a..410df76
+  git diff --stat dc5ba0a...410df76
+  git diff --name-status dc5ba0a...410df76
+
+1. Commit history
+-----------------
+
+2253aad  Add adapter-specific live GPU dashboard card
+cca072e  Read GPU temperature through installed Windows display driver
+491882a  Add optional CPU temperature monitoring with signed PawnIO
+deab33c  Show live GPU temperatures on Home dashboard
+20471a1  Add installed apps and driver views to Storage
+1ed5ea9  Improve software inventory browsing and app icons
+3890d6a  Add verified WinGet uninstall to Storage apps
+3b60af5  Record Storage uninstall branch changes and documentation impact
+410df76  Fix live telemetry in My Device Info cards
+
+2. Home and temperature monitoring
+----------------------------------
+
+- The Home dashboard adds a GPU card and adjusts its responsive grid. The GPU
+  card shows each measured adapter's name, integrated or dedicated type, usage
+  bar, and temperature where available. The CPU card also displays a fresh
+  temperature with its source.
+- DXCore enumerates hardware graphics adapters. RigMD matches Windows GPU
+  engine readings to the adapter's LUID, adds process activity on the same
+  engine, and takes the busiest engine's utilization. Independent engines and
+  different adapters stay separate. The card distinguishes measured idle
+  activity from an unavailable sample.
+- GPU temperature comes from the installed Windows display driver through
+  D3DKMT. A supported NVIDIA reading from nvidia-smi can fill a missing
+  temperature when RigMD identifies the adapter. Temperature and utilization
+  keep independent timestamps. Stale or missing readings clear from the UI.
+- Optional CPU temperature uses LibreHardwareMonitorLib 0.9.6 with the signed
+  PawnIO 2.2.0 driver and only the CPU hardware provider enabled. The collector
+  checks driver access, selects an identified CPU temperature sensor, and
+  supplies its source, sensor ID, and timestamp. It retries after transient
+  sensor failures. Home and Device Info use that same measurement contract.
+  A missing, inaccessible, or unsupported sensor shows "Not available".
+- The setup wizard offers an unchecked CPU temperature option. The setup
+  scripts pin the official driver installer by SHA-256 and verify its signer.
+  Packaging includes matching upstream source archives, licenses, and setup
+  and rollback notes. The app's telemetry loop performs read-only collection.
+  PawnIO installation is a separate administrator-approved step. Driver
+  removal is separate because other applications may share it. See
+  installer/CPU-SENSORS.md for status, installation, and removal commands.
+
+3. Storage software inventory
+-----------------------------
+
+- My Device Info > Storage has Overview, Installed apps, and Drivers views.
+  Installed apps supports search, name or largest-first sorting, physical drive
+  selection, and a Location unknown filter. Drive options show volume letters
+  and the selected drive shows available space when measured.
+- Apps come from machine and current-user desktop uninstall registrations in
+  the 32-bit and 64-bit registry views, plus main AppX packages registered for
+  the current user. Hidden system and child uninstall entries are filtered.
+  RigMD maps a known local install path to its Windows volume and physical
+  disk. App sizes are Windows or installer estimates, where supplied. The
+  inventory covers the records exposed by those sources.
+- Expand an entry for its publisher, version, source, install path, and
+  estimated size, where available. App icons use local resource extraction
+  or a package manifest logo. RigMD uses a fallback icon for missing or
+  invalid resources. Drivers have distinct rows and icons.
+- Drivers combines Plug and Play device records, driver services, and
+  third-party Driver Store packages. Rows can show version, provider, INF,
+  signer, service state, and other metadata. Drivers are informational, with
+  an Open Device Manager handoff.
+- Inventory supports manual refresh and discloses partial query results.
+  Manage in Windows opens Installed apps in Settings. RigMD refreshes the
+  app list on return and preserves the selected view and filters. Device
+  Manager is launched using the Windows system path.
+
+4. Direct uninstall for eligible apps
+-------------------------------------
+
+- An expanded eligible app shows Uninstall. Eligibility requires a verified
+  machine-wide MSI registration, a single valid product code, and Microsoft's
+  App Installer package. The review also checks WinGet command support.
+  Protected items explain the restriction. Current-user apps, packaged apps,
+  and unverifiable registrations use Manage in Windows as applicable.
+- The confirmation shows the app and version, WinGet as the launcher, and
+  machine-wide impact. On approval, RigMD consumes a one-time, three-minute
+  approval ID, checks the registration again, and starts the native
+  interactive uninstall for that exact MSI. Only one uninstall can run per
+  local API process. The request sends an app ID or approval ID.
+- RigMD reports Removed only after WinGet succeeds and the corresponding
+  Windows Installer and uninstall registrations disappear. It distinguishes
+  cancellation, restart, no match, failure, and unverified removal where the
+  evidence supports that result. The list refreshes afterward. Product and
+  exit codes can be inspected in the review or result where available.
+- The authenticated local API adds these four routes:
+
+    GET  /api/software-inventory/apps
+    GET  /api/software-inventory/drivers
+    POST /api/software-inventory/apps/uninstall-review
+    POST /api/software-inventory/apps/uninstall
+
+  Uninstall is a manual desktop action. The experiment updates the existing
+  GPU and memory diagnostic payloads and leaves the ReAct tool registry count
+  outside the scope of this feature. Approvals live in API process memory.
+
+5. My Device Info telemetry and details
+---------------------------------------
+
+- The overview and detail dialogs share one Device Info SignalR feed. Live
+  charts use a rolling 60-second time window. Stale and missing measurements
+  create gaps. The UI uses Idle for measured inactivity, Collecting during
+  warm-up, and Not available for missing evidence. The page distinguishes
+  the inventory collection time from the live sampling time.
+- Processor reports utilization, the Windows clock reading, the maximum
+  clock reported by firmware, system process, thread and handle counts,
+  temperature, sockets, physical and logical counts, firmware virtualization,
+  installed L1/L2/L3 cache, and uptime. The Windows frequency counter
+  can stay near the nominal clock. Treat it as that counter's reading.
+- Memory shows live physical usage and availability, committed memory and
+  its limit, cached memory, installed and hardware-reserved memory, configured
+  speed, module form factor, and slot count. Cached memory uses standby and
+  modified pages. Missing memory evidence stays distinct from measured zero.
+- Storage matches per-disk Windows performance counters by physical disk ID.
+  The detail shows activity, read/write rates, average response time when
+  transfers occur, volumes, and volume space at collection. Windows storage
+  metadata supplies the bus and media type where identified. Volume free
+  space is calculated from matching volume totals and usage.
+- Graphics selects a specific adapter on multi-GPU systems. It shows activity,
+  separately sampled dedicated and shared memory, temperature, driver
+  version, driver date, and PCI location where the adapter can be identified.
+  DXCore reports capacities and WDDM supplies per-adapter memory usage.
+  Legacy aggregate memory fields are available only when unambiguous.
+- Windows and Computer Name cards open details for edition, build, system
+  architecture, device identity, uptime, and active display count. The
+  Computer Name view also includes motherboard information. Active display
+  paths replace the old assumed single-display count.
+- On laptops the Network card matches traffic and link speed to the selected
+  interface. Battery and Power Plan open details. Live battery charge and
+  charging status come from Windows power status. AC power alone is
+  insufficient evidence of charging.
+- The live hardware route returns expanded CPU, RAM, GPU, battery, network,
+  display, storage, and inventory-timestamp fields. The telemetry hub adds
+  timestamped frames, per-disk response readings, per-interface network
+  speeds, and live battery status. Windows counters preserve unavailable
+  samples and measured zero separately. Existing memory and GPU diagnostic
+  payloads carry the corresponding verified fields or sensor provenance.
+
+6. Verification and tester handoff
+----------------------------------
+
+Recorded at the reviewed code tip:
+
+- The Windows Release desktop build and Vite build succeeded. TypeScript
+  checked successfully. The automated suites passed 831 backend and 134
+  frontend tests.
+- The live desktop-PC probe confirmed Ryzen 5 5600X CPU cache and firmware
+  virtualization, 3066 MT/s RAM in two of four slots, Windows storage bus
+  types for the SATA SSD, SATA HDD, and NVMe SSD, and Radeon RX 6600
+  temperature plus dedicated/shared memory readings.
+- A prior elevated PawnIO test on the Ryzen desktop recorded CPU temperature.
+  The latest non-elevated probe had no CPU temperature. Elevated desktop
+  sensor access, Intel and laptop hardware, hybrid graphics, and side-by-side
+  Task Manager parity remain open checks at this tip.
+- Uninstall tests cover local authentication, verified eligibility, exact MSI
+  identity, expired or reused approvals, changed registrations, concurrent
+  requests, and outcome reporting. The live WinGet check reached review;
+  uninstall execution was exercised with a simulated runner.
+
+Use a clean Windows checkout of the test branch. In frontend, run npm ci and
+npm run build before running the desktop app, so the API serves the current UI.
+Use the Desktop instructions in README.md. Compare the Processor, Memory,
+Storage, and Graphics cards with Task Manager at idle and under load. Check
+that opening a detail view retains the recent history and that missing readings
+clear rather than linger. On a laptop, test AC changes and adapter selection.
+For uninstall testing, use a disposable eligible machine-wide MSI and confirm
+the result in Windows Installed apps as well as RigMD.
+
+7. Documentation impact
+-----------------------
+
+- Docs/STORAGE_UNINSTALL_BRANCH_LOG.md records the Storage uninstall design,
+  test outcomes, and targeted documentation changes.
+- README and user guides should show the Home GPU card, updated device
+  details, Installed apps and Drivers paths, and the Windows handoffs.
+- Architecture and SDD should record the four software inventory routes,
+  app-specific approval and verification, telemetry source and timestamp
+  semantics, per-adapter and per-disk identity, and optional CPU probe setup.
+- The SRS and evaluation materials should spell out missing data behavior,
+  hardware coverage, conditional uninstall eligibility, visible outcomes,
+  and the limits of the current Task Manager comparison.
+- Remediation Policy should describe uninstall as a confirmed local action
+  with registration checks and result verification. Installer documentation
+  should keep the opt-in dependency, supported models, and removal steps.
+
+8. Complete committed file inventory
+-------------------------------------
+
+A = added. M = modified. Based on the three-dot code comparison above.
+
+A  Docs/STORAGE_UNINSTALL_BRANCH_LOG.md
+M  backend-dotnet/RigMD.Api/Controllers/AutonomyController.cs
+M  backend-dotnet/RigMD.Api/Controllers/HardwareController.cs
+A  backend-dotnet/RigMD.Api/Controllers/SoftwareInventoryController.cs
+M  backend-dotnet/RigMD.Api/Program.cs
+M  backend-dotnet/RigMD.Api/Services/TelemetryBackgroundService.cs
+A  backend-dotnet/RigMD.Application/Contracts/Providers/IAppUninstallService.cs
+M  backend-dotnet/RigMD.Application/Contracts/Providers/IHardwareProvider.cs
+A  backend-dotnet/RigMD.Application/Contracts/Providers/ISoftwareInventoryProvider.cs
+M  backend-dotnet/RigMD.Application/Models/HardwareModels.cs
+A  backend-dotnet/RigMD.Application/Models/SoftwareInventory.cs
+M  backend-dotnet/RigMD.Application/Models/TelemetryUpdateDto.cs
+M  backend-dotnet/RigMD.Infrastructure/Remediation/Tools/Diagnostic/InspectGpuAndDisplaysTool.cs
+M  backend-dotnet/RigMD.Infrastructure/Remediation/Tools/Diagnostic/InspectMemoryAndProcessesTool.cs
+M  backend-dotnet/RigMD.Infrastructure/RigMD.Infrastructure.csproj
+A  backend-dotnet/RigMD.Infrastructure/Windows/CpuTemperatureSampler.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/CpuTemperatureSensorReader.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/DxCoreGpuInventory.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/GpuActivityReader.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/HardwareMonitorService.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/LibreCpuTemperatureProbe.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/MachineMsiRegistration.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/WindowsAppIconReader.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/WindowsAppUninstallService.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/WindowsCounterQuery.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/WindowsGpuTemperatureReader.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WindowsNetworkProvider.cs
+A  backend-dotnet/RigMD.Infrastructure/Windows/WindowsSoftwareInventory.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WindowsSystemProfileService.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiBatteryProvider.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiCpuProvider.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiDisplayProvider.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiGpuProvider.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiMemoryProvider.cs
+M  backend-dotnet/RigMD.Infrastructure/Windows/WmiStorageProvider.cs
+M  backend-dotnet/RigMD.Tests/Api/HardwareControllerTests.cs
+M  backend-dotnet/RigMD.Tests/Api/LocalApiSecurityTests.cs
+A  backend-dotnet/RigMD.Tests/Infrastructure/CpuTemperatureSamplerTests.cs
+A  backend-dotnet/RigMD.Tests/Infrastructure/GpuActivityReaderTests.cs
+A  backend-dotnet/RigMD.Tests/Infrastructure/WindowsAppUninstallTests.cs
+A  backend-dotnet/RigMD.Tests/Infrastructure/WindowsGpuTemperatureReaderTests.cs
+A  backend-dotnet/RigMD.Tests/Infrastructure/WindowsSoftwareInventoryTests.cs
+A  frontend/src/components/AppUninstallAction.tsx
+M  frontend/src/components/DeviceDetailModal.tsx
+M  frontend/src/components/HomeDashboardContent.tsx
+A  frontend/src/components/StorageSoftwareList.tsx
+A  frontend/src/components/dashboard/GpuCard.tsx
+M  frontend/src/components/dashboard/MetricCards.tsx
+A  frontend/src/lib/deviceTelemetry.ts
+M  frontend/src/lib/liveReadings.ts
+A  frontend/src/lib/softwareInventory.ts
+M  frontend/src/lib/temperatureTelemetry.ts
+M  frontend/src/pages/SystemProfileView.tsx
+M  frontend/src/types/rigmd.ts
+A  frontend/tests/deviceTelemetry.test.mjs
+M  frontend/tests/liveReadings.test.mjs
+A  frontend/tests/softwareInventory.test.mjs
+M  frontend/tests/temperatureTelemetry.test.mjs
+A  installer/.gitignore
+A  installer/CPU-SENSORS.md
+A  installer/Manage-PawnIO.ps1
+A  installer/Prepare-CpuSensorSources.ps1
+M  installer/RigMD-Setup.iss
+M  installer/build-installer.ps1
+A  installer/licenses/CPU-SENSOR-NOTICES.md
+A  installer/licenses/LibreHardwareMonitor-MPL-2.0.txt
+A  installer/licenses/PawnIO-GPL-2.0.txt
+A  installer/licenses/PawnIO-Modules-LGPL-2.1.txt
+A  installer/licenses/PawnIO-license-exception.txt
