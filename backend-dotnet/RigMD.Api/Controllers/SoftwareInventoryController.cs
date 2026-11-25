@@ -9,7 +9,7 @@ namespace RigMD.Api.Controllers;
 public sealed class SoftwareInventoryController(ISoftwareInventoryProvider inventory) : ControllerBase
 {
     [HttpGet("apps")]
-    public async Task<ActionResult<SoftwareInventory<InstalledApp>>> Apps(CancellationToken cancellationToken) =>
+    public async Task<ActionResult<InstalledAppInventory>> Apps(CancellationToken cancellationToken) =>
         Ok(await inventory.ReadAppsAsync(cancellationToken));
 
     [HttpGet("drivers")]

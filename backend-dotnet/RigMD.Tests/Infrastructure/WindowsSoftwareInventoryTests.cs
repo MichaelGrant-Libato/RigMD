@@ -16,6 +16,19 @@ public class WindowsSoftwareInventoryTests
     public void OnlyAbsoluteLocalInstallPathsAreUsedForAttribution(string input, string? expected) =>
         Assert.Equal(expected, WindowsSoftwareInventory.NormalizeInstallPath(input));
 
+    [Theory]
+    [InlineData("\"D:\\Programs, Inc\\Example.exe\",-20", @"D:\Programs, Inc\Example.exe", -20)]
+    [InlineData(@"D:\Programs\Example.ico", @"D:\Programs\Example.ico", 0)]
+    [InlineData(@"\\server\share\Example.exe,0", null, 0)]
+    [InlineData(@"D:\Programs\Example.cmd,0", null, 0)]
+    [InlineData(@"D:\Programs\Example.dll,-2147483648", null, 0)]
+    public void IconReferencesAcceptLocalResourcesAndRejectCommands(string input, string? path, int index)
+    {
+        var result = WindowsAppIconReader.ParseDesktopIcon(input);
+        Assert.Equal(path, result?.Path);
+        if (result is { } reference) Assert.Equal(index, reference.Index);
+    }
+
     [Fact]
     public void DriverStoreRecordsAreSeparatedAndLocalizedDetailsArePreserved()
     {

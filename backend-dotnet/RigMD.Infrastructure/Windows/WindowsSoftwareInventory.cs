@@ -39,8 +39,10 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
         ConvertTo-Json -InputObject $packages -Compress
         """;
 
-    public async Task<SoftwareInventory<InstalledApp>> ReadAppsAsync(CancellationToken cancellationToken)
+    public async Task<InstalledAppInventory> ReadAppsAsync(CancellationToken cancellationToken)
     {
+        var localVolumes = storage.GetAllDisks();
+        var icons = new WindowsAppIconReader(localVolumes.Select(volume => volume.Drive));
         var entries = new List<InstalledApp>();
         var registrations = new HashSet<(RegistryHive, string, string, string?, string?, string?, long?)>();
         var partial = false;
@@ -69,7 +71,8 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
                             continue;
 
                         var source = hive == RegistryHive.LocalMachine ? "Desktop app · This PC" : "Desktop app · Current user";
-                        entries.Add(new($"registry/{hive}/{view}/{keyName}", name, publisher, version, path, bytes, source));
+                        entries.Add(new($"registry/{hive}/{view}/{keyName}", name, publisher, version, path, bytes,
+                            source, IconPng: icons.ReadDesktopIcon(RegistryText(key, "DisplayIcon"))));
                     }
                     catch (Exception ex) when (IsRegistryReadError(ex)) { partial = true; }
                 }
@@ -85,13 +88,15 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
             foreach (var package in JsonSerializer.Deserialize<AppPackage[]>(json) ?? [])
             {
                 if (Clean(package.Name) is not { } name || Clean(package.Id) is not { } id) continue;
+                cancellationToken.ThrowIfCancellationRequested();
+                var path = NormalizeInstallPath(package.InstallPath);
                 entries.Add(new($"package/{id}", name, Clean(package.Publisher), Clean(package.Version),
-                    NormalizeInstallPath(package.InstallPath), null, "Windows package · Current user"));
+                    path, null, "Windows package · Current user", IconPng: icons.ReadPackageIcon(path)));
             }
         }
         catch (Exception ex) when (IsInventoryCommandError(ex) || ex is JsonException) { partial = true; }
 
-        var volumes = storage.GetAllDisks()
+        var volumes = localVolumes
             .Where(volume => volume.DiskIndex.HasValue)
             .ToDictionary(volume => volume.Drive, volume => volume.DiskIndex!.Value, StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < entries.Count; i++)
@@ -105,7 +110,20 @@ public sealed partial class WindowsSoftwareInventory(IStorageProvider storage) :
                 entries[i] = app with { Volume = root.TrimEnd('\\').ToUpperInvariant(), DiskIndex = diskIndex };
             }
         }
-        return new(entries.OrderBy(app => app.Name, StringComparer.CurrentCultureIgnoreCase).ToArray(), partial);
+        var drives = localVolumes.Where(volume => volume.DiskIndex.HasValue)
+            .GroupBy(volume => volume.DiskIndex!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var letters = group.Select(volume => volume.Drive.TrimEnd('\\').ToUpperInvariant())
+                    .Order(StringComparer.Ordinal).ToArray();
+                double? freeGb = group.All(volume =>
+                    double.IsFinite(volume.TotalGb) && double.IsFinite(volume.UsedGb)
+                    && volume.UsedGb >= 0 && volume.UsedGb <= volume.TotalGb)
+                    ? group.Sum(volume => volume.TotalGb - volume.UsedGb) : null;
+                return new SoftwareInventoryDrive(group.Key, letters, freeGb);
+            }).ToArray();
+        return new(entries.OrderBy(app => app.Name, StringComparer.CurrentCultureIgnoreCase).ToArray(), partial, drives);
     }
 
     public async Task<SoftwareInventory<InstalledDriver>> ReadDriversAsync(CancellationToken cancellationToken)

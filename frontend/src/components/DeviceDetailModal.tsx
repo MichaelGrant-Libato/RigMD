@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -93,6 +93,11 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   const [clock, setClock] = useState(Date.now());
   const [temperatureStreamUnavailable, setTemperatureStreamUnavailable] = useState(false);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
+  const availableStorage = stats?.storage_drives;
+  const selectStorageDrive = useCallback((diskIndex: number) => {
+    const position = availableStorage?.findIndex(drive => drive.disk_index === diskIndex) ?? -1;
+    if (position >= 0) setSelectedDiskIndex(position);
+  }, [availableStorage]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -237,7 +242,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   }
 
   const latestData = data[data.length - 1];
-  const storageDrives = stats.storage_drives ?? [];
+  const storageDrives = availableStorage ?? [];
   const disk = storageDrives[selectedDiskIndex] ?? storageDrives[0];
   const cpuTemperature = selectedCpuTemperature(stats.cpu, temperatureStreamUnavailable ? {} : latestData?.CpuTemperature, clock);
   const gpuTemperature = selectedGpuTemperature(stats.gpu, temperatureStreamUnavailable ? [] : latestData?.GpuAdapters, clock);
@@ -305,7 +310,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                   ))}
                 </div>
                 {/* Disk Selector Tabs */}
-                {storageView !== 'drivers' && storageDrives.length > 1 && (
+                {storageView === 'overview' && storageDrives.length > 1 && (
                   <div className="flex flex-wrap gap-2 mb-2 border-b border-[var(--rigmd-border)] pb-4">
                     {storageDrives.map((drive, idx) => (
                       <button
@@ -331,7 +336,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
                     key={storageView}
                     kind={storageView}
                     diskIndex={disk?.disk_index}
-                    driveName={disk?.disk_index == null ? undefined : 'Drive ' + disk.disk_index}
+                    onSelectDrive={selectStorageDrive}
                   />
                 )}
                 {storageView === 'overview' && disk && (() => {
