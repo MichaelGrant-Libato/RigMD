@@ -72,6 +72,7 @@ public class WindowsNetworkProvider :
 
             result.HasActiveAdapter =
                 true;
+            result.AdapterId = activeAdapter.Adapter.Id;
 
             result.AdapterName =
                 activeAdapter.Adapter.Name;

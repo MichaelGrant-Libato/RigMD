@@ -88,6 +88,31 @@ internal sealed partial class GpuActivityReader
     [GeneratedRegex(@"^pid_\d+_luid_0x(?<high>[0-9a-f]{1,8})_0x(?<low>[0-9a-f]{1,8})_phys_(?<physical>\d+)_eng_(?<engine>\d+)_engtype_.+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex EngineInstance();
 
+    [GeneratedRegex(@"^luid_0x(?<high>[0-9a-f]{1,8})_0x(?<low>[0-9a-f]{1,8})_phys_(?<physical>\d+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex MemoryInstance();
+
+    internal static IReadOnlyList<GpuAdapterReading> ApplyMemoryReadings(IReadOnlyList<GpuAdapterReading> adapters,
+        IEnumerable<(string Name, ulong? Dedicated, ulong? Shared)> samples, DateTimeOffset capturedAtUtc)
+    {
+        var rows = samples.Select(row => (Row: row, Match: MemoryInstance().Match(row.Name)))
+            .Where(entry => entry.Match.Success)
+            .GroupBy(entry => entry.Match.Groups["high"].Value.PadLeft(8, '0') +
+                entry.Match.Groups["low"].Value.PadLeft(8, '0'), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        return adapters.Select(adapter =>
+        {
+            if (!rows.TryGetValue(adapter.Id, out var matches) ||
+                matches.Select(entry => entry.Match.Groups["physical"].Value).Distinct().Count() != matches.Length)
+                return adapter with { DedicatedUsedGb = null, SharedUsedGb = null, MemoryCapturedAtUtc = null };
+            double? dedicated = matches.All(entry => entry.Row.Dedicated.HasValue)
+                ? matches.Sum(entry => (double)entry.Row.Dedicated!.Value) / 1073741824d : null;
+            double? shared = matches.All(entry => entry.Row.Shared.HasValue)
+                ? matches.Sum(entry => (double)entry.Row.Shared!.Value) / 1073741824d : null;
+            return adapter with { DedicatedUsedGb = dedicated, SharedUsedGb = shared,
+                MemoryCapturedAtUtc = dedicated.HasValue || shared.HasValue ? capturedAtUtc : null };
+        }).ToArray();
+    }
+
     internal static IReadOnlyList<GpuAdapterReading> BuildReadings(IReadOnlyList<GpuAdapterIdentity> inventory,
         IEnumerable<(string Name, double Usage)> samples, DateTimeOffset capturedAtUtc)
     {
@@ -109,7 +134,7 @@ internal sealed partial class GpuActivityReader
 
         // Each process contributes to its physical engine. Independent engines can run concurrently.
         var busiest = totals.GroupBy(row => row.Key.Luid)
-            .ToDictionary(group => group.Key, group => Math.Round(Math.Min(100, group.Max(row => row.Value)), 1));
+            .ToDictionary(group => group.Key, group => Math.Min(100, group.Max(row => row.Value)));
         var names = inventory.Where(adapter => adapter.IsHardware).ToDictionary(adapter => adapter.Luid);
         return names.Keys.Union(busiest.Keys).Order()
             .Select((luid, index) =>
@@ -117,7 +142,12 @@ internal sealed partial class GpuActivityReader
                 names.TryGetValue(luid, out var adapter);
                 var measured = busiest.TryGetValue(luid, out var usage);
                 return new GpuAdapterReading(luid.ToString("x16"), adapter?.Name ?? $"Graphics adapter {index + 1}",
-                    adapter?.Type ?? "Unknown", measured ? usage : null, measured ? capturedAtUtc : null);
+                    adapter?.Type ?? "Unknown", measured ? usage : null, measured ? capturedAtUtc : null)
+                {
+                    DriverVersion = adapter?.DriverVersion,
+                    DedicatedMemoryGb = adapter?.DedicatedMemoryGb,
+                    SharedMemoryGb = adapter?.SharedMemoryGb
+                };
             }).ToArray();
     }
 }

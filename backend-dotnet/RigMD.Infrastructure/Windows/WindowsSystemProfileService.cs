@@ -107,6 +107,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var presence = BuildPresenceProbe(deviceType, battery, gpuStats);
         var deviceErrors = GetDeviceErrors(out var deviceErrorsAvailable);
 
+        var displayCount = _displayProvider.GetActiveDisplayCount();
         var profile = new HardwareProfileDto
         {
             DeviceName = _osProvider.GetDeviceName(),
@@ -116,7 +117,8 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             ChipsetDriver = _motherboardProvider.GetChipsetDriver(),
             PrimaryStorageType = _storageProvider.GetPrimaryStorageType(),
             ActivePowerPlan = _powerProvider.GetActivePowerPlan(),
-            ConnectedDisplays = _displayProvider.GetConnectedDisplays(),
+            ConnectedDisplays = displayCount ?? 0,
+            ActiveDisplayCount = displayCount,
             Displays = _displayProvider.GetDisplays(),
             DeviceErrors = deviceErrors,
             DeviceErrorsAvailable = deviceErrorsAvailable,

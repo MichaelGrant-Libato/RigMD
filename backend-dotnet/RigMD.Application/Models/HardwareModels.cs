@@ -14,7 +14,7 @@ public class CpuStatsDto
     public double MaxFrequencyMhz { get; set; }
     public bool IsThermallyThrottling { get; set; }
     public int Sockets { get; set; } = 1;
-    public bool VirtualizationEnabled { get; set; }
+    public bool? VirtualizationEnabled { get; set; }
     public double L1CacheKb { get; set; }
     public double L2CacheMb { get; set; }
     public double L3CacheMb { get; set; }
@@ -62,6 +62,12 @@ public class HardwarePresenceProbeDto
 
 public sealed record GpuAdapterReading(string Id, string Name, string Type, double? UsagePercent, DateTimeOffset? CapturedAtUtc)
 {
+    public string? DriverVersion { get; init; }
+    public double? DedicatedMemoryGb { get; init; }
+    public double? SharedMemoryGb { get; init; }
+    public double? DedicatedUsedGb { get; init; }
+    public double? SharedUsedGb { get; init; }
+    public DateTimeOffset? MemoryCapturedAtUtc { get; init; }
     public double? TemperatureCelsius { get; init; }
     public string TemperatureSource { get; init; } = "Unavailable";
     public DateTimeOffset? TemperatureCapturedAtUtc { get; init; }
@@ -104,13 +110,16 @@ public class MemoryStatsDto
     public double TotalGb { get; set; }
     public double UsedGb { get; set; }
     public double UsagePercent { get; set; }
+    public double? AvailableGb { get; set; }
+    public double? InstalledGb { get; set; }
+    public double? CommitLimitGb { get; set; }
     public double SpeedMtps { get; set; }
     public int SlotsUsed { get; set; }
     public int SlotsTotal { get; set; }
     public string FormFactor { get; set; } = string.Empty;
-    public double HardwareReservedMb { get; set; }
-    public double CommittedGb { get; set; }
-    public double CachedGb { get; set; }
+    public double? HardwareReservedMb { get; set; }
+    public double? CommittedGb { get; set; }
+    public double? CachedGb { get; set; }
 }
 
 public class StorageDriveDto
@@ -166,6 +175,7 @@ public class ProcessAppDto
 
 public class NetworkStatsDto
 {
+    public string? AdapterId { get; set; }
     public bool? QuerySucceeded { get; set; }
     public bool HasActiveAdapter { get; set; }
     public string AdapterName { get; set; } = string.Empty;
@@ -245,6 +255,7 @@ public class HardwareProfileDto
     public string PrimaryStorageType { get; set; } = string.Empty;
     public string ActivePowerPlan { get; set; } = string.Empty;
     public int ConnectedDisplays { get; set; }
+    public int? ActiveDisplayCount { get; set; }
     
     public List<DisplayStatsDto> Displays { get; set; } = new();
     public List<DeviceErrorDto> DeviceErrors { get; set; } = new();

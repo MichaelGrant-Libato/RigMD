@@ -88,6 +88,30 @@ public class GpuActivityReaderTests
         Assert.Equal(25, result[1].UsagePercent);
     }
 
+    [Fact]
+    public void MemoryCountersAreMatchedByAdapterAndMissingSamplesClearOldMeasurements()
+    {
+        var adapters = GpuActivityReader.BuildReadings(Inventory, [], Captured);
+        var result = GpuActivityReader.ApplyMemoryReadings(adapters,
+        [
+            ("luid_0x0_0x1_phys_0", 0, 536870912),
+            ("luid_0x00000000_0x00000002_phys_0", 2147483648, null),
+            ("luid_0x0_0x3_phys_0", 3221225472, 3221225472)
+        ], Captured);
+
+        Assert.Equal(0, result[0].DedicatedUsedGb);
+        Assert.Equal(0.5, result[0].SharedUsedGb);
+        Assert.Equal(2, result[1].DedicatedUsedGb);
+        Assert.Null(result[1].SharedUsedGb);
+        Assert.All(result, adapter => Assert.Equal(Captured, adapter.MemoryCapturedAtUtc));
+        Assert.All(GpuActivityReader.ApplyMemoryReadings(result, [], Captured.AddSeconds(1)), adapter =>
+        {
+            Assert.Null(adapter.DedicatedUsedGb);
+            Assert.Null(adapter.SharedUsedGb);
+            Assert.Null(adapter.MemoryCapturedAtUtc);
+        });
+    }
+
     private static string Engine(uint luid, int physical = 0, int engine = 0, int process = 1) =>
         $"pid_{process}_luid_0x00000000_0x{luid:x8}_phys_{physical}_eng_{engine}_engtype_3D";
 }

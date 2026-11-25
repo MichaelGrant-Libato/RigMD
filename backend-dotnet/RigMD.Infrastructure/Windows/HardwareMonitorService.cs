@@ -26,7 +26,7 @@ public interface IHardwareMonitorService
 /// <summary>
 /// Windows telemetry service with optional CPU-only LibreHardwareMonitor/PawnIO sensor access.
 /// Uses Windows Performance Counters, the installed display driver's temperature query, identified CPU sensors,
-/// Registry 64-bit VRAM lookup, GlobalMemoryStatusEx, and signed user-mode nvidia-smi CLI when available.
+/// DXCore adapter inventory, GlobalMemoryStatusEx, and signed user-mode nvidia-smi CLI when available.
 /// PawnIO setup is performed explicitly outside the telemetry loop.
 /// </summary>
 public class HardwareMonitorService : IHardwareMonitorService, IDisposable
@@ -96,7 +96,6 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
         }
 
         _nvidiaSmiPath = ResolveNvidiaSmiPath();
-        _gpuMemoryTotalGb = ReadRegistryMaxGpuVramGb();
 
         Tick();
     }
@@ -197,28 +196,21 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
     {
         // Always sample every Windows adapter, including integrated graphics on hybrid systems.
         _gpuAdapters = _gpuActivityReader.Read();
-        bool gotNvidiaMetrics = false;
-
         if (!_nvidiaSmiUnavailable && _nvidiaSmiPath != null)
         {
             if (nowUtc - _lastGpuCliProbeUtc >= MinGpuCliInterval)
             {
                 _lastGpuCliProbeUtc = nowUtc;
-                gotNvidiaMetrics = TryProbeNvidiaSmi(_nvidiaSmiPath);
-            }
-            else if (_gpuTempCelsius.HasValue || _gpuLoadPercent.HasValue)
-            {
-                gotNvidiaMetrics = true;
+                TryProbeNvidiaSmi(_nvidiaSmiPath);
             }
         }
 
-        if (!gotNvidiaMetrics)
-        {
-            UpdateGpuFromWindowsPerformanceCounters();
-        }
+        UpdateGpuFromWindowsPerformanceCounters();
         _gpuAdapters = GpuActivityReader.ApplyTemperatureFallback(_gpuAdapters, _nvidiaTemperatureFallback, DateTimeOffset.UtcNow);
         _gpuLoadPercent = _gpuAdapters.Select(adapter => adapter.UsagePercent).Max();
         _gpuTempCelsius = _gpuAdapters.Count == 1 ? _gpuAdapters[0].TemperatureCelsius : null;
+        _gpuMemoryUsedGb = _gpuAdapters.Count == 1 ? _gpuAdapters[0].DedicatedUsedGb : null;
+        _gpuMemoryTotalGb = _gpuAdapters.Count == 1 ? _gpuAdapters[0].DedicatedMemoryGb : null;
     }
 
     private bool TryProbeNvidiaSmi(string exePath)
@@ -283,24 +275,6 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
                     }
                 }
 
-                if (double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var utilPct) &&
-                    utilPct >= 0)
-                {
-                    _gpuLoadPercent = Math.Round(Math.Clamp(utilPct, 0.0, 100.0), 1);
-                }
-
-                if (double.TryParse(parts[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var usedMib) &&
-                    usedMib >= 0)
-                {
-                    _gpuMemoryUsedGb = Math.Round(usedMib / 1024.0, 2);
-                }
-
-                if (double.TryParse(parts[3].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var totalMib) &&
-                    totalMib > 0)
-                {
-                    _gpuMemoryTotalGb = Math.Round(totalMib / 1024.0, 2);
-                }
-
                 return true;
             }
         }
@@ -314,27 +288,23 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     private void UpdateGpuFromWindowsPerformanceCounters()
     {
-        // 1. Dedicated VRAM Used via Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory
+        if (_gpuAdapters.Count == 0) return;
         try
         {
             using var memSearcher = new ManagementObjectSearcher(
                 @"root\CIMV2",
-                "SELECT DedicatedUsage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory");
-
-            double maxDedicatedBytes = 0;
-            foreach (ManagementObject obj in memSearcher.Get())
+                "SELECT Name, DedicatedUsage, SharedUsage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory");
+            using var instances = memSearcher.Get();
+            var samples = new List<(string Name, ulong? Dedicated, ulong? Shared)>();
+            foreach (ManagementObject obj in instances)
+            using (obj)
             {
-                var bytes = TryParseDouble(obj["DedicatedUsage"]);
-                if (bytes > maxDedicatedBytes)
-                {
-                    maxDedicatedBytes = bytes;
-                }
+                if (obj["Name"] is not string name) continue;
+                samples.Add((name,
+                    ulong.TryParse(obj["DedicatedUsage"]?.ToString(), out var dedicated) ? dedicated : null,
+                    ulong.TryParse(obj["SharedUsage"]?.ToString(), out var shared) ? shared : null));
             }
-
-            if (maxDedicatedBytes > 0)
-            {
-                _gpuMemoryUsedGb = Math.Round(maxDedicatedBytes / (1024.0 * 1024.0 * 1024.0), 2);
-            }
+            _gpuAdapters = GpuActivityReader.ApplyMemoryReadings(_gpuAdapters, samples, DateTimeOffset.UtcNow);
         }
         catch
         {

@@ -66,6 +66,7 @@ public interface IPowerProvider
 public interface IDisplayProvider
 {
     int GetConnectedDisplays();
+    int? GetActiveDisplayCount() => GetConnectedDisplays();
     List<DisplayStatsDto> GetDisplays();
 }
 

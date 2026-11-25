@@ -4,7 +4,12 @@ using System.Text;
 
 namespace RigMD.Infrastructure.Windows;
 
-internal sealed record GpuAdapterIdentity(ulong Luid, string Name, string Type, bool IsHardware = true);
+internal sealed record GpuAdapterIdentity(ulong Luid, string Name, string Type, bool IsHardware = true)
+{
+    public double? DedicatedMemoryGb { get; init; }
+    public double? SharedMemoryGb { get; init; }
+    public string? DriverVersion { get; init; }
+}
 
 internal static class DxCoreGpuInventory
 {
@@ -46,8 +51,18 @@ internal static class DxCoreGpuInventory
                         [0] => "Dedicated",
                         _ => "Unknown"
                     };
+                    var dedicated = ReadUInt64(adapter, AdapterProperty.DedicatedAdapterMemory);
+                    var reserved = ReadUInt64(adapter, AdapterProperty.DedicatedSystemMemory);
+                    var version = ReadUInt64(adapter, AdapterProperty.DriverVersion);
                     identities.Add(new(BinaryPrimitives.ReadUInt64LittleEndian(luid),
-                        string.IsNullOrEmpty(name) ? "Graphics adapter" : name, type, hardware[0] == 1));
+                        string.IsNullOrEmpty(name) ? "Graphics adapter" : name, type, hardware[0] == 1)
+                    {
+                        DedicatedMemoryGb = dedicated.HasValue || reserved.HasValue
+                            ? (dedicated.GetValueOrDefault() + (double)reserved.GetValueOrDefault()) / 1073741824d : null,
+                        SharedMemoryGb = ReadUInt64(adapter, AdapterProperty.SharedSystemMemory) / 1073741824d,
+                        DriverVersion = version is > 0
+                            ? $"{version.Value >> 48}.{(version.Value >> 32) & 0xffff}.{(version.Value >> 16) & 0xffff}.{version.Value & 0xffff}" : null
+                    });
                 }
                 finally
                 {
@@ -87,10 +102,20 @@ internal static class DxCoreGpuInventory
         }
     }
 
+    private static ulong? ReadUInt64(IAdapter adapter, AdapterProperty property)
+    {
+        var data = ReadProperty(adapter, property);
+        return data.Length == sizeof(ulong) ? BinaryPrimitives.ReadUInt64LittleEndian(data) : null;
+    }
+
     private enum AdapterProperty : uint
     {
         InstanceLuid = 0,
+        DriverVersion = 1,
         DriverDescription = 2,
+        DedicatedAdapterMemory = 7,
+        DedicatedSystemMemory = 8,
+        SharedSystemMemory = 9,
         IsHardware = 11,
         IsIntegrated = 12
     }

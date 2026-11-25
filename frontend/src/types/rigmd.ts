@@ -1,6 +1,12 @@
 //rigmd.ts
 
 export interface GpuAdapterReading {
+  driverVersion?: string | null;
+  dedicatedMemoryGb?: number | null;
+  sharedMemoryGb?: number | null;
+  dedicatedUsedGb?: number | null;
+  sharedUsedGb?: number | null;
+  memoryCapturedAtUtc?: string | null;
   id: string;
   name: string;
   type: 'Integrated' | 'Dedicated' | 'Unknown';
@@ -208,15 +214,20 @@ export type AutomaticScanStage =
 
 export interface HardwareStats {
   device_name: string;
+  inventory_captured_at_utc?: string;
+  os_architecture?: string;
+  volume_space?: { free_gb: number; usage_percent: number } | null;
   device_type?: string;
   active_power_plan?: string;
-  connected_displays?: number;
+  connected_displays?: number | null;
   battery?: {
-    is_charging: boolean;
-    charge_percent: number;
+    is_charging: boolean | null;
+    charge_percent: number | null;
     health_status: string;
   } | null;
   network?: {
+    adapter_id?: string | null;
+    adapter_name?: string;
     is_wifi: boolean;
     query_succeeded?: boolean;
     has_active_adapter?: boolean;
@@ -283,15 +294,15 @@ export interface HardwareStats {
     usage_source?: string;
     usage_captured_at_utc?: string | null;
     usage_window_seconds?: number | null;
-    cores: number;
-    threads: number;
+    cores: number | null;
+    threads: number | null;
     frequency_mhz: number;
-    max_frequency_mhz?: number;
-    sockets?: number;
-    virtualization_enabled?: boolean;
-    l1_cache_kb?: number;
-    l2_cache_mb?: number;
-    l3_cache_mb?: number;
+    max_frequency_mhz?: number | null;
+    sockets?: number | null;
+    virtualization_enabled?: boolean | null;
+    l1_cache_kb?: number | null;
+    l2_cache_mb?: number | null;
+    l3_cache_mb?: number | null;
     processes?: number;
     handles?: number;
     temperature_celsius?: number | null;
@@ -317,14 +328,17 @@ export interface HardwareStats {
   };
   ram: {
     total_gb: number;
+    installed_gb?: number | null;
+    available_gb?: number | null;
+    commit_limit_gb?: number | null;
     used_gb: number | null;
     usage_percent: number | null;
-    speed_mtps?: number;
-    slots_used?: number;
-    slots_total?: number;
+    speed_mtps?: number | null;
+    slots_used?: number | null;
+    slots_total?: number | null;
     form_factor?: string;
-    hardware_reserved_mb?: number;
-    committed_gb?: number;
+    hardware_reserved_mb?: number | null;
+    committed_gb?: number | null;
     cached_gb?: number;
   };
   disk: {

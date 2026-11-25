@@ -15,16 +15,25 @@ public class HardwareController : ControllerBase
         _profileService = profileService;
     }
 
+    private static double? Positive(double value) => double.IsFinite(value) && value > 0 ? value : null;
+
     [HttpGet("live")]
     public IActionResult GetLiveHardware()
     {
         try
         {
             var profile = _profileService.GetLiveSystemProfile();
+            var knownVolumes = profile.AllDisks.Count > 0 && profile.AllDisks.All(volume =>
+                double.IsFinite(volume.TotalGb) && volume.TotalGb > 0 && double.IsFinite(volume.UsedGb)
+                && volume.UsedGb >= 0 && volume.UsedGb <= volume.TotalGb);
+            var volumeTotal = knownVolumes ? profile.AllDisks.Sum(volume => volume.TotalGb) : 0;
+            var volumeUsed = knownVolumes ? profile.AllDisks.Sum(volume => volume.UsedGb) : 0;
 
             return Ok(new
             {
                 device_name = profile.DeviceName,
+                inventory_captured_at_utc = DateTimeOffset.UtcNow,
+                os_architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
                 os_version = profile.OsVersion,
                 system_age = profile.SystemAge,
                 chipset_driver = profile.ChipsetDriver,
@@ -40,7 +49,7 @@ public class HardwareController : ControllerBase
                     bus_type = d.BusType,
                     detection_source = d.DetectionSource,
                     is_failing_smart = d.IsFailingSmart,
-                    status = d.IsFailingSmart ? "Warning / Failing S.M.A.R.T." : "Healthy / OK",
+                    status = d.IsFailingSmart ? "Storage warning reported" : null,
                     used_gb = d.UsedGb,
                     usage_percent = d.UsagePercent,
                     volumes = d.Volumes.Select(v => new
@@ -62,9 +71,15 @@ public class HardwareController : ControllerBase
                     usage_window_seconds = profile.Cpu.UsageWindowSeconds,
                     usage_percent = profile.Cpu.UsageAvailable != false && double.IsFinite(profile.Cpu.UsagePercent) && profile.Cpu.UsagePercent is >= 0 and <= 100
                         ? (double?)profile.Cpu.UsagePercent : null,
-                    cores = profile.Cpu.Cores,
-                    threads = profile.Cpu.Threads,
+                    cores = Positive(profile.Cpu.Cores),
+                    threads = Positive(profile.Cpu.Threads),
                     frequency_mhz = profile.Cpu.FrequencyMhz,
+                    max_frequency_mhz = Positive(profile.Cpu.MaxFrequencyMhz),
+                    sockets = Positive(profile.Cpu.Sockets),
+                    virtualization_enabled = profile.Cpu.VirtualizationEnabled,
+                    l1_cache_kb = Positive(profile.Cpu.L1CacheKb),
+                    l2_cache_mb = Positive(profile.Cpu.L2CacheMb),
+                    l3_cache_mb = Positive(profile.Cpu.L3CacheMb),
                     temperature_celsius = profile.Cpu.TemperatureCelsius,
                     temperature_source = profile.Cpu.TemperatureSource,
                     temperature_sensor_identifier = profile.Cpu.TemperatureSensorIdentifier,
@@ -76,6 +91,8 @@ public class HardwareController : ControllerBase
                     adapter_id = profile.Gpu.AdapterId,
                     name = profile.Gpu.Name,
                     driver = profile.Gpu.Driver,
+                    driver_date = profile.Gpu.DriverDate,
+                    physical_location = profile.Gpu.PhysicalLocation,
                     type = profile.Gpu.Type,
                     vram_gb = profile.Gpu.VramGb,
                     temperature_celsius = profile.Gpu.TemperatureCelsius,
@@ -85,23 +102,36 @@ public class HardwareController : ControllerBase
                 ram = new
                 {
                     total_gb = profile.Ram.TotalGb,
+                    installed_gb = profile.Ram.InstalledGb,
+                    available_gb = profile.Ram.AvailableGb,
+                    speed_mtps = Positive(profile.Ram.SpeedMtps),
+                    slots_used = Positive(profile.Ram.SlotsUsed),
+                    slots_total = Positive(profile.Ram.SlotsTotal),
+                    form_factor = profile.Ram.FormFactor,
+                    hardware_reserved_mb = profile.Ram.HardwareReservedMb,
+                    committed_gb = profile.Ram.CommittedGb,
+                    commit_limit_gb = profile.Ram.CommitLimitGb,
                     used_gb = profile.Ram.UsageAvailable == false ? (double?)null : profile.Ram.UsedGb,
                     usage_percent = profile.Ram.UsageAvailable != false && double.IsFinite(profile.Ram.UsagePercent) && profile.Ram.UsagePercent is >= 0 and <= 100
                         ? (double?)profile.Ram.UsagePercent : null
                 },
                 device_type = profile.DeviceType,
                 active_power_plan = profile.ActivePowerPlan,
-                connected_displays = profile.ConnectedDisplays,
-                battery = profile.Battery != null ? new
+                connected_displays = profile.ActiveDisplayCount ?? (profile.ConnectedDisplays > 0 ? profile.ConnectedDisplays : null),
+                volume_space = volumeTotal > 0 ? new { free_gb = volumeTotal - volumeUsed, usage_percent = 100 * volumeUsed / volumeTotal } : null,
+                battery = profile.Battery is { HasBattery: true } ? new
                 {
-                    is_charging = profile.Battery.IsCharging,
-                    charge_percent = profile.Battery.ChargePercent,
+                    is_charging = profile.Battery.QuerySucceeded == false || profile.Battery.BatteryStatus is 0 or 10
+                        ? (bool?)null : profile.Battery.IsCharging,
+                    charge_percent = profile.Battery.ChargeAvailable == true ? (int?)profile.Battery.ChargePercent : null,
                     health_status = profile.Battery.HealthStatus
                 } : null,
                 network = profile.Network != null ? new
                 {
                     query_succeeded = profile.Network.QuerySucceeded,
                     has_active_adapter = profile.Network.HasActiveAdapter,
+                    adapter_id = profile.Network.AdapterId,
+                    adapter_name = profile.Network.AdapterName,
                     has_ipv4_address = profile.Network.HasIpv4Address,
                     has_default_gateway = profile.Network.HasDefaultGateway,
                     has_dns_servers = profile.Network.HasDnsServers,
