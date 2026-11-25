@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { motion } from 'motion/react';
 import {
@@ -220,6 +220,7 @@ export default function SystemProfileView({
   
   const [selectedHardwareType, setSelectedHardwareType] = useState<HardwareType | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const closeDeviceDetails = useCallback(() => setIsModalOpen(false), []);
 
   const handleCardClick = (type: HardwareType) => {
     setSelectedHardwareType(type);
@@ -507,7 +508,7 @@ export default function SystemProfileView({
 
       <DeviceDetailModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={closeDeviceDetails}
         hardwareType={selectedHardwareType}
         stats={stats}
       />

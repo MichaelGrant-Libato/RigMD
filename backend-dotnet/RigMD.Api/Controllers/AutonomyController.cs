@@ -1006,6 +1006,7 @@ public class AutonomyController : ControllerBase
             "task manager" => ("taskmgr.exe", "Task Manager"),
             "device manager" => ("devmgmt.msc", "Device Manager"),
             "startup apps" => ("ms-settings:startupapps", "Startup Apps"),
+            "installed apps" => ("ms-settings:appsfeatures", "Installed apps"),
             "reliability monitor" => ("perfmon /rel", "Reliability Monitor"),
             "storage settings" => ("ms-settings:storagesense", "Storage Settings"),
             "backup settings" => ("ms-settings:backup", "Backup Settings"),
@@ -1027,7 +1028,7 @@ public class AutonomyController : ControllerBase
             var parts = command.Split(' ', 2);
             Process.Start(new ProcessStartInfo
             {
-                FileName = parts[0],
+                FileName = parts[0] == "devmgmt.msc" ? Path.Combine(Environment.SystemDirectory, parts[0]) : parts[0],
                 Arguments = parts.Length > 1 ? parts[1] : string.Empty,
                 UseShellExecute = true
             });

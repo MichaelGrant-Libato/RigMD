@@ -8,6 +8,7 @@ import { getLocalApiToken } from '../lib/localApiSession';
 import { findDiskReading, validReading, formatDiskRate } from '../lib/storageTelemetry';
 import { formatTemperature, selectedCpuTemperature, selectedGpuTemperature, type CpuTemperatureSample } from '../lib/temperatureTelemetry';
 import type { GpuAdapterReading, HardwareStats } from '../types/rigmd';
+import StorageSoftwareList from './StorageSoftwareList';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS';
 
@@ -17,6 +18,12 @@ interface DeviceDetailModalProps {
   hardwareType: HardwareType | null;
   stats: HardwareStats | null;
 }
+
+const storageViews = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'apps', label: 'Installed apps' },
+  { id: 'drivers', label: 'Drivers' },
+] as const;
 
 interface DiskTelemetryPoint {
   DeviceId: string;
@@ -80,6 +87,7 @@ function formatTelemetryValue(value: unknown, unit: string) {
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats }: DeviceDetailModalProps) {
   const [data, setData] = useState<TelemetryPoint[]>([]);
   const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
+  const [storageView, setStorageView] = useState<(typeof storageViews)[number]['id']>('overview');
   const dialogRef = useRef<HTMLDivElement>(null);
   const [lastReadingAt, setLastReadingAt] = useState<number | null>(null);
   const [clock, setClock] = useState(Date.now());
@@ -93,6 +101,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     setLastReadingAt(null);
     setTemperatureStreamUnavailable(false);
     setSelectedDiskIndex(0);
+    setStorageView('overview');
     let disposed = false;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
 
@@ -172,7 +181,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onClose(); }
       if (event.key !== 'Tab' || !dialog) return;
-      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], summary, [tabindex="0"]')];
+      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], summary, [tabindex="0"]')];
       const first = controls[0];
       const last = controls[controls.length - 1];
       if (!first) { event.preventDefault(); return; }
@@ -228,6 +237,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   }
 
   const latestData = data[data.length - 1];
+  const storageDrives = stats.storage_drives ?? [];
+  const disk = storageDrives[selectedDiskIndex] ?? storageDrives[0];
   const cpuTemperature = selectedCpuTemperature(stats.cpu, temperatureStreamUnavailable ? {} : latestData?.CpuTemperature, clock);
   const gpuTemperature = selectedGpuTemperature(stats.gpu, temperatureStreamUnavailable ? [] : latestData?.GpuAdapters, clock);
 
@@ -277,33 +288,53 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           {/* Content */}
           <div className="custom-scrollbar overflow-y-auto p-6">
             
-            {hardwareType === 'Storage' && stats.storage_drives && stats.storage_drives.length > 0 && (
+            {hardwareType === 'Storage' && (
               <div className="mb-6 flex flex-col gap-4">
+                <div role="group" aria-label="Storage views" className="flex flex-wrap gap-2">
+                  {storageViews.map(({ id, label }) => (
+                    <button
+                      type="button"
+                      key={id}
+                      aria-pressed={storageView === id}
+                      onClick={() => setStorageView(id)}
+                      className={'rounded-lg px-3 py-2 text-sm font-medium ' + (storageView === id
+                        ? 'bg-cyan-400/15 text-cyan-200' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 {/* Disk Selector Tabs */}
-                {stats.storage_drives.length > 1 && (
+                {storageView !== 'drivers' && storageDrives.length > 1 && (
                   <div className="flex flex-wrap gap-2 mb-2 border-b border-[var(--rigmd-border)] pb-4">
-                    {stats.storage_drives.map((disk, idx) => (
+                    {storageDrives.map((drive, idx) => (
                       <button
                         type="button"
-                        aria-pressed={selectedDiskIndex === idx}
-                        key={idx}
+                        aria-pressed={disk === drive}
+                        key={drive.disk_index ?? idx}
                         onClick={() => setSelectedDiskIndex(idx)}
                         className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                          selectedDiskIndex === idx 
+                          disk === drive
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50' 
                             : 'bg-slate-800 text-slate-400 border border-transparent hover:bg-slate-700'
                         }`}
                       >
-                        Drive {disk.disk_index ?? idx}: {disk.model}
+                        Drive {drive.disk_index ?? idx}: {drive.model}
                       </button>
                     ))}
                   </div>
                 )}
                 
                 {/* Selected Disk Chart and Details */}
-                {(() => {
-                  const idx = selectedDiskIndex < stats.storage_drives.length ? selectedDiskIndex : 0;
-                  const disk = stats.storage_drives[idx];
+                {storageView !== 'overview' && (
+                  <StorageSoftwareList
+                    key={storageView}
+                    kind={storageView}
+                    diskIndex={disk?.disk_index}
+                    driveName={disk?.disk_index == null ? undefined : 'Drive ' + disk.disk_index}
+                  />
+                )}
+                {storageView === 'overview' && disk && (() => {
                   const latestDisk = findDiskReading(latestData?.Disks ?? [], disk.disk_index);
                   const isFresh = lastReadingAt !== null && clock - lastReadingAt < 10000;
                   const activeTime = isFresh ? validReading(latestDisk?.ActiveTimePercent) : null;
@@ -453,7 +484,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
 
             </div>
 
-            {hardwareType === 'Storage' && (!stats.storage_drives || stats.storage_drives.length === 0) && (
+            {hardwareType === 'Storage' && storageView === 'overview' && storageDrives.length === 0 && (
               <div className="mt-4 rounded-lg border border-slate-700 p-4">
                  <p className="text-slate-400">No storage drives detected.</p>
               </div>
