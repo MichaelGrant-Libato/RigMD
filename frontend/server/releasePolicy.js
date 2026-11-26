@@ -1,13 +1,39 @@
 import release from '../release.json' with { type: 'json' };
+import { isInstallerDownload, isVerifiedRelease, parseReleaseVersion, releaseAssetUrl, websiteDownloadRecordUrl } from '../src/lib/downloadRelease.js';
 
 export { release };
-export const releaseDownloadUrl = `https://github.com/${release.repository}/releases/download/v${release.version}/${release.installer}`;
+export const releaseDownloadUrl = releaseAssetUrl(release.version, release.installer);
 
 export function resolveReleaseDownload(environment) {
-  // Publishing is an explicit deployment step after the matching artifact has been uploaded/tested.
-  // Old server variables must never silently direct this UI to an unrelated release.
-  if (environment.RIGMD_RELEASE_VERSION !== release.version ||
-    environment.RIGMD_DOWNLOAD_URL && environment.RIGMD_DOWNLOAD_URL !== releaseDownloadUrl)
-    return { available: false, version: release.version, message: 'The current download is being prepared. Please try again later.' };
-  return { available: true, version: release.version, url: releaseDownloadUrl };
+  const version = environment.RIGMD_RELEASE_VERSION;
+  // Keep the explicitly enabled fallback available across desktop version bumps.
+  if (parseReleaseVersion(version)) {
+    const url = environment.RIGMD_DOWNLOAD_URL || releaseAssetUrl(version, release.installer);
+    if (isInstallerDownload(version, url)) return { available: true, version, url };
+  }
+
+  return { available: false, version: release.version, message: 'The current download is being prepared. Please try again later.' };
+}
+
+export async function resolveWebsiteDownload(environment, request = fetch) {
+  const fallback = resolveReleaseDownload(environment);
+  try {
+    const response = await request(websiteDownloadRecordUrl, {
+      cache: 'no-cache',
+      redirect: 'error',
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return fallback;
+
+    const current = await response.json();
+    if (!isVerifiedRelease(current)) return fallback;
+    return {
+      available: true,
+      version: current.version,
+      url: releaseAssetUrl(current.version, current.asset),
+      prerelease: current.prerelease,
+    };
+  } catch {
+    return fallback;
+  }
 }
