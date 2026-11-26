@@ -1,7 +1,7 @@
 RigMD experiment changes for reviewer testing
 ============================================
 
-Branch      codex/my-device-info-telemetry-testing
+Branch      test/my-device-info-telemetry
 Code tip    410df761b19969da5934233a7690907e1e336678
 GitHub main dc5ba0ad1b1298ba019190c9d1aace0be72e376a
 Shared base c8fc16e3f80e95074b45c329cf246a4b217d5a41
