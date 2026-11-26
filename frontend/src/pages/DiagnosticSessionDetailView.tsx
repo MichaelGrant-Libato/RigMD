@@ -39,6 +39,7 @@ import {
 } from '../lib/motion';
 
 import { apiFetch } from '../lib/api';
+import { RecentChangesPanel } from '../components/DeviceDiagnosticPanels';
 
 import type { AutonomyResult } from '../services/autonomyService';
 import {
@@ -500,6 +501,7 @@ export default function DiagnosticSessionDetailView({
               </CheckNextSteps>
               <ProblemFeedback key={`feedback-${sessionId}`} sessionId={sessionId} />
               <FollowUpHistory key={`rechecks-${sessionId}`} observations={session.follow_up_history} status={session.follow_up_history_status} />
+              <RecentChangesPanel sessionId={sessionId} />
               <ResultDetails label="Original check" title="Original check">
               <div data-testid="original-check-details">
                 <motion.section

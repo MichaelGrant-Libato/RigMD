@@ -51,7 +51,11 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         _hardwareMonitor = hardwareMonitor;
     }
 
-    public HardwareProfileDto GetLiveSystemProfile()
+    public HardwareProfileDto GetLiveSystemProfile() => BuildProfile(true);
+
+    public HardwareProfileDto GetDeviceInventory() => BuildProfile(false);
+
+    private HardwareProfileDto BuildProfile(bool diagnostic)
     {
         var storageDrives = _storageProvider.GetStorageDrives();
         var allDisks = _storageProvider.GetAllDisks();
@@ -81,16 +85,16 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             }
         }
 
-        var cpuStats = _cpuProvider.GetCpuStats();
+        var cpuStats = diagnostic ? _cpuProvider.GetCpuStats() : _cpuProvider.GetCpuInventory();
         var gpuStats = _gpuProvider.GetGpuStats();
 
-        if (_hardwareMonitor != null)
+        if (diagnostic && _hardwareMonitor != null)
         {
             try
             {
                 _hardwareMonitor.Tick();
+                gpuStats.SetAdapterReadings(_hardwareMonitor.GetGpuAdapters());
                 cpuStats.SetTemperatureReading(_hardwareMonitor.GetCpuTemperatureReading());
-                gpuStats.TemperatureCelsius = _hardwareMonitor.GetGpuTemperature() ?? gpuStats.TemperatureCelsius;
 
                 var totalVramGb = _hardwareMonitor.GetGpuDedicatedMemoryTotalGb();
                 if (totalVramGb.HasValue && totalVramGb.Value > gpuStats.VramGb)
@@ -107,6 +111,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         var presence = BuildPresenceProbe(deviceType, battery, gpuStats);
         var deviceErrors = GetDeviceErrors(out var deviceErrorsAvailable);
 
+        var displayCount = _displayProvider.GetConnectedDisplays();
         var profile = new HardwareProfileDto
         {
             DeviceName = _osProvider.GetDeviceName(),
@@ -116,7 +121,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             ChipsetDriver = _motherboardProvider.GetChipsetDriver(),
             PrimaryStorageType = _storageProvider.GetPrimaryStorageType(),
             ActivePowerPlan = _powerProvider.GetActivePowerPlan(),
-            ConnectedDisplays = _displayProvider.GetConnectedDisplays(),
+            ConnectedDisplays = displayCount,
             Displays = _displayProvider.GetDisplays(),
             DeviceErrors = deviceErrors,
             DeviceErrorsAvailable = deviceErrorsAvailable,
@@ -125,13 +130,13 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             
             Cpu = cpuStats,
             Gpu = gpuStats,
-            Network = _networkProvider.GetNetworkStats(),
+            Network = diagnostic ? _networkProvider.GetNetworkStats() : _networkProvider.GetAdapterSnapshot(),
             
             StorageDrives = storageDrives,
             AllDisks = allDisks,
             
             ProcessInsights = _processProvider.GetProcessInsights(),
-            StabilityEvents = GetStabilityEvents(),
+            StabilityEvents = diagnostic ? GetStabilityEvents() : new(),
             Ram = _memoryProvider.GetMemoryStats(),
             Presence = presence
         };

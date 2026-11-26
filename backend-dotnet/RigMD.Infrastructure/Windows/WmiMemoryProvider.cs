@@ -7,6 +7,22 @@ namespace RigMD.Infrastructure.Windows;
 
 public class WmiMemoryProvider : IMemoryProvider
 {
+    private const double BytesPerGb = 1073741824d;
+
+    public static WindowsCounterQuery OpenCacheQuery() => new(
+        @"\Memory\Standby Cache Core Bytes", @"\Memory\Standby Cache Normal Priority Bytes",
+        @"\Memory\Standby Cache Reserve Bytes", @"\Memory\Modified Page List Bytes");
+
+    public static double? ReadCacheGb(WindowsCounterQuery query)
+    {
+        if (!query.Collect()) return null;
+        var core = query.Read(0);
+        var normal = query.Read(1);
+        var reserve = query.Read(2);
+        var modified = query.Read(3);
+        return (core + normal + reserve + modified) / BytesPerGb;
+    }
+
     public static MemoryStatsDto ReadUsage()
     {
         var dto = new MemoryStatsDto { UsageAvailable = false };
@@ -14,7 +30,22 @@ public class WmiMemoryProvider : IMemoryProvider
         {
             var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
             if (GlobalMemoryStatusEx(ref status))
-                return FromPhysicalBytes(status.TotalPhysical, status.AvailablePhysical);
+            {
+                dto = FromPhysicalBytes(status.TotalPhysical, status.AvailablePhysical);
+                var performance = new PerformanceInfo { Size = (uint)Marshal.SizeOf<PerformanceInfo>() };
+                if (GetPerformanceInfo(ref performance, performance.Size) && performance.PageSize > 0 &&
+                    performance.CommitTotal <= performance.CommitLimit && performance.CommitLimit > 0)
+                {
+                    dto.CommittedGb = (double)performance.CommitTotal * performance.PageSize / 1073741824d;
+                    dto.CommitLimitGb = (double)performance.CommitLimit * performance.PageSize / 1073741824d;
+                }
+                if (GetPhysicallyInstalledSystemMemory(out var installedKb) && installedKb > 0
+                    && installedKb <= ulong.MaxValue / 1024 && installedKb * 1024 >= status.TotalPhysical)
+                {
+                    dto.InstalledGb = installedKb / 1048576d;
+                    dto.HardwareReservedMb = (installedKb * 1024 - status.TotalPhysical) / 1048576d;
+                }
+            }
         }
         catch { }
         return dto;
@@ -27,6 +58,7 @@ public class WmiMemoryProvider : IMemoryProvider
         {
             UsageAvailable = true, TotalGb = Math.Round(total / 1073741824d, 2),
             UsedGb = Math.Round((total - available) / 1073741824d, 2),
+            AvailableGb = available / 1073741824d,
             UsagePercent = Math.Round((total - available) * 100d / total, 1)
         };
     }
@@ -45,6 +77,25 @@ public class WmiMemoryProvider : IMemoryProvider
         public ulong AvailableExtendedVirtual;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PerformanceInfo
+    {
+        public uint Size;
+        public nuint CommitTotal, CommitLimit, CommitPeak, PhysicalTotal, PhysicalAvailable, SystemCache;
+        public nuint KernelTotal, KernelPaged, KernelNonpaged, PageSize;
+        public uint HandleCount, ProcessCount, ThreadCount;
+    }
+
+    [DllImport("psapi.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetPerformanceInfo(ref PerformanceInfo information, uint size);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetPhysicallyInstalledSystemMemory(out ulong totalKilobytes);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
@@ -52,55 +103,33 @@ public class WmiMemoryProvider : IMemoryProvider
     public MemoryStatsDto GetMemoryStats()
     {
         var dto = ReadUsage();
-        List<ulong?>? installedModules = null;
-        
+        using var cache = OpenCacheQuery();
+        dto.CachedGb = ReadCacheGb(cache);
+
+        List<ulong?>? capacities = null;
         try
         {
-            using var memSearcher = new ManagementObjectSearcher("SELECT Speed, FormFactor, Capacity FROM Win32_PhysicalMemory");
-            var capacities = new List<ulong?>();
-            double totalRawCapacity = 0;
-            foreach (var obj in memSearcher.Get())
+            using var searcher = new ManagementObjectSearcher("SELECT ConfiguredClockSpeed, FormFactor, Capacity FROM Win32_PhysicalMemory");
+            searcher.Options.Timeout = TimeSpan.FromSeconds(2);
+            using var modules = searcher.Get();
+            var sizes = new List<ulong?>();
+            var speeds = new HashSet<double?>();
+            var factors = new HashSet<string>();
+            foreach (ManagementObject module in modules)
+            using (module)
             {
-
-                if (obj["Speed"] != null && double.TryParse(obj["Speed"].ToString(), out var speed))
-                {
-                    dto.SpeedMtps = speed;
-                }
-                
-                if (obj["FormFactor"] != null && int.TryParse(obj["FormFactor"].ToString(), out var ff))
-                {
-                    dto.FormFactor = ff == 8 ? "DIMM" : ff == 12 ? "SODIMM" : "Unknown";
-                }
-                
-                var capacity = ulong.TryParse(obj["Capacity"]?.ToString(), out var cap) && cap > 0 ? cap : (ulong?)null;
-                capacities.Add(capacity);
-                if (capacity.HasValue) totalRawCapacity += capacity.Value;
+                sizes.Add(ulong.TryParse(module["Capacity"]?.ToString(), out var capacity) && capacity > 0 ? capacity : null);
+                speeds.Add(double.TryParse(module["ConfiguredClockSpeed"]?.ToString(), out var speed) && speed > 0 ? speed : null);
+                factors.Add(module["FormFactor"]?.ToString() switch { "8" => "DIMM", "12" => "SODIMM", _ => "" });
             }
-            installedModules = capacities;
-            
-            dto.HardwareReservedMb = Math.Max(0, Math.Round((totalRawCapacity / (1024.0 * 1024.0)) - (dto.TotalGb * 1024.0), 1));
-            
-            using var perfSearcher = new ManagementObjectSearcher("SELECT CommittedBytes, CacheBytes FROM Win32_PerfFormattedData_PerfOS_Memory");
-            foreach (var obj in perfSearcher.Get())
-            {
-                if (obj["CommittedBytes"] != null && long.TryParse(obj["CommittedBytes"].ToString(), out var committed))
-                {
-                    dto.CommittedGb = Math.Round(committed / (1024.0 * 1024.0 * 1024.0), 1);
-                }
-                
-                if (obj["CacheBytes"] != null && long.TryParse(obj["CacheBytes"].ToString(), out var cached))
-                {
-                    dto.CachedGb = Math.Round(cached / (1024.0 * 1024.0 * 1024.0), 1);
-                }
-                break;
-            }
+            capacities = sizes;
+            if (speeds.Count == 1 && speeds.Single() is { } configured) dto.SpeedMtps = configured;
+            if (factors.Count == 1) dto.FormFactor = factors.Single();
+            else if (factors.Count > 1 && !factors.Contains("")) dto.FormFactor = "Mixed";
         }
-        catch
-        {
-            // Ignore
-        }
+        catch (Exception ex) when (ex is ManagementException or COMException or UnauthorizedAccessException) { }
 
-        var slots = ReadSlotCounts(() => installedModules ?? throw new InvalidOperationException("Memory inventory unavailable."), ReadSystemSlotCounts);
+        var slots = ReadSlotCounts(() => capacities ?? [], ReadSystemSlotCounts);
         dto.SlotsUsed = slots.Used;
         dto.SlotsTotal = slots.Total;
         return dto;

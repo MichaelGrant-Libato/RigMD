@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="RigMD.Tests" />
     <ProjectReference Include="..\RigMD.Application\RigMD.Application.csproj" />
     <ProjectReference Include="..\RigMD.Infrastructure\RigMD.Infrastructure.csproj" />
   </ItemGroup>

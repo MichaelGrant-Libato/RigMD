@@ -5,6 +5,7 @@ namespace RigMD.Application.Contracts.Providers;
 public interface ICpuProvider
 {
     CpuStatsDto GetCpuStats();
+    CpuStatsDto GetCpuInventory() => GetCpuStats();
     void RefreshActivity(CpuStatsDto cpu) { }
 }
 
@@ -46,6 +47,7 @@ public interface IProcessProvider
 public interface INetworkProvider
 {
     NetworkStatsDto GetNetworkStats();
+    NetworkStatsDto GetAdapterSnapshot() => GetNetworkStats();
 }
 
 public interface IBatteryProvider
@@ -72,6 +74,7 @@ public interface IDisplayProvider
 public interface IWindowsSystemProfileService
 {
     HardwareProfileDto GetLiveSystemProfile();
+    HardwareProfileDto GetDeviceInventory() => GetLiveSystemProfile();
 
     HardwarePresenceProbeDto GetHardwarePresenceProbe()
     {

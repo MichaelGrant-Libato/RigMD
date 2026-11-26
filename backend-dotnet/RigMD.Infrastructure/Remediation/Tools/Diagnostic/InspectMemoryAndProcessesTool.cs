@@ -150,8 +150,8 @@ public class InspectMemoryAndProcessesTool : IRigMdAgentTool
                 usedGb = Math.Round(memory.UsedGb, 2),
                 usagePercent = memory.UsageAvailable != false && double.IsFinite(memory.UsagePercent) && memory.UsagePercent is >= 0 and <= 100
                     ? (double?)memory.UsagePercent : null,
-                committedGb = Math.Round(memory.CommittedGb, 2),
-                cachedGb = Math.Round(memory.CachedGb, 2),
+                committedGb = memory.CommittedGb is { } committed ? Math.Round(committed, 2) : (double?)null,
+                cachedGb = memory.CachedGb is { } cached ? Math.Round(cached, 2) : (double?)null,
                 speedMtps = memory.SpeedMtps,
                 formFactor = memory.FormFactor
             },

@@ -32,7 +32,8 @@ import {
 import { API_BASE_URL, apiGet } from '../lib/api';
 import * as signalR from '@microsoft/signalr';
 import { getLocalApiToken } from '../lib/localApiSession';
-import { mergeLiveUsage, type LiveUsageSample } from '../lib/liveReadings';
+import { mergeLiveUsage } from '../lib/liveReadings';
+import { isCurrent, keepDeviceSample, type DeviceFeed, type DeviceSample } from '../lib/deviceTelemetry';
 import type {
   AgentStatus,
   DashboardSessionSummary,
@@ -335,6 +336,7 @@ void PlaceholderView;
 export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { onStartupReady?: (complete: boolean) => void; onSummaryReady?: (complete: boolean) => void } = {}) {
   const [initialDashboard, setInitialDashboard] = useState<'pending' | 'completed' | 'failed'>('pending');
   const [stats, setStats] = useState<HardwareStats | null>(null);
+  const [deviceFeed, setDeviceFeed] = useState<DeviceFeed>(() => ({ samples: [], now: Date.now(), disconnected: false }));
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
   const [error, setError] = useState<string | null>(null);
@@ -382,30 +384,56 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
   const deviceName = overview.data?.deviceName?.trim() || stats?.device_name?.trim() || 'Detecting Device';
   const isFetchingHardwareRef = useRef(false);
   const isFetchingDashboardRef = useRef(false);
-  const latestUsageRef = useRef<{ sample: LiveUsageSample; receivedAt: number } | null>(null);
-  const usageUpdatedAtRef = useRef(0);
+  const latestUsageRef = useRef<DeviceSample | null>(null);
 
   useEffect(() => {
     if (!needsSensorStreaming) return;
     let disposed = false;
+    let retryTimer: number | undefined;
+    let connectionLost = false;
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`${API_BASE_URL}/hubs/telemetry`, { accessTokenFactory: getLocalApiToken })
       .withAutomaticReconnect().build();
-    connection.on('ReceiveTelemetry', (sample: LiveUsageSample) => {
-      if (disposed) return;
-      usageUpdatedAtRef.current = Date.now();
-      latestUsageRef.current = { sample, receivedAt: Date.now() };
+    connection.on('ReceiveTelemetry', (sample: DeviceSample) => {
+      const now = Date.now();
+      const prior = latestUsageRef.current;
+      if (disposed || !isCurrent(sample.capturedAtUtc, now) ||
+        (prior && Date.parse(sample.capturedAtUtc) < Date.parse(prior.capturedAtUtc))) return;
+      latestUsageRef.current = sample;
+      connectionLost = false;
+      setDeviceFeed(previous => ({ samples: keepDeviceSample(previous.samples, sample, now), now, disconnected: false }));
       setStats(previous => previous ? mergeLiveUsage(previous, sample) : previous);
-      setHardwareUpdatedAt(new Date());
     });
-    void connection.start().then(() => { if (disposed) void connection.stop(); }).catch(() => {});
+    const disconnected = () => {
+      if (disposed || connectionLost) return;
+      connectionLost = true;
+      latestUsageRef.current = null;
+      const now = Date.now();
+      setDeviceFeed(previous => ({ samples: keepDeviceSample(previous.samples, { capturedAtUtc: new Date(now).toISOString() }, now),
+        now, disconnected: true }));
+      setStats(previous => previous ? mergeLiveUsage(previous, {}) : previous);
+    };
+    const retry = () => {
+      if (!disposed) retryTimer = window.setTimeout(start, 3000);
+    };
+    const start = () => {
+      void connection.start().catch(() => { disconnected(); retry(); });
+    };
+    connection.onreconnecting(disconnected);
+    connection.onclose(() => { disconnected(); retry(); });
+    start();
     const staleTimer = window.setInterval(() => {
-      if (usageUpdatedAtRef.current && Date.now() - usageUpdatedAtRef.current > 5000) {
-        latestUsageRef.current = null;
-        setStats(previous => previous ? mergeLiveUsage(previous, {}) : previous);
-      }
+      const now = Date.now();
+      if (latestUsageRef.current && !isCurrent(latestUsageRef.current.capturedAtUtc, now)) disconnected();
+      setDeviceFeed(previous => ({ ...previous, now }));
     }, 1000);
-    return () => { disposed = true; window.clearInterval(staleTimer); void connection.stop(); };
+    return () => {
+      disposed = true;
+      window.clearInterval(staleTimer);
+      window.clearTimeout(retryTimer);
+      latestUsageRef.current = null;
+      void connection.stop().catch(() => {});
+    };
   }, [needsSensorStreaming]);
 
   const fetchHardware = useCallback(async () => {
@@ -419,9 +447,9 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
     try {
       const liveResponse = await apiGet<HardwareStats>('/api/hardware/live', { timeout: 60000 });
       const fresh = latestUsageRef.current;
-      setStats(fresh && Date.now() - fresh.receivedAt <= 5000 ? mergeLiveUsage(liveResponse.data, fresh.sample) : liveResponse.data);
-      usageUpdatedAtRef.current = fresh?.receivedAt ?? Date.now();
-      setHardwareUpdatedAt(new Date());
+      setStats(fresh && isCurrent(fresh.capturedAtUtc, Date.now()) ? mergeLiveUsage(liveResponse.data, fresh) : liveResponse.data);
+      const capturedAt = Date.parse(liveResponse.data.inventory_captured_at_utc ?? '');
+      setHardwareUpdatedAt(new Date(Number.isFinite(capturedAt) ? capturedAt : Date.now()));
       setError(null);
     } catch {
       setAgentStatus(null);
@@ -518,7 +546,8 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
   };
 
   const renderPage = () => {
-    if (needsFullInventory && !(activePage === 'reports' && reportWithoutInventory) && (error || !stats || isInventoryPageLoading)) {
+    if (needsFullInventory && !(activePage === 'reports' && reportWithoutInventory) &&
+      (!stats || (activePage === 'reports' && (error || isInventoryPageLoading)))) {
       if (!error) return <DeviceDataSkeleton report={activePage === 'reports'} />;
       return <><TopHeader title={activePage === 'reports' ? 'Share Report' : 'My Device Info'} subtitle="Device details are unavailable" /><div className="p-8" role="alert">
         <h2 className="text-xl font-semibold">{error ? 'Device details could not be loaded' : 'Loading full device details…'}</h2>
@@ -554,6 +583,8 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
             hardwareUpdatedAt={hardwareUpdatedAt}
             isRefreshingHardware={isRefreshingHardware}
             onRefreshHardware={refreshHardware}
+              feed={deviceFeed}
+              onOpenMemoryCheck={openMemoryCheck}
           />
         );
 

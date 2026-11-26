@@ -14,7 +14,11 @@ public class WindowsNetworkProvider :
     private const string DnsTestHost =
         "example.com";
 
-    public NetworkStatsDto GetNetworkStats()
+    public NetworkStatsDto GetNetworkStats() => ReadNetwork(includeTests: true);
+
+    public NetworkStatsDto GetAdapterSnapshot() => ReadNetwork(includeTests: false);
+
+    private static NetworkStatsDto ReadNetwork(bool includeTests)
     {
         var result =
             new NetworkStatsDto
@@ -34,9 +38,6 @@ public class WindowsNetworkProvider :
                     .Where(adapter =>
                         adapter.NetworkInterfaceType !=
                             NetworkInterfaceType.Loopback)
-                    .Where(adapter =>
-                        adapter.NetworkInterfaceType !=
-                            NetworkInterfaceType.Tunnel)
                     .Select(adapter => new
                     {
                         Adapter =
@@ -49,13 +50,18 @@ public class WindowsNetworkProvider :
                         item.Properties
                             .UnicastAddresses
                             .Any(address =>
-                                address.Address.AddressFamily ==
-                                    AddressFamily.InterNetwork))
+                                address.Address.AddressFamily == AddressFamily.InterNetwork ||
+                                (!includeTests && address.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
+                                    !address.Address.IsIPv6LinkLocal)))
                     .ToList();
 
-            // Prioritize an adapter that has an active default gateway (routed to LAN/Internet)
+            var probeTarget = IPAddress.Parse("8.8.8.8");
+            var route = WindowsNetworkRoute.Find(probeTarget);
+            if (route is null && !includeTests)
+                route = WindowsNetworkRoute.Find(IPAddress.Parse("2606:4700:4700::1111"));
             var activeAdapter =
-                candidates.FirstOrDefault(item =>
+                candidates.FirstOrDefault(item => item.Adapter.Id == route?.Adapter.Id)
+                ?? candidates.FirstOrDefault(item =>
                     item.Properties.GatewayAddresses.Any(gateway =>
                         gateway.Address.AddressFamily == AddressFamily.InterNetwork &&
                         !IPAddress.Any.Equals(gateway.Address)))
@@ -65,13 +71,15 @@ public class WindowsNetworkProvider :
             if (activeAdapter == null)
             {
                 result.DnsResolutionMessage =
-                    "No active IPv4 network adapter was detected.";
+                    includeTests ? "No active IPv4 network adapter was detected." : "No active IP adapter was detected.";
 
                 return result;
             }
 
             result.HasActiveAdapter =
                 true;
+            result.AdapterId = activeAdapter.Adapter.Id;
+            result.IsWifi = activeAdapter.Adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
 
             result.AdapterName =
                 activeAdapter.Adapter.Name;
@@ -91,6 +99,10 @@ public class WindowsNetworkProvider :
             if (ipv4 != null)
             {
                 result.IpAddress = ipv4.Address.ToString();
+            }
+            else if (!includeTests && route?.Adapter.Id == activeAdapter.Adapter.Id)
+            {
+                result.IpAddress = route.Source.ToString();
             }
 
             try
@@ -124,11 +136,12 @@ public class WindowsNetworkProvider :
                         address.AddressFamily ==
                             AddressFamily.InterNetworkV6);
 
+            if (!includeTests) return result;
+
             try
             {
-                var addresses =
-                    Dns.GetHostAddresses(
-                        DnsTestHost);
+                using var dnsTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var addresses = Dns.GetHostAddressesAsync(DnsTestHost, dnsTimeout.Token).GetAwaiter().GetResult();
 
                 result.DnsResolutionSucceeded =
                     addresses.Length > 0;
@@ -152,7 +165,7 @@ public class WindowsNetworkProvider :
                         
                         for (int i = 0; i < pingCount; i++)
                         {
-                            var reply = ping.Send("8.8.8.8", timeout, buffer);
+                            var reply = ping.Send(probeTarget, timeout, buffer);
                             if (reply.Status == IPStatus.Success)
                             {
                                 successfulPings++;
@@ -172,6 +185,11 @@ public class WindowsNetworkProvider :
                     }
                 }
             }
+            catch (OperationCanceledException)
+            {
+                result.QuerySucceeded = false;
+                result.DnsResolutionMessage = "Windows did not finish the DNS lookup in time.";
+            }
             catch (Exception ex)
             {
                 result.DnsResolutionSucceeded =
@@ -186,11 +204,11 @@ public class WindowsNetworkProvider :
                 result.IsWifi = true;
                 try
                 {
-                    var process = new System.Diagnostics.Process
+                    using var process = new System.Diagnostics.Process
                     {
                         StartInfo = new System.Diagnostics.ProcessStartInfo
                         {
-                            FileName = "netsh",
+                            FileName = Path.Combine(Environment.SystemDirectory, "netsh.exe"),
                             Arguments = "wlan show interfaces",
                             RedirectStandardOutput = true,
                             UseShellExecute = false,
@@ -199,22 +217,25 @@ public class WindowsNetworkProvider :
                     };
 
                     process.Start();
-                    var output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
+                    var outputTask = process.StandardOutput.ReadToEndAsync();
+                    if (!process.WaitForExit(2000))
+                    {
+                        try { process.Kill(); }
+                        catch (InvalidOperationException) { }
+                        return result;
+                    }
+                    var output = outputTask.GetAwaiter().GetResult();
 
                     var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                    var signalLine = lines.FirstOrDefault(l => l.Trim().StartsWith("Signal"));
-                    if (signalLine != null)
+                    var guidText = activeAdapter.Adapter.Id.Trim('{', '}');
+                    var interfaceStart = Array.FindIndex(lines, line => line.Contains(guidText, StringComparison.OrdinalIgnoreCase));
+                    if (interfaceStart >= 0)
                     {
-                        var parts = signalLine.Split(':');
-                        if (parts.Length > 1)
-                        {
-                            var valueStr = parts[1].Trim().Replace("%", "");
-                            if (int.TryParse(valueStr, out int signal))
-                            {
-                                result.WifiSignalStrength = signal;
-                            }
-                        }
+                        var signalLine = lines.Skip(interfaceStart + 1)
+                            .TakeWhile(line => !line.TrimStart().StartsWith("Name", StringComparison.OrdinalIgnoreCase))
+                            .FirstOrDefault(line => line.TrimStart().StartsWith("Signal", StringComparison.OrdinalIgnoreCase));
+                        if (signalLine is not null && int.TryParse(signalLine.Split(':').Last().Trim().TrimEnd('%'), out var signal)
+                            && signal is >= 0 and <= 100) result.WifiSignalStrength = signal;
                     }
                 }
                 catch
