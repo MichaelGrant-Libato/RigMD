@@ -2,12 +2,13 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import release from '../release.json' with { type: 'json' };
 import {
-  downloadConfigKey, installerNames, isVerifiedRelease, parseReleaseVersion, releaseAssetUrl,
+  installerNames, isVerifiedRelease, parseReleaseVersion, releaseAssetUrl, websiteDownloadBranch, websiteDownloadFile,
 } from '../src/lib/downloadRelease.js';
 
 const githubApi = `https://api.github.com/repos/${release.repository}`;
 const sha1 = /^[a-f\d]{40}$/i;
 const sha256 = /^[a-f\d]{64}$/i;
+const apiHeaders = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
 
 async function getJson(request, url, headers, service) {
   const response = await request(url, {
@@ -42,7 +43,7 @@ export async function verifyRelease(tag, { request = fetch, githubToken, allowPr
     throw new Error('Provide a RigMD release tag such as v0.2.22.');
   }
   const version = tag.slice(1);
-  const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  const headers = { ...apiHeaders };
   if (githubToken) headers.Authorization = `Bearer ${githubToken}`;
   const github = path => getJson(request, `${githubApi}/${path}`, headers, 'GitHub');
 
@@ -82,17 +83,43 @@ export async function verifyRelease(tag, { request = fetch, githubToken, allowPr
   return { version, asset: installer.name, sha256: manifest.sha256.toLowerCase(), sourceRevision, prerelease: published.prerelease };
 }
 
-export async function promoteRelease(candidate, { request = fetch, configId, vercelToken, teamId } = {}) {
-  if (!isVerifiedRelease(candidate)) throw new Error('Missing verified release metadata.');
-  if (!configId || !/^[A-Za-z\d_-]+$/.test(configId) || !vercelToken) {
-    throw new Error('Configure RIGMD_GLOBAL_CONFIG_ID and VERCEL_TOKEN to promote the download.');
+async function readDownloadRecord(request, headers, url) {
+  const response = await request(url, {
+    headers, redirect: 'error', signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Could not read the GitHub download record (HTTP ${response.status}).`);
+  const file = await response.json();
+  if (file.type !== 'file' || file.encoding !== 'base64' || !sha1.test(file.sha) || typeof file.content !== 'string') {
+    throw new Error('The current GitHub download record is invalid.');
   }
+  return { value: JSON.parse(Buffer.from(file.content, 'base64').toString('utf8')), sha: file.sha };
+}
 
-  const headers = { Authorization: `Bearer ${vercelToken}` };
-  const url = new URL(`https://api.vercel.com/v1/global-config/${configId}/items`);
-  if (teamId) url.searchParams.set('teamId', teamId);
-  const items = await getJson(request, url, headers, 'Vercel');
-  const current = items.find(item => item.key === downloadConfigKey);
+async function ensureDownloadBranch(request, headers, sourceRevision) {
+  const response = await request(`${githubApi}/git/ref/heads/${websiteDownloadBranch}`, {
+    headers, redirect: 'error', signal: AbortSignal.timeout(15_000),
+  });
+  if (response.ok) return;
+  if (response.status !== 404) throw new Error(`Could not read the website download branch (HTTP ${response.status}).`);
+
+  const created = await request(`${githubApi}/git/refs`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: `refs/heads/${websiteDownloadBranch}`, sha: sourceRevision }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!created.ok) throw new Error(`Could not create the website download branch (HTTP ${created.status}).`);
+}
+
+export async function promoteRelease(candidate, { request = fetch, githubToken } = {}) {
+  if (!isVerifiedRelease(candidate)) throw new Error('Missing verified release metadata.');
+  if (!githubToken) throw new Error('GitHub Actions needs a write token for the website download branch.');
+
+  const headers = { ...apiHeaders, Authorization: `Bearer ${githubToken}` };
+  const url = `${githubApi}/contents/${websiteDownloadFile}`;
+  const current = await readDownloadRecord(request, headers, `${url}?ref=${websiteDownloadBranch}`);
   if (current) {
     if (!isVerifiedRelease(current.value)) throw new Error('The current download record is invalid.');
     const previousVersion = parseReleaseVersion(current.value.version);
@@ -107,21 +134,28 @@ export async function promoteRelease(candidate, { request = fetch, configId, ver
     }
   }
 
+  if (!current) await ensureDownloadBranch(request, headers, candidate.sourceRevision);
+  const payload = {
+    branch: websiteDownloadBranch,
+    message: `Promote RigMD v${candidate.version} website download`,
+    content: Buffer.from(JSON.stringify(candidate, null, 2) + '\n').toString('base64'),
+    ...(current ? { sha: current.sha } : {}),
+  };
   const response = await request(url, {
-    method: 'PATCH',
+    method: 'PUT',
     headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: [{ operation: 'upsert', key: downloadConfigKey, value: candidate }] }),
+    body: JSON.stringify(payload),
     redirect: 'error',
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error(`Vercel rejected the website update (HTTP ${response.status}).`);
+  if (!response.ok) throw new Error(`GitHub rejected the website download record update (HTTP ${response.status}).`);
   return 'promoted';
 }
 
 export async function verifyWebsiteDownload(candidate, { request = fetch, wait = delay } = {}) {
   const expectedUrl = releaseAssetUrl(candidate.version, candidate.asset);
-  for (let attempt = 0; attempt < 6; attempt++) {
-    if (attempt) await wait(5000);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt) await wait(10_000);
     try {
       const response = await request('https://www.rig-md.com/api/download-url', {
         redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -131,10 +165,10 @@ export async function verifyWebsiteDownload(candidate, { request = fetch, wait =
       if (download?.available === true && download.version === candidate.version && download.url === expectedUrl &&
           download.prerelease === candidate.prerelease) return;
     } catch {
-      // The Global Config update may still be propagating.
+      // The new record may still be propagating through GitHub's cache.
     }
   }
-  throw new Error('The site has not reported the approved release. Check the production deployment and Global Config connection, then rerun.');
+  throw new Error('The site has not reported the approved release. Check the production deployment, then rerun.');
 }
 
 async function main() {
@@ -152,9 +186,7 @@ async function main() {
     return;
   }
   const result = await promoteRelease(candidate, {
-    configId: process.env.RIGMD_GLOBAL_CONFIG_ID,
-    vercelToken: process.env.VERCEL_TOKEN,
-    teamId: process.env.VERCEL_TEAM_ID,
+    githubToken: process.env.GITHUB_TOKEN,
   });
   console.log(`${tag}: ${result}.`);
   if (result !== 'skipped older version') {

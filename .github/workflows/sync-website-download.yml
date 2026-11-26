@@ -26,6 +26,8 @@ jobs:
     if: github.repository == 'MichaelGrant-Libato/RigMD' && (github.event_name == 'release' || github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,7 +42,4 @@ jobs:
           RIGMD_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           RIGMD_VERIFY_ONLY: ${{ inputs.verify_only }}
           RIGMD_PROMOTE_PRERELEASES: ${{ vars.RIGMD_PROMOTE_PRERELEASES }}
-          RIGMD_GLOBAL_CONFIG_ID: ${{ vars.RIGMD_GLOBAL_CONFIG_ID }}
-          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: node frontend/scripts/sync-website-download.mjs

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { release, releaseDownloadUrl, resolveReleaseDownload, resolveWebsiteDownload } from '../server/releasePolicy.js';
-import { isInstallerDownload, releaseAssetUrl } from '../src/lib/downloadRelease.js';
+import { isInstallerDownload, releaseAssetUrl, websiteDownloadRecordUrl } from '../src/lib/downloadRelease.js';
 import handler from '../api/download-url.js';
 
 test('a release is unavailable until explicitly enabled, and stale URL overrides cannot select an older installer', () => {
@@ -31,15 +31,12 @@ test('runtime release supplies the displayed version and exact link independentl
   const asset = `RigMD-Setup-v${version}.exe`;
   const record = { version, asset, sha256: 'a'.repeat(64), sourceRevision: 'b'.repeat(40), prerelease: true };
   const resolve = async (url, options) => {
-    assert.equal(String(url), 'https://global-config.vercel.com/ec_test/item/rigmdDownloadRelease');
-    assert.equal(options.headers.Authorization, 'Bearer read-test-token');
+    assert.equal(String(url), websiteDownloadRecordUrl);
+    assert.equal(options.headers, undefined);
     assert.equal(options.redirect, 'error');
     return Response.json(record);
   };
-  const result = await resolveWebsiteDownload({
-    GLOBAL_CONFIG: 'https://global-config.vercel.com/ec_test?token=read-test-token',
-    RIGMD_RELEASE_VERSION: release.version,
-  }, resolve);
+  const result = await resolveWebsiteDownload({ RIGMD_RELEASE_VERSION: release.version }, resolve);
   assert.deepEqual(result, { available: true, version, url: releaseAssetUrl(version, asset), prerelease: true });
   assert.equal(isInstallerDownload(result.version, result.url), true);
   assert.equal(isInstallerDownload(release.version, result.url), false);
@@ -48,10 +45,7 @@ test('runtime release supplies the displayed version and exact link independentl
 });
 
 test('missing, unavailable or invalid runtime data keeps the deployment fallback', async () => {
-  const environment = {
-    RIGMD_RELEASE_VERSION: release.version,
-    GLOBAL_CONFIG: 'https://global-config.vercel.com/ec_test?token=read-test-token',
-  };
+  const environment = { RIGMD_RELEASE_VERSION: release.version };
   for (const request of [
     () => new Response(null, { status: 404 }),
     () => Response.json({ version: '0.2.22', asset: 'Other.exe' }),
@@ -59,21 +53,17 @@ test('missing, unavailable or invalid runtime data keeps the deployment fallback
   ]) {
     assert.deepEqual(await resolveWebsiteDownload(environment, request), resolveReleaseDownload(environment));
   }
-  const invalidOrigin = { ...environment, GLOBAL_CONFIG: 'https://example.com/ec_test?token=read-test-token' };
-  let requested = false;
-  const actual = await resolveWebsiteDownload(invalidOrigin, () => { requested = true; });
-  assert.equal(requested, false);
-  assert.equal(actual.url, releaseDownloadUrl);
 });
 
-test('a Global Config deployment can keep an explicitly pinned fallback when the build version advances', async () => {
+test('an explicitly pinned fallback remains available when the build version advances', async () => {
   const version = '0.2.19';
   const environment = {
     RIGMD_RELEASE_VERSION: version,
     RIGMD_DOWNLOAD_URL: releaseAssetUrl(version, 'RigMD-Setup-v0.2.19.exe'),
-    GLOBAL_CONFIG: 'https://global-config.vercel.com/ec_test?token=read-test-token',
   };
   const fallback = await resolveWebsiteDownload(environment, () => new Response(null, { status: 404 }));
   assert.deepEqual(fallback, { available: true, version, url: environment.RIGMD_DOWNLOAD_URL });
-  assert.equal(resolveReleaseDownload({ ...environment, GLOBAL_CONFIG: undefined }).available, false);
+  assert.equal(resolveReleaseDownload({
+    ...environment, RIGMD_DOWNLOAD_URL: 'https://example.com/RigMD-Setup.exe',
+  }).available, false);
 });

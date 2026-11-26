@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { promoteRelease, verifyRelease, verifyWebsiteDownload } from '../scripts/sync-website-download.mjs';
-import { downloadConfigKey, releaseAssetUrl } from '../src/lib/downloadRelease.js';
+import { releaseAssetUrl } from '../src/lib/downloadRelease.js';
 
 const version = '0.2.21';
 const tag = 'v' + version;
@@ -66,24 +66,42 @@ test('dirty builds, wrong digests, changed byte counts and broken links are reje
 });
 
 test('promotion writes one verified record and ignores a replay or an older release', async () => {
-  let items = [];
+  let branch = false;
+  let file = null;
   let writes = 0;
   const request = async (url, options) => {
-    assert.equal(String(url), 'https://api.vercel.com/v1/global-config/ec_test/items?teamId=team_test');
     assert.equal(options.headers.Authorization, 'Bearer write-test-token');
-    if (options.method !== 'PATCH') return Response.json(items);
-    const { items: requested } = JSON.parse(options.body);
-    assert.deepEqual(requested, [{ operation: 'upsert', key: downloadConfigKey, value: candidate }]);
-    items = requested;
+    assert.equal(new URL(url).origin, 'https://api.github.com');
+    if (url.endsWith('/git/ref/heads/website-download')) return new Response(null, { status: branch ? 200 : 404 });
+    if (url.endsWith('/git/refs')) {
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), { ref: 'refs/heads/website-download', sha: sourceRevision });
+      branch = true;
+      return new Response(null, { status: 201 });
+    }
+    if (url.endsWith('/contents/website-download.json?ref=website-download')) {
+      return file ? Response.json(file) : new Response(null, { status: 404 });
+    }
+    assert.equal(url.endsWith('/contents/website-download.json'), true);
+    assert.equal(options.method, 'PUT');
+    assert.equal(branch, true);
+    const { branch: target, content, sha } = JSON.parse(options.body);
+    assert.equal(target, 'website-download');
+    assert.equal(sha, file?.sha);
+    const current = JSON.parse(Buffer.from(content, 'base64').toString('utf8'));
+    assert.equal(current.version, writes ? '0.2.22' : candidate.version);
+    file = { type: 'file', encoding: 'base64', content, sha: 'a'.repeat(40) };
     writes++;
-    return Response.json({ status: 'ok' });
+    return new Response(null, { status: 201 });
   };
-  const options = { request, configId: 'ec_test', teamId: 'team_test', vercelToken: 'write-test-token' };
+  const options = { request, githubToken: 'write-test-token' };
   assert.equal(await promoteRelease(candidate, options), 'promoted');
   assert.equal(await promoteRelease(candidate, options), 'already active');
   assert.equal(await promoteRelease({ ...candidate, version: '0.2.20', asset: 'RigMD-Setup.exe' }, options), 'skipped older version');
   await assert.rejects(promoteRelease({ ...candidate, sha256: 'f'.repeat(64) }, options), /active version already/);
   assert.equal(writes, 1);
+  assert.equal(await promoteRelease({ ...candidate, version: '0.2.22', asset: 'RigMD-Setup.exe' }, options), 'promoted');
+  assert.equal(writes, 2);
 });
 
 test('visibility check waits for the website response to match the promoted version and link', async () => {

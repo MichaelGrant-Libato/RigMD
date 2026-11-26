@@ -1,6 +1,9 @@
 import release from '../../release.json' with { type: 'json' };
 
-export const downloadConfigKey = 'rigmdDownloadRelease';
+export const websiteDownloadBranch = 'website-download';
+export const websiteDownloadFile = 'website-download.json';
+export const websiteDownloadRecordUrl =
+  `https://raw.githubusercontent.com/${release.repository}/refs/heads/${websiteDownloadBranch}/${websiteDownloadFile}`;
 
 export function parseReleaseVersion(version) {
   return typeof version === 'string' && /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/.test(version)
