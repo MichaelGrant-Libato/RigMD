@@ -6,6 +6,7 @@ import type { DashboardSummary, HardwareStats, PageKey } from '../types/rigmd';
 import StatusPill from './dashboard/StatusPill';
 import HomeOverviewCards from './dashboard/HomeOverviewCards';
 import { overviewPills, type HomeOverview } from '../lib/homeOverview';
+import type { DeviceFeed } from '../lib/deviceTelemetry';
 import RecentDiagnosticsTimeline from './dashboard/RecentDiagnosticsTimeline';
 import AlertsSummaryCard from './dashboard/AlertsSummaryCard';
 import { REVIEW_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
@@ -16,6 +17,7 @@ interface Props {
   stats: HardwareStats | null;
   overview: HomeOverview | null;
   overviewError: string | null;
+  deviceFeed?: DeviceFeed;
   summaryState: 'pending' | 'completed' | 'failed';
   dashboard: DashboardSummary;
   setActivePage: (page: PageKey) => void;
@@ -92,7 +94,7 @@ function getStatusPills(stats: HardwareStats | null, dashboard: DashboardSummary
   return pills;
 }
 
-export default function HomeDashboardContent({ stats, overview, overviewError, summaryState, dashboard, setActivePage, onViewSession }: Props) {
+export default function HomeDashboardContent({ stats, overview, overviewError, deviceFeed, summaryState, dashboard, setActivePage, onViewSession }: Props) {
   const hasWarnings = dashboard.warning_signs_active_count > 0;
   const pills = overview ? overviewPills(overview) : getStatusPills(stats, dashboard);
   if (overview && dashboard.warning_signs_active_count > 0) pills.push({ label: `${dashboard.warning_signs_active_count} Alerts`, variant: 'warning' });
@@ -160,7 +162,7 @@ export default function HomeDashboardContent({ stats, overview, overviewError, s
       </motion.section>
 
       {/* ═══════ METRIC CARDS ═══════ */}
-      <HomeOverviewCards overview={overview} error={overviewError} />
+      <HomeOverviewCards overview={overview} error={overviewError} deviceFeed={deviceFeed} />
 
       {/* ═══════ BOTTOM ROW — Timeline + Alerts ═══════ */}
       {summaryState !== 'completed' ? <section className="rigmd-card-surface rounded-xl border p-6" role={summaryState === 'failed' ? 'alert' : 'status'}>

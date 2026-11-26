@@ -60,6 +60,7 @@ builder.Services.AddSingleton<RigMD.Api.Services.IDesktopAccountBrowser, RigMD.A
 builder.Services.AddSingleton<RigMD.Api.Services.DesktopAccountConnection>();
 
 builder.Services.AddLocalApiRateLimiting();
+builder.Services.AddSingleton<DeviceDiagnosticRunner>();
 
 // Add CORS policy to allow only local React frontend origins
 builder.Services.AddCors(options =>

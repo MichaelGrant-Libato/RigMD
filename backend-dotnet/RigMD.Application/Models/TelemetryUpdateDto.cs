@@ -3,37 +3,52 @@ namespace RigMD.Application.Models;
 public class DiskTelemetryDto
 {
     public string DeviceId { get; set; } = string.Empty;
-    public double ActiveTimePercent { get; set; }
-    public double ReadKbps { get; set; }
-    public double WriteKbps { get; set; }
+    public DateTimeOffset? CapturedAtUtc { get; set; }
+    public double? ActiveTimePercent { get; set; }
+    public double? ReadKbps { get; set; }
+    public double? WriteKbps { get; set; }
+    public bool? HasTransfers { get; set; }
+    public double? ResponseTimeMs { get; set; }
 }
+
+public sealed record NetworkAdapterTelemetry(string Id, double? SendKbps, double? ReceiveKbps, double? LinkMbps);
+public sealed record TelemetryCollectorStatus(string Name, string State, DateTimeOffset? LastReadAt);
 
 public class TelemetryUpdateDto
 {
+    public DateTimeOffset CapturedAtUtc { get; set; }
     public double? CpuUsagePercent { get; set; }
     public string CpuUsageSource { get; set; } = "Unavailable";
     public DateTimeOffset? CpuUsageCapturedAtUtc { get; set; }
     public double? CpuUsageWindowSeconds { get; set; }
-    public double CpuSpeedMhz { get; set; }
+    public double? CpuSpeedMhz { get; set; }
+    public double? UptimeSeconds { get; set; }
     public double? CpuTempCelsius { get; set; }
     public string CpuTemperatureSource { get; set; } = "Unavailable";
     public string? CpuTemperatureSensorIdentifier { get; set; }
     public DateTimeOffset? CpuTemperatureCapturedAtUtc { get; set; }
-    public int CpuProcesses { get; set; }
-    public int CpuThreads { get; set; }
-    public int CpuHandles { get; set; }
+    public int? CpuProcesses { get; set; }
+    public int? CpuThreads { get; set; }
+    public int? CpuHandles { get; set; }
     
     public double? RamUsagePercent { get; set; }
     public double? RamUsedGb { get; set; }
     public double? RamTotalGb { get; set; }
+    public double? RamAvailableGb { get; set; }
+    public double? RamCommittedGb { get; set; }
+    public double? RamCommitLimitGb { get; set; }
+    public double? RamCachedGb { get; set; }
     
-    public double GpuUsagePercent { get; set; }
-    public double GpuMemoryUsedGb { get; set; }
+    public IReadOnlyList<GpuAdapterReading> GpuAdapters { get; set; } = [];
+    public double? GpuUsagePercent { get; set; }
+    public double? GpuMemoryUsedGb { get; set; }
     public double? GpuMemoryTotalGb { get; set; }
     public double? GpuTempCelsius { get; set; }
     
     public List<DiskTelemetryDto> Disks { get; set; } = new();
     
-    public double NetworkSendKbps { get; set; }
-    public double NetworkReceiveKbps { get; set; }
+    public IReadOnlyList<NetworkAdapterTelemetry> NetworkAdapters { get; set; } = [];
+    public int? BatteryChargePercent { get; set; }
+    public bool? BatteryCharging { get; set; }
+    public IReadOnlyList<TelemetryCollectorStatus> CollectorStatus { get; set; } = [];
 }

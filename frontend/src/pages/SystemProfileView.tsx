@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-import * as signalR from '@microsoft/signalr';
+import { useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
@@ -18,10 +17,9 @@ import {
 } from 'lucide-react';
 
 import TopHeader from '../components/TopHeader';
-import { API_BASE_URL } from '../lib/api';
-import { getLocalApiToken } from '../lib/localApiSession';
-import { formatTemperature, validTemperature } from '../lib/temperatureTelemetry';
-import { REVIEW_THRESHOLDS, NETWORK_THRESHOLDS, networkReviewStatus } from '../lib/reviewThresholds';
+import { formatTemperature, selectedCpuTemperature, gpuTemperatureReading } from '../lib/temperatureTelemetry';
+import { formatMeasurement, latestDeviceSample, type DeviceFeed } from '../lib/deviceTelemetry';
+import { REVIEW_THRESHOLDS } from '../lib/reviewThresholds';
 import { storageReviewStatus } from '../lib/storageTelemetry';
 import { desktopDisplayCount } from '../lib/hardwareInventory';
 import { buttonTap, cardFadeUp, cardTransition, pageFade, pageTransition } from '../lib/motion';
@@ -35,6 +33,8 @@ interface SystemProfileViewProps {
   hardwareUpdatedAt: Date | null;
   isRefreshingHardware: boolean;
   onRefreshHardware: () => Promise<void>;
+  feed?: DeviceFeed;
+  onOpenMemoryCheck?: () => void;
 }
 
 interface FriendlyInfoCardProps {
@@ -59,7 +59,7 @@ function isDetected(value: string | number | null | undefined) {
 }
 
 function formatLastUpdated(value: Date | null) {
-  if (!value) return 'Waiting for first scan';
+  if (!value || !Number.isFinite(value.getTime())) return 'Waiting for device info';
 
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -71,7 +71,7 @@ function formatLastUpdated(value: Date | null) {
 }
 
 function formatStorageSize(sizeGb: number | null | undefined) {
-  if (typeof sizeGb !== 'number' || Number.isNaN(sizeGb)) return 'Not available';
+  if (typeof sizeGb !== 'number' || !Number.isFinite(sizeGb) || sizeGb <= 0) return 'Not available';
   if (sizeGb >= 1000) return `${(sizeGb / 1024).toFixed(1)} TB`;
   if (sizeGb >= 10) return `${Math.round(sizeGb)} GB`;
   return `${sizeGb.toFixed(1)} GB`;
@@ -80,7 +80,7 @@ function formatStorageSize(sizeGb: number | null | undefined) {
 function formatStorageDisplay(stats: HardwareStats): string {
   const sizeStr = formatStorageSize(stats.disk?.total_gb);
   const drives = stats.storage_drives ?? [];
-  const driveCount = drives.length > 0 ? drives.length : 1;
+  const driveCount = drives.length;
   const rawType = stats.storage_type?.trim();
   const hasKnownType =
     rawType &&
@@ -107,12 +107,6 @@ function getToneClasses(tone: FriendlyInfoCardProps['tone'] = 'neutral') {
   if (tone === 'watch') return 'border-amber-400/25 bg-amber-400/10 text-amber-300';
   if (tone === 'danger') return 'border-red-400/25 bg-red-400/10 text-red-300';
   return 'border-cyan-400/25 bg-cyan-400/10 text-cyan-300';
-}
-
-function usageLabel(value: number | null | undefined) {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? `${value.toFixed(1)}% in use during last scan`
-    : 'Usage unavailable';
 }
 
 function FriendlyInfoCard({ icon: Icon, title, value, helper, warningLabel, tone = 'neutral', onClick }: FriendlyInfoCardProps) {
@@ -161,51 +155,28 @@ export default function SystemProfileView({
   hardwareUpdatedAt,
   isRefreshingHardware,
   onRefreshHardware,
+  feed,
+  onOpenMemoryCheck,
 }: SystemProfileViewProps) {
-  const [liveCpuTemp, setLiveCpuTemp] = useState<number | null | undefined>(undefined);
-  const [liveGpuTemp, setLiveGpuTemp] = useState<number | null | undefined>(undefined);
-  const connectionRef = useRef<signalR.HubConnection | null>(null);
-  const hasStats = Boolean(stats);
-
-  useEffect(() => {
-    if (!hasStats) return;
-
-    let disposed = false;
-    const hubUrl = `${API_BASE_URL}/hubs/telemetry`;
-
-    const connection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl, { accessTokenFactory: getLocalApiToken })
-      .withAutomaticReconnect()
-      .build();
-
-    connection.on('ReceiveTelemetry', (telemetry: { cpuTempCelsius?: number | null; gpuTempCelsius?: number | null }) => {
-      if (disposed) return;
-      setLiveCpuTemp(validTemperature(telemetry.cpuTempCelsius));
-      setLiveGpuTemp(validTemperature(telemetry.gpuTempCelsius));
-    });
-
-    connectionRef.current = connection;
-
-    connection.start().catch((err) => {
-      if (!disposed) {
-        console.error('SignalR Connection Error (SystemProfile): ', err);
-      }
-    });
-
-    return () => {
-      disposed = true;
-      if (connectionRef.current) {
-        connectionRef.current.stop();
-        connectionRef.current = null;
-      }
-    };
-  }, [hasStats]);
+  const latest = latestDeviceSample(feed);
+  const gpuName = stats?.gpu.name?.trim().toLowerCase();
+  const matchingAdapters = latest?.gpuAdapters?.filter(adapter => adapter.name.trim().toLowerCase() === gpuName) ?? [];
+  const gpu = matchingAdapters.length === 1 ? matchingAdapters[0]
+    : latest?.gpuAdapters?.length === 1 ? latest.gpuAdapters[0] : undefined;
+  const liveCpuTemp = selectedCpuTemperature(stats?.cpu, latest ?? {}, feed?.now)?.celsius;
+  const liveGpuTemp = gpu ? gpuTemperatureReading(gpu, feed?.now)?.celsius : undefined;
+  const memoryUsage = latest?.ramUsagePercent;
+  const charge = latest?.batteryChargePercent;
+  const charging = latest?.batteryCharging;
+  const lowBattery = charge != null && charge <= 20 && charging === false;
+  const volume = stats?.volume_space;
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
   const [selectedHardwareType, setSelectedHardwareType] = useState<HardwareType | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const closeDeviceDetails = useCallback(() => setIsModalOpen(false), []);
 
   const handleCardClick = (type: HardwareType) => {
     setSelectedHardwareType(type);
@@ -274,7 +245,7 @@ export default function SystemProfileView({
               <div className="flex flex-wrap gap-3">
               <motion.button
                 type="button"
-                title="Retrieve the latest saved readings without starting a new hardware scan"
+                  title="Collect current device information"
                 onClick={onRefreshHardware}
                 disabled={isRefreshingHardware}
                 whileTap={buttonTap}
@@ -347,7 +318,7 @@ export default function SystemProfileView({
                     icon={Cpu}
                     title="Processor"
                     value={cleanValue(stats.cpu.name).replace(/\s+\d+-Core Processor$/i, '')}
-                    helper={`Temperature: ${formatTemperature(stats.cpu.temperature_celsius, liveCpuTemp, liveCpuTemp !== undefined)}`}
+                    helper={`Temperature: ${formatTemperature(liveCpuTemp)}`}
                     tone={getUsageTone(stats.cpu.usage_percent)}
                     warningLabel={(stats.cpu.usage_percent ?? -1) >= 90 ? 'Processor was very busy' : 'Processor was busy'}
                     onClick={() => handleCardClick('CPU')}
@@ -356,10 +327,10 @@ export default function SystemProfileView({
                   <FriendlyInfoCard
                     icon={MemoryStick}
                     title="Memory"
-                    value={`${stats.ram.total_gb} GB total`}
-                    helper={usageLabel(stats.ram.usage_percent)}
-                    tone={getUsageTone(stats.ram.usage_percent, REVIEW_THRESHOLDS.memory)}
-                    warningLabel={(stats.ram.usage_percent ?? -1) >= 90 ? 'Memory was very high' : 'Memory was high'}
+                    value={stats.ram.total_gb > 0 ? `${stats.ram.total_gb} GB total` : 'Not available'}
+                    helper={memoryUsage == null ? 'Live usage unavailable' : formatMeasurement(memoryUsage, '% in use now', 1, 'Idle')}
+                    tone={getUsageTone(memoryUsage, REVIEW_THRESHOLDS.memory)}
+                    warningLabel="Memory usage is high"
                     onClick={() => handleCardClick('Memory')}
                   />
 
@@ -367,9 +338,8 @@ export default function SystemProfileView({
                     icon={HardDrive}
                     title="Storage"
                     value={formatStorageDisplay(stats)}
-                    helper={typeof stats.disk.used_gb === 'number' && stats.disk.total_gb > 0
-                      ? `${formatStorageSize(Math.max(0, stats.disk.total_gb - stats.disk.used_gb))} free | ${stats.disk.usage_percent.toFixed(1)}% of space used`
-                      : usageLabel(stats.disk.usage_percent)}
+                    helper={volume ? (volume.free_gb === 0 ? 'Volumes full' : formatStorageSize(volume.free_gb) + ' free')
+                      + ' · ' + formatMeasurement(volume.usage_percent, '% used', 1, 'Empty') : 'Volume space unavailable'}
                     tone={storageReviewStatus(stats) === 'high' ? 'watch' : storageReviewStatus(stats) === 'normal' ? 'good' : 'neutral'}
                     warningLabel={storageReviewStatus(stats) === 'high' ? 'Review volume free space' : ''}
                     onClick={() => handleCardClick('Storage')}
@@ -378,8 +348,8 @@ export default function SystemProfileView({
                   <FriendlyInfoCard
                     icon={Monitor}
                     title="Graphics"
-                    value={cleanValue(stats.gpu.name)}
-                    helper={`Temperature: ${formatTemperature(stats.gpu.temperature_celsius, liveGpuTemp, liveGpuTemp !== undefined)}`}
+                    value={cleanValue(gpu?.name ?? stats.gpu.name)}
+                    helper={`Temperature: ${formatTemperature(liveGpuTemp)}`}
                     tone="neutral"
                     onClick={() => handleCardClick('GPU')}
                   />
@@ -389,6 +359,7 @@ export default function SystemProfileView({
                     title="Windows"
                     value={cleanValue(stats.os_version).replace(/^Microsoft\s+/i, '').replace(/\s*\([\d.]+\)$/, '')}
                     tone="neutral"
+                    onClick={() => handleCardClick('OS')}
                   />
 
                   <FriendlyInfoCard
@@ -396,6 +367,15 @@ export default function SystemProfileView({
                     title="Computer Name"
                     value={cleanValue(stats.device_name)}
                     tone="neutral"
+                    onClick={() => handleCardClick('Device')}
+                  />
+
+                  <FriendlyInfoCard
+                    icon={Wifi}
+                    title="Network"
+                    value={stats.network?.adapter_name || 'Connection Test'}
+                    helper={stats.network?.has_active_adapter === false ? 'No active interface found' : 'Check your connection'}
+                    onClick={() => handleCardClick('Network')}
                   />
                 </motion.div>
               </section>
@@ -404,7 +384,7 @@ export default function SystemProfileView({
                 <section className="mt-2">
                   <div className="mb-4">
                     <h3 className="text-lg font-bold text-white">Laptop Health</h3>
-                    <p className="text-sm text-slate-500">Live battery and network details for this portable device.</p>
+                    <p className="text-sm text-slate-500">Battery and power details for this portable device.</p>
                   </div>
 
                   <motion.div
@@ -416,28 +396,13 @@ export default function SystemProfileView({
                   >
                     {stats.battery && (
                       <FriendlyInfoCard
-                        icon={stats.battery.is_charging ? BatteryCharging : Battery}
+                        icon={charging ? BatteryCharging : Battery}
                         title="Battery"
-                        value={`${stats.battery.charge_percent}%`}
-                        helper={`Health: ${stats.battery.health_status}`}
-                        tone={stats.battery.charge_percent <= 20 && !stats.battery.is_charging ? 'danger' : 'good'}
-                        warningLabel={stats.battery.charge_percent <= 20 && !stats.battery.is_charging ? 'Low battery' : ''}
-                      />
-                    )}
-                    {stats.network && (
-                      <FriendlyInfoCard
-                        icon={stats.network.is_wifi ? Wifi : Activity}
-                        title="Network"
-                        value={stats.network.query_succeeded === false ? 'Check unavailable' : stats.network.has_active_adapter === false ? 'No active IPv4 adapter' : stats.network.is_wifi ? 'Wi-Fi adapter' : 'Ethernet adapter'}
-                        helper={
-                          [
-                            stats.network.is_wifi && stats.network.wifi_signal_strength ? `Signal: ${stats.network.wifi_signal_strength}%` : '',
-                            stats.network.ping_latency_ms != null ? `Ping: ${stats.network.ping_latency_ms}ms` : ''
-                          ].filter(Boolean).join(' | ') || undefined
-                        }
-                        tone={networkReviewStatus(stats.network) === 'high' ? 'watch' : networkReviewStatus(stats.network) === 'normal' ? 'good' : 'neutral'}
-                        warningLabel={stats.network.is_wifi && stats.network.wifi_signal_strength != null && stats.network.wifi_signal_strength > 0 && stats.network.wifi_signal_strength <= NETWORK_THRESHOLDS.weakSignalPercent ? 'Weak signal' : ''}
-                        onClick={() => handleCardClick('Network')}
+                        value={formatMeasurement(charge, '%', 0, 'Empty')}
+                        helper="Battery Health"
+                        tone={lowBattery ? 'danger' : 'neutral'}
+                        warningLabel={lowBattery ? 'Low battery' : ''}
+                        onClick={() => handleCardClick('Battery')}
                       />
                     )}
                     {stats.active_power_plan && (
@@ -446,6 +411,7 @@ export default function SystemProfileView({
                         title="Power Plan"
                         value={stats.active_power_plan}
                         tone="neutral"
+                        onClick={() => handleCardClick('Power')}
                       />
                     )}
                   </motion.div>
@@ -491,7 +457,9 @@ export default function SystemProfileView({
 
       <DeviceDetailModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={closeDeviceDetails}
+        feed={feed}
+        onMemoryCheck={onOpenMemoryCheck}
         hardwareType={selectedHardwareType}
         stats={stats}
       />

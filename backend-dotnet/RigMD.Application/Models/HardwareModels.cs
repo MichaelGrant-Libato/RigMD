@@ -14,7 +14,7 @@ public class CpuStatsDto
     public double MaxFrequencyMhz { get; set; }
     public bool IsThermallyThrottling { get; set; }
     public int Sockets { get; set; } = 1;
-    public bool VirtualizationEnabled { get; set; }
+    public bool? VirtualizationEnabled { get; set; }
     public double L1CacheKb { get; set; }
     public double L2CacheMb { get; set; }
     public double L3CacheMb { get; set; }
@@ -60,8 +60,23 @@ public class HardwarePresenceProbeDto
     public Dictionary<string, ComponentPresenceInfoDto> Components { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
+public sealed record GpuAdapterReading(string Id, string Name, string Type, double? UsagePercent, DateTimeOffset? CapturedAtUtc)
+{
+    public string? DriverVersion { get; init; }
+    public double? DedicatedMemoryGb { get; init; }
+    public double? SharedMemoryGb { get; init; }
+    public double? DedicatedUsedGb { get; init; }
+    public double? SharedUsedGb { get; init; }
+    public DateTimeOffset? MemoryCapturedAtUtc { get; init; }
+    public double? TemperatureCelsius { get; init; }
+    public string TemperatureSource { get; init; } = "Unavailable";
+    public DateTimeOffset? TemperatureCapturedAtUtc { get; init; }
+}
+
 public class GpuStatsDto
 {
+    public IReadOnlyList<GpuAdapterReading> Adapters { get; set; } = [];
+    public string? AdapterId { get; set; }
     public bool HasGpu { get; set; } = true;
     public bool HasDedicatedGpu { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -74,6 +89,19 @@ public class GpuStatsDto
     public string DirectXVersion { get; set; } = string.Empty;
     public string PhysicalLocation { get; set; } = string.Empty;
     public double? TemperatureCelsius { get; set; }
+    public string TemperatureSource { get; set; } = "Unavailable";
+    public DateTimeOffset? TemperatureCapturedAtUtc { get; set; }
+
+    public void SetAdapterReadings(IReadOnlyList<GpuAdapterReading> adapters)
+    {
+        Adapters = adapters;
+        var matches = adapters.Where(adapter => string.Equals(adapter.Name, Name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        var selected = matches.Length == 1 ? matches[0] : null;
+        AdapterId = selected?.Id;
+        TemperatureCelsius = selected?.TemperatureCelsius;
+        TemperatureSource = selected?.TemperatureSource ?? "Unavailable";
+        TemperatureCapturedAtUtc = selected?.TemperatureCapturedAtUtc;
+    }
 }
 
 public class MemoryStatsDto
@@ -82,13 +110,16 @@ public class MemoryStatsDto
     public double TotalGb { get; set; }
     public double UsedGb { get; set; }
     public double UsagePercent { get; set; }
+    public double? AvailableGb { get; set; }
+    public double? InstalledGb { get; set; }
+    public double? CommitLimitGb { get; set; }
     public double SpeedMtps { get; set; }
     public int? SlotsUsed { get; set; }
     public int? SlotsTotal { get; set; }
     public string FormFactor { get; set; } = string.Empty;
-    public double HardwareReservedMb { get; set; }
-    public double CommittedGb { get; set; }
-    public double CachedGb { get; set; }
+    public double? HardwareReservedMb { get; set; }
+    public double? CommittedGb { get; set; }
+    public double? CachedGb { get; set; }
 }
 
 public class StorageDriveDto
@@ -144,6 +175,7 @@ public class ProcessAppDto
 
 public class NetworkStatsDto
 {
+    public string? AdapterId { get; set; }
     public bool? QuerySucceeded { get; set; }
     public bool HasActiveAdapter { get; set; }
     public string AdapterName { get; set; } = string.Empty;

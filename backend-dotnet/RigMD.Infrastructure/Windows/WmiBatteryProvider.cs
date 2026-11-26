@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.InteropServices;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 
@@ -58,7 +59,7 @@ public class WmiBatteryProvider : IBatteryProvider
                     _ => "Unknown"
                 };
 
-                bool isCharging = status == 2 || status == 6 || status == 7 || status == 8 || status == 9;
+                bool isCharging = status is 6 or 7 or 8 or 9;
 
                 return new BatteryStatsDto
                 {
@@ -82,4 +83,23 @@ public class WmiBatteryProvider : IBatteryProvider
 
         return new BatteryStatsDto { HasBattery = false, QuerySucceeded = false, ChargeAvailable = false };
     }
+
+    public static (int? ChargePercent, bool? Charging) ReadLiveStatus()
+    {
+        if (!GetSystemPowerStatus(out var status) || status.BatteryFlag == 255 || (status.BatteryFlag & 128) != 0)
+            return (null, null);
+        return (status.BatteryLifePercent <= 100 ? status.BatteryLifePercent : null, (status.BatteryFlag & 8) != 0);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte AcLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
+        public uint BatteryLifeTime, BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 }

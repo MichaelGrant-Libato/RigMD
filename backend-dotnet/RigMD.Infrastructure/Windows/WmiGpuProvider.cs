@@ -1,4 +1,6 @@
 using System.Management;
+using System.Runtime.InteropServices;
+using System.Text;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Models;
 
@@ -44,9 +46,9 @@ public class WmiGpuProvider : IGpuProvider
                 };
 
                 var dDate = obj["DriverDate"]?.ToString() ?? "";
-                if (dDate.Length >= 8)
+                if (dDate.Length >= 8 && DateOnly.TryParseExact(dDate[..8], "yyyyMMdd", out var date))
                 {
-                    candidate.DriverDate = $"{dDate.Substring(0, 4)}-{dDate.Substring(4, 2)}-{dDate.Substring(6, 2)}";
+                    candidate.DriverDate = date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                 }
 
                 if (obj["AdapterRAM"] != null && long.TryParse(obj["AdapterRAM"].ToString(), out var ramBytes) && ramBytes > 0)
@@ -63,12 +65,7 @@ public class WmiGpuProvider : IGpuProvider
                 }
 
                 var pnpId = obj["PNPDeviceID"]?.ToString() ?? "";
-                if (pnpId.StartsWith("PCI\\", StringComparison.OrdinalIgnoreCase))
-                {
-                    candidate.PhysicalLocation = "PCI bus";
-                }
-
-                candidate.SharedMemoryGb = Math.Round(candidate.VramGb > 0 ? candidate.VramGb * 0.5 : 8.0, 1);
+                candidate.PhysicalLocation = ReadLocation(pnpId) ?? "";
 
                 var lowerName = name.ToLowerInvariant();
                 bool isDedicated =
@@ -111,4 +108,31 @@ public class WmiGpuProvider : IGpuProvider
         selected.HasDedicatedGpu = anyDedicated;
         return selected;
     }
+
+    private static string? ReadLocation(string pnpId)
+    {
+        if (string.IsNullOrWhiteSpace(pnpId) || CM_Locate_DevNodeW(out var node, pnpId, 0) != 0) return null;
+        var key = new DevicePropertyKey { Category = new("a45c254e-df1c-4efd-8020-67d146a850e0"), Id = 15 };
+        var buffer = new byte[1024];
+        var size = (uint)buffer.Length;
+        return CM_Get_DevNode_PropertyW(node, in key, out var type, buffer, ref size, 0) == 0 &&
+            type == 0x12 && size is >= 2 and <= 1024 && size % 2 == 0
+            ? Encoding.Unicode.GetString(buffer, 0, (int)size).TrimEnd('\0').Trim() : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DevicePropertyKey
+    {
+        public Guid Category;
+        public uint Id;
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint CM_Locate_DevNodeW(out uint node, string deviceId, uint flags);
+
+    [DllImport("cfgmgr32.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint CM_Get_DevNode_PropertyW(uint node, in DevicePropertyKey property, out uint propertyType,
+        [Out] byte[] buffer, ref uint size, uint flags);
 }

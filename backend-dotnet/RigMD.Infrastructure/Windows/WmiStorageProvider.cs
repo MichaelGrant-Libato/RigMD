@@ -33,6 +33,7 @@ public class WmiStorageProvider : IStorageProvider
     {
         // Refresh status on every scan; only immutable model metadata would be safe to cache.
         _storageDrives.Clear();
+        _primaryStorageType = "Unknown";
 
         try
         {
@@ -70,6 +71,7 @@ public class WmiStorageProvider : IStorageProvider
                     IsFailingSmart = ReportsHealthWarning(status)
                 });
             }
+            ReadModernStorageMetadata();
 
             // Determine primary type
             var types = _storageDrives.Select(d => d.Type).ToList();
@@ -87,6 +89,69 @@ public class WmiStorageProvider : IStorageProvider
         }
 
         return _storageDrives.ToList();
+    }
+
+    private void ReadModernStorageMetadata()
+    {
+        const string storageNamespace = @"root\Microsoft\Windows\Storage";
+        try
+        {
+            var devices = new List<(string Name, string Serial, ulong Size, int Media)>();
+            try
+            {
+                using var mediaQuery = new ManagementObjectSearcher(storageNamespace,
+                    "SELECT FriendlyName, SerialNumber, Size, MediaType FROM MSFT_PhysicalDisk");
+                using var media = mediaQuery.Get();
+                foreach (ManagementObject row in media)
+                using (row)
+                    if (ulong.TryParse(row["Size"]?.ToString(), out var size) &&
+                        int.TryParse(row["MediaType"]?.ToString(), out var kind))
+                        devices.Add((row["FriendlyName"]?.ToString()?.Trim() ?? "",
+                            row["SerialNumber"]?.ToString()?.Trim() ?? "", size, kind));
+            }
+            catch (ManagementException) { }
+
+            using var diskQuery = new ManagementObjectSearcher(storageNamespace,
+                "SELECT Number, BusType, FriendlyName, SerialNumber, Size FROM MSFT_Disk");
+            using var disks = diskQuery.Get();
+            foreach (ManagementObject row in disks)
+            using (row)
+            {
+                if (!int.TryParse(row["Number"]?.ToString(), out var number) ||
+                    _storageDrives.FirstOrDefault(drive => drive.DiskIndex == number) is not { } drive) continue;
+
+                var bus = row["BusType"]?.ToString() switch
+                {
+                    "1" => "SCSI", "6" => "Fibre Channel", "7" => "USB", "8" => "RAID", "9" => "iSCSI",
+                    "10" => "SAS", "11" => "SATA", "12" => "SD", "13" => "MMC", "14" => "Virtual",
+                    "15" => "File-backed virtual", "16" => "Storage Spaces", "17" => "NVMe", "19" => "UFS",
+                    _ => null
+                };
+                drive.BusType = bus;
+                if (bus is not null)
+                {
+                    drive.Interface = bus;
+                    drive.DetectionSource = "Windows storage bus";
+                }
+
+                if (!ulong.TryParse(row["Size"]?.ToString(), out var size)) continue;
+                var serial = row["SerialNumber"]?.ToString()?.Trim();
+                var name = row["FriendlyName"]?.ToString()?.Trim();
+                var matches = devices.Where(item => item.Size == size && !string.IsNullOrWhiteSpace(serial) &&
+                    string.Equals(item.Serial, serial, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+                if (matches.Length == 0 && !string.IsNullOrWhiteSpace(name))
+                    matches = devices.Where(item => item.Size == size &&
+                        string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+                var mediaType = matches.Length == 1 ? matches[0].Media switch { 3 => "HDD", 4 => "SSD", 5 => "SCM", _ => null } : null;
+                if (mediaType is not null)
+                {
+                    drive.MediaType = mediaType;
+                    drive.Type = mediaType == "SSD" && bus is ("SATA" or "NVMe") ? $"{bus} SSD" : mediaType;
+                    drive.DetectionSource = "Windows storage bus and media type";
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ManagementException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException) { }
     }
 
     public List<DiskVolumeDto> GetAllDisks()

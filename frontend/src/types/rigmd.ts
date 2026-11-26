@@ -191,20 +191,42 @@ export type AutomaticScanStage =
   | 'completed'
   | 'failed';
 
+export interface GpuAdapterReading {
+  id: string;
+  name: string;
+  type: string;
+  usagePercent?: number | null;
+  capturedAtUtc?: string | null;
+  temperatureCelsius?: number | null;
+  temperatureSource?: string;
+  temperatureCapturedAtUtc?: string | null;
+  driverVersion?: string | null;
+  dedicatedMemoryGb?: number | null;
+  sharedMemoryGb?: number | null;
+  dedicatedUsedGb?: number | null;
+  sharedUsedGb?: number | null;
+  memoryCapturedAtUtc?: string | null;
+}
+
 export interface HardwareStats {
   device_name: string;
+  inventory_captured_at_utc?: string;
+  os_architecture?: string;
+  volume_space?: { free_gb: number; usage_percent: number } | null;
   device_type?: string;
   active_power_plan?: string;
   connected_displays?: number | null;
   battery?: {
-    is_charging: boolean;
-    charge_percent: number;
+    is_charging: boolean | null;
+    charge_percent: number | null;
     health_status: string;
   } | null;
   network?: {
     is_wifi: boolean;
     query_succeeded?: boolean;
     has_active_adapter?: boolean;
+    adapter_id?: string | null;
+    adapter_name?: string | null;
     has_ipv4_address?: boolean;
     has_default_gateway?: boolean;
     has_dns_servers?: boolean;
@@ -268,12 +290,12 @@ export interface HardwareStats {
     usage_source?: string;
     usage_captured_at_utc?: string | null;
     usage_window_seconds?: number | null;
-    cores: number;
-    threads: number;
+    cores: number | null;
+    threads: number | null;
     frequency_mhz: number;
-    max_frequency_mhz?: number;
-    sockets?: number;
-    virtualization_enabled?: boolean;
+    max_frequency_mhz?: number | null;
+    sockets?: number | null;
+    virtualization_enabled?: boolean | null;
     l1_cache_kb?: number;
     l2_cache_mb?: number;
     l3_cache_mb?: number;
@@ -285,6 +307,8 @@ export interface HardwareStats {
     temperature_captured_at_utc?: string | null;
   };
   gpu: {
+    adapters?: GpuAdapterReading[];
+    adapter_id?: string | null;
     name: string;
     driver: string;
     type: string;
@@ -294,17 +318,20 @@ export interface HardwareStats {
     driver_date?: string;
     directx_version?: string;
     physical_location?: string;
-    temperature_celsius?: number;
+    temperature_celsius?: number | null;
   };
   ram: {
     total_gb: number;
+    installed_gb?: number | null;
+    available_gb?: number | null;
+    commit_limit_gb?: number | null;
     used_gb: number | null;
     usage_percent: number | null;
     speed_mtps?: number;
     slots_used?: number | null;
     slots_total?: number | null;
     form_factor?: string;
-    hardware_reserved_mb?: number;
+    hardware_reserved_mb?: number | null;
     committed_gb?: number;
     cached_gb?: number;
   };

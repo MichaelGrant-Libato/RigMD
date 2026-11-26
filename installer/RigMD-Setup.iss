@@ -37,18 +37,16 @@ RestartApplications=no
 [InstallDelete]
 Type: files; Name: "{app}\Api\*.sys"
 Type: files; Name: "{app}\Desktop\*.sys"
-Type: files; Name: "{app}\Api\LibreHardwareMonitorLib.dll"
-Type: files; Name: "{app}\Desktop\LibreHardwareMonitorLib.dll"
 
 [Files]
 Source: "{#DesktopPublishDirectory}\*"; \
     DestDir: "{app}\Desktop"; \
-    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
+    Excludes: "*.pdb,*.sys,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "{#ApiPublishDirectory}\*"; \
     DestDir: "{app}\Api"; \
-    Excludes: "*.pdb,*.sys,LibreHardwareMonitorLib.dll,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
+    Excludes: "*.pdb,*.sys,appsettings.Development.json,appsettings.Development.example.json,appsettings.Local.json,appsettings.*.local.json,secrets.json,.env*,*.db,*.db-shm,*.db-wal,cloud-account.bin,*.user"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "Uninstall-RigMD.bat"; \
@@ -64,6 +62,9 @@ Source: "Uninstall-RigMD.bat"; \
 Source: "uninstall-rigmd.ps1"; \
     DestDir: "{app}"; \
     Flags: ignoreversion
+
+Source: "CPU-SENSORS.md"; DestDir: "{app}\Support"; Flags: ignoreversion
+Source: "licenses\*.txt"; DestDir: "{app}\Support\Licenses"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; \

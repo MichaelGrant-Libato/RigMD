@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 namespace RigMD.Infrastructure.Persistence;
 
-internal static class LocalDiagnosticDeviceIdentity
+public static class LocalDiagnosticDeviceIdentity
 {
     public static string Read()
     {

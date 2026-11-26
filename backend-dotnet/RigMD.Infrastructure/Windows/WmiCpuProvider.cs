@@ -50,14 +50,13 @@ public class WmiCpuProvider : ICpuProvider
         return _utilityUnavailable ? NativeSampler.Read() : utility;
     }
 
+    public static string UsageSource => _utilityUnavailable ? "Windows processor busy time (fallback)" : "Windows processor busy time";
     public static NativeCpuActivity ReadNativeActivity()
     {
         var observation = NativeSampler.ReadObservation();
         return new(observation.Value, observation.Value.HasValue ? "measured" : observation.Primed ? "warming" : "unavailable",
             observation.CapturedAt, observation.WindowSeconds);
     }
-
-    public static string UsageSource => _utilityUnavailable ? "Windows processor busy time (fallback)" : "Windows processor busy time";
     public static DateTimeOffset? UsageCapturedAt => _utilityUnavailable ? NativeSampler.CapturedAt : UsageSampler.CapturedAt;
     public static double? UsageWindowSeconds => _utilityUnavailable ? NativeSampler.WindowSeconds : UsageSampler.WindowSeconds;
 
@@ -73,7 +72,20 @@ public class WmiCpuProvider : ICpuProvider
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetSystemTimes(out CpuFileTime idle, out CpuFileTime kernel, out CpuFileTime user);
 
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetActiveProcessorCount(ushort groupNumber);
+
     public CpuStatsDto GetCpuStats()
+    {
+        var dto = GetCpuInventory();
+        try { LoadLiveCpuInfo(dto); }
+        catch { /* Frequency metadata must not invalidate a measured activity sample. */ }
+        dto.SetTemperatureReading(CpuTemperatureSensorReader.Read());
+        return dto;
+    }
+
+    public CpuStatsDto GetCpuInventory()
     {
         var dto = new CpuStatsDto { UsageAvailable = false };
 
@@ -86,10 +98,6 @@ public class WmiCpuProvider : ICpuProvider
             ApplyFallback(dto);
         }
 
-        try { LoadLiveCpuInfo(dto); }
-        catch { /* Frequency metadata must not invalidate a measured activity sample. */ }
-
-        dto.SetTemperatureReading(CpuTemperatureSensorReader.Read());
         return dto;
     }
 
@@ -100,61 +108,49 @@ public class WmiCpuProvider : ICpuProvider
             new ManagementObjectSearcher(
                 "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, CurrentClockSpeed, MaxClockSpeed, VirtualizationFirmwareEnabled, SocketDesignation FROM Win32_Processor");
 
-        int sockets = 0;
-        foreach (
-            ManagementObject obj
-            in searcher.Get())
+        searcher.Options.Timeout = TimeSpan.FromSeconds(2);
+        using var processors = searcher.Get();
+        var sockets = 0;
+        var cores = 0;
+        var threads = 0;
+        var completeCores = true;
+        var completeThreads = true;
+        var virtualization = new HashSet<bool?>();
+        foreach (ManagementObject obj in processors)
+        using (obj)
         {
             sockets++;
-            if (sockets > 1) continue;
-            
-            dto.Name =
-                obj["Name"]
-                    ?.ToString()
-                    ?.Trim()
-                ?? "Unknown CPU";
-
-            dto.Cores =
-                Convert.ToInt32(
-                    obj["NumberOfCores"]
-                    ?? 0);
-
-            dto.Threads =
-                Convert.ToInt32(
-                    obj["NumberOfLogicalProcessors"]
-                    ?? 0);
-
-            dto.FrequencyMhz =
-                Convert.ToDouble(
-                    obj["CurrentClockSpeed"]
-                    ?? 0);
-
-            dto.MaxFrequencyMhz =
-                Convert.ToDouble(
-                    obj["MaxClockSpeed"]
-                    ?? 0);
-
-            if (obj["VirtualizationFirmwareEnabled"] != null && bool.TryParse(obj["VirtualizationFirmwareEnabled"].ToString(), out var virt))
+            if (sockets == 1)
             {
-                dto.VirtualizationEnabled = virt;
+                dto.Name = obj["Name"]?.ToString()?.Trim() ?? "Unknown CPU";
+                dto.FrequencyMhz = TryConvertToDouble(obj["CurrentClockSpeed"]);
             }
+            dto.MaxFrequencyMhz = Math.Max(dto.MaxFrequencyMhz, TryConvertToDouble(obj["MaxClockSpeed"]));
+            if (int.TryParse(obj["NumberOfCores"]?.ToString(), out var coreCount) && coreCount > 0) cores += coreCount;
+            else completeCores = false;
+            if (int.TryParse(obj["NumberOfLogicalProcessors"]?.ToString(), out var threadCount) && threadCount > 0) threads += threadCount;
+            else completeThreads = false;
+            virtualization.Add(bool.TryParse(obj["VirtualizationFirmwareEnabled"]?.ToString(), out var enabled) ? enabled : null);
         }
-        
-        dto.Sockets = sockets > 0 ? sockets : 1;
+
+        dto.Sockets = sockets;
+        dto.Cores = completeCores ? cores : 0;
+        dto.Threads = completeThreads ? threads : 0;
+        if (virtualization.Count == 1) dto.VirtualizationEnabled = virtualization.Single();
 
         try
         {
-            using var cacheSearcher = new ManagementObjectSearcher("SELECT Level, MaxCacheSize FROM Win32_CacheMemory");
-            foreach (ManagementObject obj in cacheSearcher.Get())
+            using var cacheSearcher = new ManagementObjectSearcher("SELECT Level, InstalledSize FROM Win32_CacheMemory");
+            cacheSearcher.Options.Timeout = TimeSpan.FromSeconds(2);
+            using var caches = cacheSearcher.Get();
+            foreach (ManagementObject obj in caches)
+            using (obj)
             {
-                if (obj["Level"] != null && obj["MaxCacheSize"] != null &&
-                    int.TryParse(obj["Level"].ToString(), out var level) &&
-                    double.TryParse(obj["MaxCacheSize"].ToString(), out var sizeKb))
-                {
-                    if (level == 3) dto.L1CacheKb += sizeKb; // WMI Levels are 3=L1, 4=L2, 5=L3 usually
-                    else if (level == 4) dto.L2CacheMb += sizeKb / 1024.0;
-                    else if (level == 5) dto.L3CacheMb += sizeKb / 1024.0;
-                }
+                if (!int.TryParse(obj["Level"]?.ToString(), out var level) ||
+                    !double.TryParse(obj["InstalledSize"]?.ToString(), out var sizeKb) || sizeKb <= 0) continue;
+                if (level == 3) dto.L1CacheKb += sizeKb;
+                else if (level == 4) dto.L2CacheMb += sizeKb / 1024.0;
+                else if (level == 5) dto.L3CacheMb += sizeKb / 1024.0;
             }
         }
         catch { }
@@ -236,16 +232,10 @@ public class WmiCpuProvider : ICpuProvider
                 "Unknown CPU";
         }
 
-        if (dto.Cores <= 0)
-        {
-            dto.Cores =
-                Environment.ProcessorCount;
-        }
-
         if (dto.Threads <= 0)
         {
-            dto.Threads =
-                Environment.ProcessorCount;
+            var active = GetActiveProcessorCount(ushort.MaxValue);
+            if (active <= int.MaxValue) dto.Threads = (int)active;
         }
 
         dto.UsagePercent =

@@ -259,8 +259,7 @@ $SensitivePatterns = @(
     "cloud-account.bin",
     "*.user",
     "*.pdb",
-    "*.sys",
-    "LibreHardwareMonitorLib.dll"
+    "*.sys"
 )
 
 foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory))

@@ -1,277 +1,208 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using RigMD.Api.Hubs;
-using RigMD.Application.Models;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
+using Microsoft.AspNetCore.SignalR;
+using RigMD.Api.Hubs;
+using RigMD.Application.Models;
 using RigMD.Infrastructure.Windows;
 
 namespace RigMD.Api.Services;
 
-public class TelemetryBackgroundService : BackgroundService
+public class TelemetryBackgroundService(
+    IHubContext<TelemetryHub> hubContext,
+    Lazy<IHardwareMonitorService> hardwareMonitor,
+    TelemetrySubscriptions subscriptions,
+    ILogger<TelemetryBackgroundService> logger) : BackgroundService
 {
-    private readonly IHubContext<TelemetryHub> _hubContext;
-    private readonly Lazy<IHardwareMonitorService> _hardwareMonitor;
-    private readonly TelemetrySubscriptions _subscriptions;
-    private readonly ILogger<TelemetryBackgroundService> _logger;
-    
-    private PerformanceCounter? _threadCounter;
-    private PerformanceCounter? _handleCounter;
-    private PerformanceCounter? _processCounter;
-
-    private readonly Dictionary<string, DiskCounters> _diskCounters = new(StringComparer.OrdinalIgnoreCase);
-    private long _prevNetworkBytesSent;
-    private long _prevNetworkBytesReceived;
-    private DateTime _prevNetworkTime = DateTime.MinValue;
-
-    public TelemetryBackgroundService(
-        IHubContext<TelemetryHub> hubContext, 
-        Lazy<IHardwareMonitorService> hardwareMonitor,
-        TelemetrySubscriptions subscriptions,
-        ILogger<TelemetryBackgroundService> logger)
-    {
-        _hubContext = hubContext;
-        _hardwareMonitor = hardwareMonitor;
-        _subscriptions = subscriptions;
-        _logger = logger;
-    }
+    private readonly Dictionary<string, WindowsCounterQuery> _diskCounters = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, NetworkBaseline> _networkBaselines = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Home uses fast native readings. Start full sensor streaming only for a subscriber.
-        await _subscriptions.WaitAsync(stoppingToken);
-        // .NET 10 runs ExecuteAsync on a worker; expensive sensor setup must stay here.
-        var hardwareMonitor = _hardwareMonitor.Value;
-        try 
+        await subscriptions.WaitAsync(stoppingToken);
+        using var system = new WindowsCounterQuery(
+            @"\System\Processes", @"\System\Threads", @"\Process(_Total)\Handle Count",
+            @"\Processor Information(_Total)\Processor Frequency");
+        using var cache = WmiMemoryProvider.OpenCacheQuery();
+        var gpu = new TelemetryCollector<IReadOnlyList<GpuAdapterReading>>("Graphics", () =>
         {
-            _threadCounter = new PerformanceCounter("System", "Threads");
-            _processCounter = new PerformanceCounter("System", "Processes");
-            // Handles are not easily grabbed globally from System category without iterating processes, 
-            // but we can estimate or leave 0 for now. Actually, "Process" -> "Handle Count" -> "_Total" works!
-            _handleCounter = new PerformanceCounter("Process", "Handle Count", "_Total");
-        } 
-        catch (Exception ex)
+            var monitor = hardwareMonitor.Value;
+            monitor.TickGpu();
+            var adapters = monitor.GetGpuAdapters();
+            return adapters.Count > 0 ? adapters : null;
+        }, logger);
+        var disk = new TelemetryCollector<List<DiskTelemetryDto>>("Storage", () =>
         {
-            _logger.LogWarning(ex, "Failed to initialize some performance counters");
-        }
+            var sample = new TelemetryUpdateDto();
+            UpdateDisks(sample);
+            return sample.Disks.Any(drive => drive.CapturedAtUtc.HasValue) ? sample.Disks : null;
+        }, logger);
+        var network = new TelemetryCollector<IReadOnlyList<NetworkAdapterTelemetry>>("Network", () =>
+        {
+            var sample = ReadNetwork();
+            return sample.Count > 0 ? sample : null;
+        }, logger);
+        var thermal = new TelemetryCollector<CpuTemperatureReading>("CPU temperature",
+            () => CpuTemperatureSensorReader.Read(), logger);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            await _subscriptions.WaitAsync(stoppingToken);
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                // Tick LHM to read new sensor values
-                hardwareMonitor.Tick();
+                await subscriptions.WaitAsync(stoppingToken);
+                try
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var adapters = gpu.Read(now, stoppingToken);
+                    var disks = disk.Read(now, stoppingToken);
+                    var links = network.Read(now, stoppingToken);
+                    var temperature = thermal.Read(now, stoppingToken);
+                    var cpuUsage = WmiCpuProvider.ReadUsagePercent();
+                    var memory = WmiMemoryProvider.ReadUsage();
+                    var battery = WmiBatteryProvider.ReadLiveStatus();
+                    var singleGpu = adapters?.Count == 1 ? adapters[0] : null;
+                    var dto = new TelemetryUpdateDto
+                    {
+                        CapturedAtUtc = DateTimeOffset.UtcNow,
+                        CpuUsagePercent = cpuUsage,
+                        CpuUsageSource = cpuUsage.HasValue ? WmiCpuProvider.UsageSource : "Unavailable",
+                        CpuUsageCapturedAtUtc = WmiCpuProvider.UsageCapturedAt,
+                        CpuUsageWindowSeconds = WmiCpuProvider.UsageWindowSeconds,
+                        CpuTempCelsius = temperature?.Celsius,
+                        CpuTemperatureSource = temperature?.Source ?? "Unavailable",
+                        CpuTemperatureSensorIdentifier = temperature?.SensorIdentifier,
+                        CpuTemperatureCapturedAtUtc = temperature?.CapturedAtUtc,
+                        UptimeSeconds = Environment.TickCount64 / 1000d,
+                        RamUsagePercent = memory.UsageAvailable == true ? memory.UsagePercent : null,
+                        RamUsedGb = memory.UsageAvailable == true ? memory.UsedGb : null,
+                        RamTotalGb = memory.UsageAvailable == true ? memory.TotalGb : null,
+                        RamAvailableGb = memory.AvailableGb,
+                        RamCommittedGb = memory.CommittedGb,
+                        RamCommitLimitGb = memory.CommitLimitGb,
+                        RamCachedGb = WmiMemoryProvider.ReadCacheGb(cache),
+                        GpuAdapters = adapters ?? [],
+                        GpuUsagePercent = singleGpu?.UsagePercent,
+                        GpuTempCelsius = singleGpu?.TemperatureCelsius,
+                        GpuMemoryUsedGb = singleGpu?.DedicatedUsedGb,
+                        GpuMemoryTotalGb = singleGpu?.DedicatedMemoryGb,
+                        Disks = disks ?? [],
+                        NetworkAdapters = links ?? [],
+                        BatteryChargePercent = battery.ChargePercent,
+                        BatteryCharging = battery.Charging,
+                        CollectorStatus = [gpu.Status(now), disk.Status(now), network.Status(now), thermal.Status(now)]
+                    };
+                    if (system.Collect())
+                    {
+                        dto.CpuProcesses = PositiveCount(system.Read(0));
+                        dto.CpuThreads = PositiveCount(system.Read(1));
+                        dto.CpuHandles = PositiveCount(system.Read(2));
+                        dto.CpuSpeedMhz = system.Read(3) is > 0 and var speed ? speed : null;
+                    }
+                    await hubContext.Clients.All.SendAsync("ReceiveTelemetry", dto, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception ex) { logger.LogError(ex, "Error in telemetry streaming"); }
 
-                var dto = new TelemetryUpdateDto();
-                
-                // Use the same activity metric and availability rules as a saved diagnostic.
-                dto.CpuUsagePercent = WmiCpuProvider.ReadUsagePercent();
-                dto.CpuUsageSource = dto.CpuUsagePercent.HasValue ? WmiCpuProvider.UsageSource : "Unavailable";
-                dto.CpuUsageCapturedAtUtc = WmiCpuProvider.UsageCapturedAt;
-                dto.CpuUsageWindowSeconds = WmiCpuProvider.UsageWindowSeconds;
-
-                var cpuTemperature = hardwareMonitor.GetCpuTemperatureReading();
-                dto.CpuTempCelsius = cpuTemperature?.Celsius;
-                dto.CpuTemperatureSource = cpuTemperature?.Source ?? "Unavailable";
-                dto.CpuTemperatureSensorIdentifier = cpuTemperature?.SensorIdentifier;
-                dto.CpuTemperatureCapturedAtUtc = cpuTemperature?.CapturedAtUtc;
-                
-                try { if (_processCounter != null) dto.CpuProcesses = (int)_processCounter.NextValue(); } catch {}
-                try { if (_threadCounter != null) dto.CpuThreads = (int)_threadCounter.NextValue(); } catch {}
-                try { if (_handleCounter != null) dto.CpuHandles = (int)_handleCounter.NextValue(); } catch {}
-
-                var memory = WmiMemoryProvider.ReadUsage();
-                dto.RamUsagePercent = memory.UsageAvailable == true ? memory.UsagePercent : null;
-                dto.RamUsedGb = memory.UsageAvailable == true ? memory.UsedGb : null;
-                dto.RamTotalGb = memory.UsageAvailable == true ? memory.TotalGb : null;
-
-                // GPU
-                dto.GpuUsagePercent = Math.Round(hardwareMonitor.GetGpuLoad() ?? 0, 1);
-                dto.GpuTempCelsius = hardwareMonitor.GetGpuTemperature();
-                dto.GpuMemoryUsedGb = Math.Round(hardwareMonitor.GetGpuDedicatedMemoryUsedGb() ?? 0, 1);
-                dto.GpuMemoryTotalGb = Math.Round(hardwareMonitor.GetGpuDedicatedMemoryTotalGb() ?? 0, 1);
-
-                // Disks (Persistent performance counters for real live activity & rates)
-                UpdateDisks(dto);
-
-                // Network (Real-time live throughput calculation in Kbps)
-                UpdateNetwork(dto);
-
-                await _hubContext.Clients.All.SendAsync("ReceiveTelemetry", dto, stoppingToken);
+                await Task.Delay(1000, stoppingToken);
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in telemetry streaming");
-            }
-
-            await Task.Delay(1000, stoppingToken);
         }
-
-        foreach (var counters in _diskCounters.Values)
+        finally
         {
-            counters.Dispose();
+            disk.AfterPending(() =>
+            {
+                foreach (var counter in _diskCounters.Values) counter.Dispose();
+                _diskCounters.Clear();
+            });
         }
-        _diskCounters.Clear();
     }
+
+    private static int? PositiveCount(double? value) => value is > 0 and <= int.MaxValue ? (int)value.Value : null;
 
     private void UpdateDisks(TelemetryUpdateDto dto)
     {
         try
         {
-            var cat = new PerformanceCounterCategory("PhysicalDisk");
-            var instances = cat.GetInstanceNames().Where(i => i != "_Total").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var instances = new PerformanceCounterCategory("PhysicalDisk").GetInstanceNames()
+                .Where(name => name.Length > 0 && char.IsAsciiDigit(name[0])).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var staleKeys = _diskCounters.Keys.Where(k => !instances.Contains(k)).ToList();
-            foreach (var key in staleKeys)
-            {
-                if (_diskCounters.Remove(key, out var oldCounters))
-                {
-                    oldCounters.Dispose();
-                }
-            }
+            foreach (var stale in _diskCounters.Keys.Where(key => !instances.Contains(key)).ToArray())
+                if (_diskCounters.Remove(stale, out var old)) old.Dispose();
 
-            foreach (var inst in instances)
+            foreach (var instance in instances)
             {
-                if (!_diskCounters.TryGetValue(inst, out var counters))
+                var reading = new DiskTelemetryDto { DeviceId = instance };
+                dto.Disks.Add(reading);
+
+                if (!_diskCounters.TryGetValue(instance, out var counters))
                 {
-                    counters = new DiskCounters(inst);
-                    _diskCounters[inst] = counters;
+                    var prefix = $@"\PhysicalDisk({instance})\";
+                    counters = new WindowsCounterQuery(prefix + "% Idle Time", prefix + "Disk Read Bytes/sec",
+                        prefix + "Disk Write Bytes/sec", prefix + "Avg. Disk sec/Transfer", prefix + "Disk Transfers/sec");
+                    _diskCounters[instance] = counters;
+                    counters.Collect();
                     continue;
                 }
 
-                double activeTime = 0;
-                double readKbps = 0;
-                double writeKbps = 0;
-
-                try
-                {
-                    if (counters.ActiveTime != null)
-                    {
-                        var raw = counters.ActiveTime.NextValue();
-                        activeTime = Math.Clamp(Math.Round((double)raw, 1), 0, 100);
-                    }
-                }
-                catch { }
-
-                try
-                {
-                    if (counters.ReadBytes != null)
-                    {
-                        var raw = counters.ReadBytes.NextValue();
-                        readKbps = Math.Round(raw / 1024.0, 1);
-                    }
-                }
-                catch { }
-
-                try
-                {
-                    if (counters.WriteBytes != null)
-                    {
-                        var raw = counters.WriteBytes.NextValue();
-                        writeKbps = Math.Round(raw / 1024.0, 1);
-                    }
-                }
-                catch { }
-
-                dto.Disks.Add(new DiskTelemetryDto
-                {
-                    DeviceId = inst,
-                    ActiveTimePercent = activeTime,
-                    ReadKbps = readKbps,
-                    WriteKbps = writeKbps
-                });
+                if (!counters.Collect()) continue;
+                var idle = counters.Read(0);
+                // Small above-100 variations come from counter timing and were observed on idle disks.
+                reading.ActiveTimePercent = idle is >= 0 and <= 101 ? Math.Max(0, 100 - idle.Value) : null;
+                reading.ReadKbps = counters.Read(1) / 1024;
+                reading.WriteKbps = counters.Read(2) / 1024;
+                var transfers = counters.Read(4);
+                reading.HasTransfers = transfers.HasValue ? transfers.Value > 0 : null;
+                if (reading.HasTransfers == true)
+                    reading.ResponseTimeMs = counters.Read(3) * 1000;
+                if (reading.ActiveTimePercent.HasValue || reading.ReadKbps.HasValue ||
+                    reading.WriteKbps.HasValue || reading.HasTransfers.HasValue)
+                    reading.CapturedAtUtc = DateTimeOffset.UtcNow;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to read physical disk counters");
+            dto.Disks.Clear();
+            logger.LogDebug(ex, "Failed to read physical disk counters");
         }
     }
 
-    private void UpdateNetwork(TelemetryUpdateDto dto)
+    private IReadOnlyList<NetworkAdapterTelemetry> ReadNetwork()
     {
+        var current = new Dictionary<string, NetworkBaseline>(StringComparer.OrdinalIgnoreCase);
+        var readings = new List<NetworkAdapterTelemetry>();
         try
         {
-            long currentBytesSent = 0;
-            long currentBytesReceived = 0;
-
-            var interfaces = NetworkInterface.GetAllNetworkInterfaces();
-            foreach (var nic in interfaces)
+            var timestamp = Stopwatch.GetTimestamp();
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
-                if (nic.OperationalStatus != OperationalStatus.Up) continue;
-                if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-                if (nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+                if (nic.OperationalStatus != OperationalStatus.Up ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
 
-                var stats = nic.GetIPStatistics();
-                currentBytesSent += stats.BytesSent;
-                currentBytesReceived += stats.BytesReceived;
-            }
-
-            var now = DateTime.UtcNow;
-            if (_prevNetworkTime != DateTime.MinValue)
-            {
-                var elapsedSeconds = (now - _prevNetworkTime).TotalSeconds;
-                if (elapsedSeconds > 0.1)
+                try
                 {
-                    var deltaSent = currentBytesSent - _prevNetworkBytesSent;
-                    var deltaRecv = currentBytesReceived - _prevNetworkBytesReceived;
-
-                    if (deltaSent >= 0 && deltaRecv >= 0)
+                    var statistics = nic.GetIPStatistics();
+                    current[nic.Id] = new(statistics.BytesSent, statistics.BytesReceived, timestamp);
+                    double? send = null, receive = null;
+                    if (_networkBaselines.TryGetValue(nic.Id, out var prior))
                     {
-                        var sendKbps = Math.Round((deltaSent * 8.0) / 1024.0 / elapsedSeconds, 1);
-                        var recvKbps = Math.Round((deltaRecv * 8.0) / 1024.0 / elapsedSeconds, 1);
-
-                        dto.NetworkSendKbps = sendKbps;
-                        dto.NetworkReceiveKbps = recvKbps;
+                        var elapsed = Stopwatch.GetElapsedTime(prior.Timestamp, timestamp).TotalSeconds;
+                        if (elapsed is >= 0.1 and <= 5)
+                        {
+                            if (statistics.BytesSent >= prior.Sent) send = (statistics.BytesSent - prior.Sent) * 8d / 1000 / elapsed;
+                            if (statistics.BytesReceived >= prior.Received) receive = (statistics.BytesReceived - prior.Received) * 8d / 1000 / elapsed;
+                        }
                     }
+                    var linkBitsPerSecond = nic.Speed;
+                    readings.Add(new(nic.Id, send, receive, linkBitsPerSecond > 0 ? linkBitsPerSecond / 1000000d : null));
                 }
+                catch (NetworkInformationException) { }
             }
-
-            _prevNetworkBytesSent = currentBytesSent;
-            _prevNetworkBytesReceived = currentBytesReceived;
-            _prevNetworkTime = now;
         }
-        catch (Exception ex)
+        catch (NetworkInformationException ex)
         {
-            _logger.LogDebug(ex, "Failed to read network statistics");
+            logger.LogDebug(ex, "Failed to read network statistics");
         }
+        _networkBaselines = current;
+        return readings;
     }
 
-    private sealed class DiskCounters : IDisposable
-    {
-        public PerformanceCounter? ActiveTime { get; }
-        public PerformanceCounter? ReadBytes { get; }
-        public PerformanceCounter? WriteBytes { get; }
-
-        public DiskCounters(string instance)
-        {
-            try
-            {
-                ActiveTime = new PerformanceCounter("PhysicalDisk", "% Disk Time", instance, true);
-                ActiveTime.NextValue();
-            }
-            catch { }
-
-            try
-            {
-                ReadBytes = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", instance, true);
-                ReadBytes.NextValue();
-            }
-            catch { }
-
-            try
-            {
-                WriteBytes = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", instance, true);
-                WriteBytes.NextValue();
-            }
-            catch { }
-        }
-
-        public void Dispose()
-        {
-            try { ActiveTime?.Dispose(); } catch { }
-            try { ReadBytes?.Dispose(); } catch { }
-            try { WriteBytes?.Dispose(); } catch { }
-        }
-    }
+    private sealed record NetworkBaseline(long Sent, long Received, long Timestamp);
 }
