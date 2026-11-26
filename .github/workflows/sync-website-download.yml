@@ -1,0 +1,46 @@
+name: Sync website download
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to check
+        required: true
+        type: string
+      verify_only:
+        description: Verify the release without updating the website
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rigmd-website-download
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'MichaelGrant-Libato/RigMD' && (github.event_name == 'release' || github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Verify and update the hosted installer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RIGMD_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RIGMD_VERIFY_ONLY: ${{ inputs.verify_only }}
+          RIGMD_PROMOTE_PRERELEASES: ${{ vars.RIGMD_PROMOTE_PRERELEASES }}
+          RIGMD_GLOBAL_CONFIG_ID: ${{ vars.RIGMD_GLOBAL_CONFIG_ID }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node frontend/scripts/sync-website-download.mjs

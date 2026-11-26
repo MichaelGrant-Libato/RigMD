@@ -14,8 +14,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabase';
-import release from '../../release.json';
-import { releaseDownloadUrl } from '../../server/releasePolicy';
+import { isInstallerDownload } from '../lib/downloadRelease';
 
 const features = [
   [
@@ -54,15 +53,16 @@ function DownloadLandingPage() {
   const navigate = useNavigate();
   const [userEmail, setUserEmail] = useState('');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState('');
+  const [download, setDownload] = useState(null);
   const [downloadMessage, setDownloadMessage] = useState('Checking the current download…');
+  const downloadUrl = download?.url;
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/download-url', { signal: controller.signal, cache: 'no-store' }).then(async response => {
       const data = await response.json();
-      if (!response.ok || data.available !== true || data.version !== release.version || data.url !== releaseDownloadUrl)
+      if (!response.ok || data?.available !== true || !isInstallerDownload(data.version, data.url))
         throw new Error('The current download is being prepared. Please try again later.');
-      if (!controller.signal.aborted) { setDownloadUrl(data.url); setDownloadMessage(`RigMD ${data.version}`); }
+      if (!controller.signal.aborted) setDownload(data);
     }).catch(() => { if (!controller.signal.aborted) setDownloadMessage('The current download is unavailable. Please try again later.'); });
     return () => controller.abort();
   }, []);
@@ -199,7 +199,7 @@ function DownloadLandingPage() {
                 </motion.a>
 
                 <p role="status" className="text-sm text-[var(--rigmd-text-faint)]">
-                  {downloadMessage}<br />Windows 10 / 11 - 64-bit
+                  {download ? `RigMD ${download.version}${download.prerelease ? ' prerelease' : ''}` : downloadMessage}<br />Windows 10 / 11 - 64-bit
                 </p>
               </div>
 
