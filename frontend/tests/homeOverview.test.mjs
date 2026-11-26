@@ -36,6 +36,8 @@ test('unknown or partial volumes cannot earn a normal storage indicator; measure
 });
 test('full inventory is requested for device details and reports; sensors also run during checks', () => {
   for (const page of ['home', 'settings', 'appSpeed', 'diagnosticHistory', 'help']) { assert.equal(fullInventoryNeeded(page), false); assert.equal(sensorStreamingNeeded(page), false); }
+  assert.equal(sensorStreamingNeeded('home', true), true);
+  assert.equal(sensorStreamingNeeded('settings', true), false);
   for (const page of ['systemProfile', 'reports']) { assert.equal(fullInventoryNeeded(page), true); assert.equal(sensorStreamingNeeded(page), true); }
   assert.equal(sensorStreamingNeeded('newDiagnosis'), true);
 });

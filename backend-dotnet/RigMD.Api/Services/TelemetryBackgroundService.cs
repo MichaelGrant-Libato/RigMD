@@ -190,7 +190,8 @@ public class TelemetryBackgroundService(
                             if (statistics.BytesReceived >= prior.Received) receive = (statistics.BytesReceived - prior.Received) * 8d / 1000 / elapsed;
                         }
                     }
-                    readings.Add(new(nic.Id, send, receive, nic.Speed > 0 ? nic.Speed / 1000000d : null));
+                    var linkBitsPerSecond = nic.Speed;
+                    readings.Add(new(nic.Id, send, receive, linkBitsPerSecond > 0 ? linkBitsPerSecond / 1000000d : null));
                 }
                 catch (NetworkInformationException) { }
             }

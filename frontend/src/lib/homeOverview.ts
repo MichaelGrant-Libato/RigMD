@@ -29,7 +29,9 @@ export function parseHomeOverview(value: unknown): HomeOverview {
 }
 export function essentialHomeReady(row: HomeOverview | null) { return row !== null && row.cpu.state !== 'warming'; }
 export function fullInventoryNeeded(page: string) { return page === 'systemProfile' || page === 'reports'; }
-export function sensorStreamingNeeded(page: string) { return fullInventoryNeeded(page) || page === 'newDiagnosis'; }
+export function sensorStreamingNeeded(page: string, homeReady = false) {
+  return fullInventoryNeeded(page) || page === 'newDiagnosis' || (page === 'home' && homeReady);
+}
 export function overviewPills(row: HomeOverview) {
   const variant = (state: string): 'ok' | 'warning' | 'neutral' => state === 'high' ? 'warning' : state === 'normal' ? 'ok' : 'neutral';
   const storage = row.volumes.map(volume => percentReviewStatus(volume.usagePercent, REVIEW_THRESHOLDS.storage));

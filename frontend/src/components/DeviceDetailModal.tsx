@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity, Battery, Zap } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { chartReadings, formatMeasurement, isCurrent, latestDeviceSample, measurement, type DeviceFeed, type DeviceSample } from '../lib/deviceTelemetry';
+import { chartReadings, formatAdapterLinkSpeed, formatMeasurement, isCurrent, latestDeviceSample, measurement, trafficScale, type DeviceFeed, type DeviceSample } from '../lib/deviceTelemetry';
 import { formatTemperature, gpuTemperatureReading, selectedCpuTemperature } from '../lib/temperatureTelemetry';
 import type { HardwareStats } from '../types/rigmd';
 import { AppActivityPanel, BatteryHealthPanel, ConnectionTestPanel, DriveHealthPanel } from './DeviceDiagnosticPanels';
@@ -64,9 +64,9 @@ function Field({ label, value, title }: { label: string; value: string; title?: 
   );
 }
 
-function ActivityChart({ title, label, now, color, rows, upperBound }: {
+function ActivityChart({ title, label, now, color, rows, upperBound, ticks }: {
   title: string; label: string; now: number; color: string;
-  rows: { time: number; value: number | null }[]; upperBound: number;
+  rows: { time: number; value: number | null }[]; upperBound: number; ticks?: number[];
 }) {
   const validCount = rows.filter(row => row.value !== null).length;
   return (
@@ -81,7 +81,8 @@ function ActivityChart({ title, label, now, color, rows, upperBound }: {
             <LineChart data={rows} margin={{ top: 5, right: 3, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
               <XAxis dataKey="time" type="number" scale="time" domain={[now - 60000, now]} allowDataOverflow hide />
-              <YAxis domain={[0, upperBound]} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+              <YAxis domain={[0, upperBound]} ticks={ticks} allowDataOverflow={ticks !== undefined}
+                tick={{ fill: '#94a3b8', fontSize: 12 }} />
               <Line dataKey="value" type="linear" stroke={color} strokeWidth={2} connectNulls={false}
                 dot={validCount === 1 ? { r: 3 } : false} isAnimationActive={false} />
             </LineChart>
@@ -278,14 +279,15 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     Icon = Wifi;
     title = 'Network';
     subtitle = text(stats.network?.adapter_name);
-    const rows = chartReadings(samples, now, sample => ({ value: measurement(selectNetwork(sample)?.receiveKbps) }));
+    const chart = trafficScale(chartReadings(samples, now, sample => ({ value: measurement(selectNetwork(sample)?.receiveKbps) })));
     content = <>
-      <ActivityChart title="Receive speed · Last 60 seconds" label={liveValue(network?.receiveKbps, ' Kbps', 1)}
-        now={now} color="#f472b6" upperBound={Math.max(1, ...rows.map(row => row.value ?? 0))} rows={rows} />
+      <ActivityChart title={'Receive traffic · Last 60 seconds (' + chart.unit + ')'} label={liveValue(network?.receiveKbps, ' Kbps', 1)}
+        now={now} color="#f472b6" upperBound={chart.upperBound} rows={chart.rows} ticks={chart.ticks} />
       <Details>
-        <Field label="Send speed" value={liveValue(network?.sendKbps, ' Kbps', 1)} />
-        <Field label="Receive speed" value={liveValue(network?.receiveKbps, ' Kbps', 1)} />
-        <Field label="Link speed" value={positive(network?.linkMbps, ' Mbps', 1)} />
+        <Field label="Send traffic" value={liveValue(network?.sendKbps, ' Kbps', 1)} />
+        <Field label="Receive traffic" value={liveValue(network?.receiveKbps, ' Kbps', 1)} />
+        <Field label="Adapter link speed" value={formatAdapterLinkSpeed(network?.linkMbps)}
+          title="Link rate reported by Windows for this adapter. Send and receive traffic come from the bytes transferred during the sample." />
         <Field label="IP address" value={text(stats.network?.ip_address)} />
       </Details>
       <ConnectionTestPanel />

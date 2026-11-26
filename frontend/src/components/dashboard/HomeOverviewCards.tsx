@@ -1,28 +1,59 @@
 import type { ReactNode } from 'react';
-import { Cpu, MemoryStick, HardDrive, Network } from 'lucide-react';
+import { Cpu, Gpu, MemoryStick, HardDrive, Network } from 'lucide-react';
 import type { HomeOverview } from '../../lib/homeOverview';
 import { formatStorageCapacity } from '../../lib/storageTelemetry';
 import { UsageBar, MemoryGauge } from './LiveUsageIndicators';
 import { REVIEW_THRESHOLDS } from '../../lib/reviewThresholds';
+import { isCurrent, latestDeviceSample, measurement, type DeviceFeed } from '../../lib/deviceTelemetry';
+import { formatTemperature, gpuTemperatureReading } from '../../lib/temperatureTelemetry';
 
 function Card({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return <div className="rigmd-card-surface min-h-[166px] rounded-xl border p-5"><div className="flex items-center gap-3 text-cyan-300"><span aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-400/10">{icon}</span><h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">{title}</h3></div><div className="mt-4 space-y-2">{children}</div></div>;
 }
-export default function HomeOverviewCards({ overview, error }: { overview: HomeOverview | null; error?: string | null }) {
+export default function HomeOverviewCards({ overview, error, deviceFeed }: {
+  overview: HomeOverview | null;
+  error?: string | null;
+  deviceFeed?: DeviceFeed;
+}) {
   const empty = error ? 'Not available' : 'Loading readings…';
   const cpu = overview?.cpu;
   const memory = overview?.memory;
   const network = overview?.network;
+  const gpuReading = latestDeviceSample(deviceFeed);
+  const gpuAdapters = gpuReading?.gpuAdapters ?? [];
+  const gpuState = gpuReading?.collectorStatus?.find(status => status.name === 'Graphics')?.state;
+  const gpuMessage = !deviceFeed?.disconnected &&
+    (!deviceFeed?.samples.length || gpuState === 'collecting') ? 'Collecting GPU readings…' : 'GPU readings unavailable';
+  const now = deviceFeed?.now ?? Date.now();
   const color = (value: number | null | undefined, threshold: number) => value == null ? 'text-slate-400' : value >= threshold ? 'text-amber-300' : 'text-white';
   return <>
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Essential device readings">
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5" aria-label="Essential device readings">
       <Card title="CPU activity" icon={<Cpu size={24} className="shrink-0" />}>
         <p className={`text-3xl font-bold tabular-nums ${color(cpu?.usagePercent, REVIEW_THRESHOLDS.cpu)}`}>{cpu?.usagePercent != null ? `${Math.round(cpu.usagePercent)}%` : cpu?.state === 'warming' ? 'Measuring…' : cpu ? 'Not available' : empty}</p>
         <p className="truncate text-xs text-slate-400">{cpu?.name ?? 'Processor information pending'}</p>
         <p className="text-xs text-slate-400" title={cpu?.source}>{cpu?.windowSeconds ? `Average over ${cpu.windowSeconds.toFixed(1)} s` : 'A real sampling interval is needed.'}</p>
         <UsageBar label="CPU activity" value={cpu?.usagePercent} warningAt={REVIEW_THRESHOLDS.cpu} />
         <p className="text-xs text-slate-500">Temperature is checked in device details and device checks.</p>
+      </Card>
+      <Card title="GPU" icon={<Gpu size={24} className="shrink-0" />}>
+        {gpuAdapters.length ? <ul className="space-y-3">{gpuAdapters.map(adapter => {
+          const usage = isCurrent(adapter.capturedAtUtc, now) ? measurement(adapter.usagePercent, 100) : null;
+          const temperature = gpuTemperatureReading(adapter, now);
+          return <li key={adapter.id} className="space-y-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+              <p className="text-lg font-bold tabular-nums text-white">
+                {usage === null ? 'Usage unavailable' : usage === 0 ? 'Idle' : usage < 1 ? '<1% activity' : Math.round(usage) + '% activity'}
+              </p>
+              {temperature && <span className="text-xs tabular-nums text-slate-300" title={temperature.source}>
+                {formatTemperature(temperature.celsius)}
+              </span>}
+            </div>
+            <p className="break-words text-xs text-slate-400">{adapter.name}</p>
+            {adapter.type !== 'Unknown' && <p className="text-xs text-slate-400">{adapter.type} graphics</p>}
+            <UsageBar label={adapter.name + ' activity'} value={usage} />
+          </li>;
+        })}</ul> : <p className="text-sm text-slate-400">{gpuMessage}</p>}
       </Card>
       <Card title="Memory in use" icon={<MemoryStick size={24} className="shrink-0" />}>
         <div className="flex items-center gap-4"><MemoryGauge value={memory?.usagePercent} warningAt={REVIEW_THRESHOLDS.memory} />

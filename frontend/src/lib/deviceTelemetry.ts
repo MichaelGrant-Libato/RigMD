@@ -104,3 +104,26 @@ export function formatMeasurement(value: unknown, unit = '', digits = 0, zero = 
   if (available < min / 2) return '<' + min.toFixed(digits) + unit;
   return available.toFixed(digits) + unit;
 }
+
+export function trafficScale(rows: { time: number; value: number | null }[]) {
+  const maximumKbps = Math.max(0, ...rows.map(row => measurement(row.value) ?? 0));
+  const divisor = maximumKbps >= 1000 ? 1000 : 1;
+  const unit = divisor === 1000 ? 'Mbps' : 'Kbps';
+  const minimumStep = Math.max(maximumKbps / divisor / 4, 0.25);
+  const magnitude = 10 ** Math.floor(Math.log10(minimumStep));
+  const step = ([1, 2, 2.5, 5, 10].find(value => value * magnitude >= minimumStep) ?? 10) * magnitude;
+  return {
+    unit,
+    upperBound: step * 4,
+    ticks: [0, 1, 2, 3, 4].map(tick => Number((tick * step).toPrecision(6))),
+    rows: rows.map(row => ({ ...row, value: row.value === null ? null : row.value / divisor })),
+  };
+}
+
+export function formatAdapterLinkSpeed(megabits: unknown): string {
+  const speed = measurement(megabits);
+  if (speed === null || speed === 0) return 'Not available';
+  const value = speed >= 1000 ? speed / 1000 : speed;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value)
+    + (speed >= 1000 ? ' Gbps' : ' Mbps');
+}

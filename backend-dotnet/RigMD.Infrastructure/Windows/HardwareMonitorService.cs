@@ -459,6 +459,7 @@ public class HardwareMonitorService : IHardwareMonitorService, IDisposable
 
     public void Dispose()
     {
+        CpuTemperatureSensorReader.Close();
         try
         {
             _cpuCounter?.Dispose();

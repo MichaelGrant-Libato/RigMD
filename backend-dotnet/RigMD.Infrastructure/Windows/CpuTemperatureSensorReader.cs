@@ -9,13 +9,19 @@ public sealed record HardwareTemperatureSample(
     string HardwareIdentifier,
     string SensorIdentifier,
     string SensorType,
-    double? Celsius);
+    double? Celsius,
+    string? SensorName = null);
 
 public static class CpuTemperatureSensorReader
 {
+    private static readonly CpuTemperatureSampler EmbeddedSampler = new(
+        () => new LibreCpuTemperatureProbe(), LibreCpuTemperatureProbe.CanAccessDriver);
+
     public static CpuTemperatureReading? Read(
         Func<string, IEnumerable<HardwareTemperatureSample>>? probe = null)
     {
+        // Injected probes retain the external-provider-only contract used by callers and tests.
+        if (probe == null && EmbeddedSampler.Read() is { } embeddedReading) return embeddedReading;
         probe ??= ReadWmiSensors;
         foreach (var source in new[] { @"root\LibreHardwareMonitor", @"root\OpenHardwareMonitor" })
         {
@@ -33,6 +39,8 @@ public static class CpuTemperatureSensorReader
         return null;
     }
 
+    public static void Close() => EmbeddedSampler.Reset();
+
     public static CpuTemperatureReading? SelectReading(
         IEnumerable<HardwareTemperatureSample> samples,
         string source)
@@ -43,13 +51,23 @@ public static class CpuTemperatureSensorReader
                 !string.IsNullOrWhiteSpace(sample.HardwareIdentifier) &&
                 sample.SensorIdentifier.StartsWith(sample.HardwareIdentifier + "/temperature/", StringComparison.OrdinalIgnoreCase) &&
                 sample.Celsius is >= 0 and <= 150 && double.IsFinite(sample.Celsius.Value))
-            .OrderByDescending(sample => sample.Celsius)
+            .OrderBy(sample => TemperaturePriority(sample.SensorName))
+            .ThenByDescending(sample => sample.Celsius)
             .FirstOrDefault();
 
-        // CapturedAt is the WMI read time, not a hardware-provided sample timestamp.
+        // CapturedAt records collection time; the sensor does not supply its own timestamp.
         return hottest == null ? null : new CpuTemperatureReading(
-            Math.Round(hottest.Celsius!.Value, 1), source, hottest.SensorIdentifier, DateTimeOffset.UtcNow);
+            Math.Round(hottest.Celsius!.Value, 1),
+            string.IsNullOrWhiteSpace(hottest.SensorName) ? source : $"{source} ({hottest.SensorName})",
+            hottest.SensorIdentifier, DateTimeOffset.UtcNow);
     }
+
+    private static int TemperaturePriority(string? name) => name switch
+    {
+        "CPU Package" or "Core (Tdie)" or "Core (Tctl/Tdie)" => 0,
+        "Core (Tctl)" => 1,
+        _ => 2
+    };
 
     private static IEnumerable<HardwareTemperatureSample> ReadWmiSensors(string source)
     {
@@ -66,7 +84,7 @@ public static class CpuTemperatureSensorReader
 
         var samples = new List<HardwareTemperatureSample>();
         using var sensors = new ManagementObjectSearcher(source,
-            "SELECT Identifier, Parent, SensorType, Value FROM Sensor WHERE SensorType='Temperature'");
+            "SELECT Identifier, Parent, SensorType, Value, Name FROM Sensor WHERE SensorType='Temperature'");
         foreach (ManagementObject item in sensors.Get())
         {
             var parent = item["Parent"]?.ToString() ?? string.Empty;
@@ -74,7 +92,8 @@ public static class CpuTemperatureSensorReader
             var rawValue = item["Value"];
             var value = rawValue == null ? (double?)null : Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
             samples.Add(new HardwareTemperatureSample(hardwareType, parent,
-                item["Identifier"]?.ToString() ?? string.Empty, item["SensorType"]?.ToString() ?? string.Empty, value));
+                item["Identifier"]?.ToString() ?? string.Empty, item["SensorType"]?.ToString() ?? string.Empty, value,
+                item["Name"]?.ToString()));
         }
 
         return samples;

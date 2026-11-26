@@ -3,7 +3,9 @@ import { motion, useReducedMotion } from 'motion/react';
 function measured(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
 }
-export function UsageBar({ value, label, warningAt }: { value: number | null | undefined; label: string; warningAt: number }) {
+export function UsageBar({ value, label, warningAt = Number.POSITIVE_INFINITY }: {
+  value: number | null | undefined; label: string; warningAt?: number;
+}) {
   const reduced = useReducedMotion();
   const available = measured(value);
   const color = !available ? '#64748b' : value >= warningAt ? '#fbbf24' : '#34d399';

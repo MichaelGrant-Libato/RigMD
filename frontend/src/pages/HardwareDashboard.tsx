@@ -24,6 +24,7 @@ const SettingsView = lazy(() => import('./SettingsView'));
 const AppSpeedView = lazy(() => import('./AppSpeedView'));
 import { useHomeOverview } from '../lib/useHomeOverview';
 import { fullInventoryNeeded, sensorStreamingNeeded, type HomeOverview } from '../lib/homeOverview';
+import { afterScreenPaint } from '../lib/performanceMeasurement';
 
 import {
   cardTransition,
@@ -270,6 +271,7 @@ function HomeDashboardView({
   stats,
   overview,
   overviewError,
+  deviceFeed,
   summaryState,
   dashboard,
   setActivePage,
@@ -278,6 +280,7 @@ function HomeDashboardView({
   stats: HardwareStats | null;
   overview: HomeOverview | null;
   overviewError: string | null;
+  deviceFeed: DeviceFeed;
   summaryState: 'pending' | 'completed' | 'failed';
   dashboard: DashboardSummary;
   setActivePage: (page: PageKey) => void;
@@ -299,6 +302,7 @@ function HomeDashboardView({
           stats={stats}
           overview={overview}
           overviewError={overviewError}
+          deviceFeed={deviceFeed}
           summaryState={summaryState}
           dashboard={dashboard}
           setActivePage={setActivePage}
@@ -344,7 +348,8 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
   const [activePage, setActivePage] = useState<PageKey>('home');
   const overview = useHomeOverview(!fullInventoryNeeded(activePage));
   const needsFullInventory = fullInventoryNeeded(activePage);
-  const needsSensorStreaming = sensorStreamingNeeded(activePage);
+  const [homeSensorsReady, setHomeSensorsReady] = useState(false);
+  const needsSensorStreaming = sensorStreamingNeeded(activePage, homeSensorsReady);
   const startupReported = useRef(false);
   const summaryReported = useRef(false);
   const [restoreAppSpeedFocus, setRestoreAppSpeedFocus] = useState(false);
@@ -375,6 +380,10 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
     const complete = overview.state === 'completed';
     if (failed || complete) { startupReported.current = true; onStartupReady?.(!failed && complete); }
   }, [overview.state, activePage, onStartupReady]);
+  useEffect(() => {
+    if (activePage !== 'home' || homeSensorsReady || overview.state === 'pending') return;
+    return afterScreenPaint(() => setHomeSensorsReady(true));
+  }, [activePage, homeSensorsReady, overview.state]);
   useEffect(() => {
     if (summaryReported.current) return;
     const failed = activePage !== 'home' || initialDashboard === 'failed';
@@ -565,6 +574,7 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
             stats={null}
             overview={overview.data}
             overviewError={overview.error}
+            deviceFeed={deviceFeed}
             summaryState={initialDashboard}
             dashboard={dashboard}
             setActivePage={handleSetActivePage}
@@ -657,6 +667,7 @@ export default function HardwareDashboard({ onStartupReady, onSummaryReady }: { 
             stats={null}
             overview={overview.data}
             overviewError={overview.error}
+            deviceFeed={deviceFeed}
             summaryState={initialDashboard}
             dashboard={dashboard}
             setActivePage={handleSetActivePage}
