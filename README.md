@@ -2,6 +2,8 @@
 
 RigMD is a Windows desktop diagnostic advisory and controlled remediation platform for PCs and Laptops.
 
+**[Download RigMD for Windows](https://www.rig-md.com/download)** · Windows 10 and 11 (64-bit)
+
 ---
 
 ## 1. Overview & Vision
@@ -11,7 +13,7 @@ RigMD is a **controlled closed-loop diagnostic and remediation platform** for Wi
 The system combines:
 
 1. **Native Windows Telemetry**
-   Hardware, drivers, processes, utilization, battery health, device type detection, and Windows system information collected via WMI.
+   Windows APIs, performance counters, and WMI provide live hardware and system readings, including GPU activity. My Device Info offers App Activity, Connection Test, Drive Health, and Battery Health where supported. The What Changed? panel in Past Checks shows Windows updates, driver configuration events, and crashes recorded since a saved check.
 
 2. **Deterministic Diagnostic Engine**
    Structured scoring, evidence, action categories, confidence levels, recurring-pattern analysis, and warning-sign detection.
@@ -245,7 +247,7 @@ RigMD collects Windows-observable readings through supported Windows interfaces.
 
 | Provider | Source / Method | Data Collected |
 |---|---|---|
-| `HardwareMonitorService` | Supported sensor sources and Windows performance readings | Available sensor readings only; unsupported CPU/GPU temperatures remain unavailable |
+| `HardwareMonitorService` | Windows graphics drivers and supported CPU sensor providers, including an optional existing PawnIO installation | GPU activity and available CPU/GPU temperatures |
 | `WmiCpuProvider` | `Win32_Processor`, Performance Counters | Name, usage %, cores, threads, frequency, thermal throttling |
 | `WmiGpuProvider` | `Win32_VideoController` | Name, driver version, type (Dedicated/Integrated), VRAM |
 | `WmiMemoryProvider` | `Win32_OperatingSystem` | Total/used GB, usage % |
@@ -353,6 +355,7 @@ Current automated test coverage includes:
 - [Architecture](./Docs/ARCHITECTURE.md)
 - [Autonomous Engine](./Docs/AUTONOMOUS_ENGINE.md)
 - [Remediation Policy](./Docs/REMEDIATION_POLICY.md)
+- [Website Download Sync](./Docs/WEBSITE_DOWNLOAD_SYNC.md)
 - [Architectural Decisions](./Docs/DECISIONS.md)
 - [Migration History](./Docs/MIGRATION_HISTORY.md)
 - [Architecture Migration (Archive)](./Docs/Migration_Archive/ARCHITECTURE_MIGRATION.md)
