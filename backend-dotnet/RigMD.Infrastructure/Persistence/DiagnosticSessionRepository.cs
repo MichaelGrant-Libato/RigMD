@@ -561,16 +561,24 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
         return true;
     }
 
-    public async Task SaveExplanationSourceAsync(Guid sessionId, string source, string? model)
+    public Task SaveExplanationSourceAsync(Guid sessionId, string source, string? model) =>
+        SaveExplanationAsync(sessionId, source, model, status: null);
+
+    public async Task SaveExplanationAsync(Guid sessionId, string source, string? model, string? status, string? text = null, bool onlyPending = false)
     {
         var clientId = GetCurrentClientId();
-        var query = _db.DiagnosticSessions.Include(s => s.Answers).Include(s => s.Profile).Where(s => s.Id == sessionId);
+        var query = _db.DiagnosticSessions.Include(s => s.Answers).Include(s => s.Profile).Include(s => s.Output).Where(s => s.Id == sessionId);
         if (!string.IsNullOrEmpty(clientId))
             query = query.Where(s => s.Profile.ClientId == clientId || s.Answers.Any(a => a.QuestionKey == "client_id" && a.AnswerValue == clientId));
+        if (onlyPending)
+            query = query.Where(s => s.Answers.Any(a => a.QuestionKey == "explanation_status" && a.AnswerValue == "pending"));
         var session = await query.FirstOrDefaultAsync();
         if (session == null) return;
         SetOrAddAnswer(session, "explanation_source", source is "gemini" or "local" ? source : "unknown");
         SetOrAddAnswer(session, "explanation_model", source == "gemini" ? model ?? "" : "");
+        if (status != null) SetOrAddAnswer(session, "explanation_status", status);
+        if (source == "gemini" && text != null && session.Output != null)
+            session.Output.AiExplanation = text;
         await _db.SaveChangesAsync();
     }
 
@@ -896,6 +904,8 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             AiExplanation = s.Output?.AiExplanation ?? string.Empty,
             ExplanationSource = Answer("explanation_source"),
             ExplanationModel = Answer("explanation_model"),
+            ExplanationStatus = Answer("explanation_status"),
+            DriveHealthTargets = includeHistory ? ReadDriveHealthTargets(s.Profile?.StorageDetails) : Array.Empty<DriveHealthTarget>(),
             IsRecurring = s.Answers.Any(a => a.QuestionKey == "is_recurring" && a.AnswerValue == "true"),
             ResolutionStatus = Answer("resolution_status"),
             ResolutionSummary = Answer("resolution_summary"),
@@ -925,6 +935,27 @@ public class DiagnosticSessionRepository : IDiagnosticSessionRepository
             RecommendedNextStep = string.IsNullOrWhiteSpace(Answer("recommended_next_step"))
                 ? nextStep : Answer("recommended_next_step")
         };
+    }
+
+    internal static IReadOnlyList<DriveHealthTarget> ReadDriveHealthTargets(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<DriveHealthTarget>();
+        try
+        {
+            var drives = JsonSerializer.Deserialize<List<StorageDriveDto>>(json) ?? [];
+            return drives.Where(drive => drive is not null && drive.DiskIndex >= 0 && drive.SizeGb > 0 && !string.IsNullOrWhiteSpace(drive.Model))
+                .Select(drive => new
+                {
+                    Drive = drive,
+                    Volumes = (drive.Volumes ?? []).Where(volume => volume is not null && volume.TotalGb > 0 &&
+                        volume.UsagePercent is >= 80 and <= 100 && !string.IsNullOrWhiteSpace(volume.Drive))
+                        .Select(volume => volume.Drive).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+                })
+                .Where(item => item.Drive.IsFailingSmart || item.Volumes.Length > 0)
+                .Select(item => new DriveHealthTarget(item.Drive.DiskIndex!.Value, item.Drive.Model, item.Drive.SizeGb, item.Volumes))
+                .ToArray();
+        }
+        catch (JsonException) { return Array.Empty<DriveHealthTarget>(); }
     }
 
     internal static object[] ReadSavedProof(string json)

@@ -125,7 +125,7 @@ export default function SettingsView({ onOpenAppSpeed, restoreAppSpeedFocus = fa
                 </div>
 
                 <p className="mt-4 text-sm leading-relaxed text-slate-300">
-                  RigMD still reads device data from Windows on this PC. This setting only controls whether Gemini may help explain the result and plan a safe guided action when an issue needs review.
+                  RigMD reads and saves the Windows check on this PC first. Gemini can explain findings that need review and assist with guided action planning.
                 </p>
 
                 {/* Engine Mode Selection */}

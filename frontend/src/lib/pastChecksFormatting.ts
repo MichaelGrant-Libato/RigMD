@@ -12,6 +12,7 @@ export const COMPONENT_LABELS: Record<string, string> = {
   storage: 'Storage',
   disk: 'Storage',
   os: 'Windows',
+  startup: 'Startup',
   drivers: 'Drivers',
   driver: 'Drivers',
   battery: 'Battery / Power',

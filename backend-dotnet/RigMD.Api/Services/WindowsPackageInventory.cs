@@ -12,6 +12,9 @@ public sealed record PackageFacts(string FullName, string FamilyName, string Use
 
 public static class WindowsPackageInventory
 {
+    internal static bool IsMainApp(Package package) =>
+        !package.IsFramework && !package.IsResourcePackage && !package.IsBundle && !package.IsOptional;
+
     public static StorageAppEntry FromFacts(PackageFacts facts)
     {
         var protectedApp = facts.Framework || facts.Resource || facts.Bundle || facts.Optional || facts.Development || facts.SystemSigned ||
@@ -44,7 +47,7 @@ public static class WindowsPackageInventory
                 try
                 {
                     // Match the user-facing main-app view; dependencies/resources are never direct-removal choices.
-                    if (package.IsFramework || package.IsResourcePackage || package.IsBundle || package.IsOptional) continue;
+                    if (!IsMainApp(package)) continue;
                     var required = packages.Any(other => other.Id.FullName != package.Id.FullName && other.Dependencies.Any(dependency => dependency.Id.FamilyName == package.Id.FamilyName));
                     var version = package.Id.Version;
                     var facts = new PackageFacts(package.Id.FullName, package.Id.FamilyName, sid,

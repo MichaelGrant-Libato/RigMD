@@ -1,10 +1,10 @@
 import { friendlyActionCategory, expandDiagnosticReadings, getReadingPresentation, readingEvidenceLabel, readingStatusLabel, type DiagnosticReading } from './diagnosticLanguage.ts';
 import { getCheckOverview, getCheckStatus, getCheckEvidenceLabel, getCheckCoverageNotice, getLatestCheckSummary } from './checkPresentation.ts';
 import { getSessionCheckLabel } from './pastChecksFormatting.ts';
-import { readingTone } from './diagnosticReadingVisuals.ts';
+import { explanationSourceLabel, explanationStatusLabel, readingTone } from './diagnosticReadingVisuals.ts';
 import { validReading } from './storageTelemetry.ts';
 import { getFollowUpReadings } from './followUpReadings.ts';
-import { friendlyToolName, friendlyVerification } from './diagnosticLanguage.ts';
+import { friendlyToolName, friendlyVerification, plainDiagnosticText } from './diagnosticLanguage.ts';
 import type { ReportActionHistory } from './reportActionHistory.ts';
 import type { DashboardSummary, HardwareStats, SessionSummary } from '../types/rigmd.ts';
 
@@ -168,7 +168,9 @@ export function buildReportDocument({
         field('Selected check', getSessionCheckLabel(selected)),
         field('Trigger / symptom', cleanValue(selected.symptom_type)),
         field('Original finding', overview.summary || overview.title),
-        field('Original next step', friendlyAction(selected.action_category)),
+        field('Original next step', plainDiagnosticText(selected.recommended_next_step) || friendlyAction(selected.action_category)),
+        field('Explanation source', explanationSourceLabel(selected.explanation_source, selected.explanation_model)),
+        ...(explanationStatusLabel(selected.explanation_status) ? [field('Explanation status', explanationStatusLabel(selected.explanation_status)!)] : []),
         field('Evidence availability', getCheckEvidenceLabel(selected)),
         field('Latest follow-up', getCheckStatus(latest).label),
         field('Follow-up time', formatDate(selected.resolution_checked_at)),
@@ -253,7 +255,7 @@ export function buildReportDocument({
         field('Saved check ID', session.session_code || session.session_id),
         field('Trigger / symptom', cleanValue(session.symptom_type)),
         field('Original finding', getCheckOverview(session).summary || getCheckOverview(session).title),
-        field('Original next step', friendlyAction(session.action_category)),
+        field('Original next step', plainDiagnosticText(session.recommended_next_step) || friendlyAction(session.action_category)),
         field('Follow-up', getCheckStatus(session.resolution_proof?.length
           ? { ...session, resolution_proof: getFollowUpReadings(session.proof, session.resolution_proof) } : session).label),
       ],

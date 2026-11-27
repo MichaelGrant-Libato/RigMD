@@ -1,9 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using RigMD.Api.Services;
 using RigMD.Api.Middleware;
 using RigMD.Application.Contracts.Ai;
 using RigMD.Application.Contracts.Persistence;
 using RigMD.Application.Contracts.Providers;
 using RigMD.Application.Services;
+using RigMD.Application.Services.Autonomy;
 using RigMD.Domain.Rules;
 using RigMD.Application.Models;
 
@@ -19,6 +23,7 @@ public class DiagnosticController : ControllerBase
     private readonly ResolutionService _resolutionService;
     private readonly IAutomaticDiagnosisService _automaticDiagnosisService;
     private readonly IAiExplainer? _aiExplainer;
+    private readonly DeviceDiagnosticRunner _diagnosticRunner;
 
     public DiagnosticController(
         IDiagnosticEngineService diagnosticEngine,
@@ -26,7 +31,8 @@ public class DiagnosticController : ControllerBase
         IWindowsSystemProfileService profileService,
         ResolutionService resolutionService,
         IAutomaticDiagnosisService automaticDiagnosisService,
-        IAiExplainer? aiExplainer = null)
+        IAiExplainer? aiExplainer = null,
+        DeviceDiagnosticRunner? diagnosticRunner = null)
     {
         _diagnosticEngine = diagnosticEngine;
         _sessionRepository = sessionRepository;
@@ -34,6 +40,7 @@ public class DiagnosticController : ControllerBase
         _resolutionService = resolutionService;
         _automaticDiagnosisService = automaticDiagnosisService;
         _aiExplainer = aiExplainer;
+        _diagnosticRunner = diagnosticRunner ?? new DeviceDiagnosticRunner();
     }
 
     public class LocalDiagnosisRequest
@@ -163,58 +170,9 @@ public class DiagnosticController : ControllerBase
                 _automaticDiagnosisService
                     .Diagnose(input);
 
-            var explanation = result.Explanation;
-            var explanationSource = "local";
-            string? explanationModel = null;
-            if (_aiExplainer != null && result.ComponentStatus != ComponentStatus.NotPresent)
-            {
-                try
-                {
-                    var mappedResult = new DiagnosticResult
-                    {
-                        DiagnosedCategory = result.DiagnosedCategory,
-                        ActionCategory = result.ActionCategory,
-                        ConfidenceLabel = result.ConfidenceLabel,
-                        RecommendedNextStep = result.RecommendedNextStep,
-                        Proof = result.Proof.Select(p => new DiagnosticProofItem
-                        {
-                            Label = p.Label,
-                            Value = p.Value,
-                            Status = p.Status,
-                            Meaning = p.Meaning
-                        }).ToList(),
-                        AllLiveProof = result.Proof.Select(p => new DiagnosticProofItem
-                        {
-                            Label = p.Label,
-                            Value = p.Value,
-                            Status = p.Status,
-                            Meaning = p.Meaning
-                        }).ToList()
-                    };
-                    var scopeSymptom = new DiagnosticSymptomPayload
-                    {
-                        SymptomType = request.Mode == "scenario" && !string.IsNullOrWhiteSpace(request.ScenarioId)
-                            ? request.ScenarioId
-                            : request.Mode == "component" && result.TargetScope.Count > 0
-                                ? $"Component check: {string.Join(", ", result.TargetScope)}"
-                                : "Full computer check",
-                        AffectedActivity = $"Mode: {request.Mode}"
-                    };
-                    var generated = await _aiExplainer.GenerateExplanationWithSourceAsync(mappedResult, scopeSymptom);
-                    if (!string.IsNullOrWhiteSpace(generated.Text))
-                    {
-                        explanationSource = generated.Source;
-                        explanationModel = generated.Model;
-                        explanation = string.IsNullOrWhiteSpace(result.IncidentalWarning)
-                            ? generated.Text
-                            : $"{generated.Text}\n\n{result.IncidentalWarning}";
-                    }
-                }
-                catch
-                {
-                    // Keep baseline explanation if AI explainer fails
-                }
-            }
+            var explanationStatus = RigMdAgentRuntimeSettingsStore.ResolveEffectiveProxyUrl() == null ? "local-only"
+                : result.ComponentStatus == ComponentStatus.NotPresent || result.ActionCategory is not ("Troubleshoot" or "Escalate") ? "not-needed"
+                : _aiExplainer == null ? "service-unavailable" : "pending";
 
             var sessionId =
                 await _sessionRepository
@@ -228,7 +186,7 @@ public class DiagnosticController : ControllerBase
                         result.DiagnosedCategory,
                         result.ActionCategory,
                         result.ConfidenceLabel,
-                        explanation,
+                        result.Explanation,
                         "local",
                         result.PrimaryResult,
                         result.IncidentalWarning,
@@ -236,11 +194,11 @@ public class DiagnosticController : ControllerBase
                         result.Proof,
                         result.RecommendedNextStep);
 
-            await _sessionRepository.SaveExplanationSourceAsync(sessionId, explanationSource, explanationModel);
+            await _sessionRepository.SaveExplanationAsync(sessionId, "local", null, explanationStatus);
             if (HttpContext != null) HttpContext.Items[PerformanceRecordingMiddleware.ContextKey] = new PerformanceContext(
                 result.Proof.Count, result.Proof.Count(p => p.EvidenceKind is "unavailable" or "not_assessed" ||
                     p.Status is "unknown" or "unavailable" or "not_assessed" or "not_verified" or "unverified"), request.Mode,
-                explanationSource == "gemini" ? "gemini" : "local");
+                "local");
 
             return Ok(
                 new
@@ -274,9 +232,10 @@ public class DiagnosticController : ControllerBase
                         result.ConfidenceLabel,
 
                     ai_explanation =
-                        explanation,
-                    explanation_source = explanationSource,
-                    explanation_model = explanationModel,
+                        result.Explanation,
+                    explanation_source = "local",
+                    explanation_model = (string?)null,
+                    explanation_status = explanationStatus,
 
                     proof =
                         result.Proof,
@@ -322,6 +281,117 @@ public class DiagnosticController : ControllerBase
     // =========================================================
     // GET ALL SESSIONS
     // =========================================================
+
+    [HttpPost("sessions/{sessionId:guid}/explanation")]
+    public async Task<IActionResult> ExplainSavedCheck(Guid sessionId, CancellationToken token)
+    {
+        var response = await _diagnosticRunner.TryRunAsync<IActionResult>("explanation:" + sessionId, async ct =>
+        {
+            var session = await _sessionRepository.GetSessionAsync(sessionId);
+            if (session == null) return NotFound(new { detail = "Saved check not found." });
+            if (session.ExplanationStatus != "pending") return ExplanationResponse(session);
+
+            var generated = new DiagnosticExplanation(session.AiExplanation, "local", Status: "interrupted");
+            if (_aiExplainer != null && DateTimeOffset.TryParse(session.CreatedAt, out var savedAt) &&
+                savedAt <= DateTimeOffset.UtcNow && DateTimeOffset.UtcNow - savedAt < TimeSpan.FromMinutes(2))
+            {
+                try
+                {
+                    var result = new DiagnosticResult
+                    {
+                        DiagnosedCategory = session.DiagnosedCategory,
+                        ActionCategory = session.ActionCategory,
+                        ConfidenceLabel = session.ConfidenceLabel,
+                        RecommendedNextStep = session.RecommendedNextStep ?? "",
+                        Proof = CloudEvidence(session.Proof)
+                    };
+                    var symptom = new DiagnosticSymptomPayload
+                    {
+                        SymptomType = session.DiagnosisMode switch
+                        {
+                            "component" => CloudComponentScope(session.ComponentIds),
+                            "scenario" => "Selected problem check",
+                            _ => "Full computer check"
+                        },
+                        AffectedActivity = "Saved Windows check"
+                    };
+                    generated = await _aiExplainer.GenerateExplanationWithSourceAsync(result, symptom, ct);
+                }
+                catch (OperationCanceledException) { generated = generated with { Status = "interrupted" }; }
+                catch (Exception) { generated = generated with { Status = "service-unavailable" }; }
+            }
+
+            if (generated.Source == "gemini" && !string.IsNullOrWhiteSpace(generated.Text))
+            {
+                session.ExplanationSource = "gemini";
+                session.ExplanationModel = generated.Model ?? "";
+                session.ExplanationStatus = "completed";
+                session.AiExplanation = string.IsNullOrWhiteSpace(session.IncidentalWarning) ? generated.Text
+                    : $"{generated.Text}\n\n{session.IncidentalWarning}";
+            }
+            else
+            {
+                session.ExplanationSource = "local";
+                session.ExplanationStatus = generated.Status ?? "service-unavailable";
+            }
+            await _sessionRepository.SaveExplanationAsync(sessionId, session.ExplanationSource, session.ExplanationModel,
+                session.ExplanationStatus, session.AiExplanation, onlyPending: true);
+            return ExplanationResponse(session);
+        }, token);
+        return response ?? Conflict(new { detail = "The explanation is already being requested." });
+    }
+
+    private IActionResult ExplanationResponse(DiagnosticSessionDto session) => Ok(new
+    {
+        ai_explanation = session.AiExplanation,
+        explanation_source = session.ExplanationSource,
+        explanation_model = session.ExplanationModel,
+        explanation_status = session.ExplanationStatus
+    });
+
+    private static readonly Dictionary<string, string> CloudMetricLabels = new()
+    {
+        ["cpu_usage"] = "Processor activity", ["cpu_temperature"] = "Processor temperature",
+        ["gpu_temperature"] = "Graphics temperature", ["memory_usage"] = "Memory use",
+        ["storage_usage"] = "Storage space used", ["battery_charge"] = "Battery charge",
+        ["network_latency"] = "Network latency", ["network_packet_loss"] = "Network packet loss",
+        ["application_crash_history"] = "Application crash records (last 7 days)",
+        ["system_crash_history"] = "System crash and unexpected restart records (last 7 days)"
+    };
+
+    private static string CloudComponentScope(string componentIds)
+    {
+        try
+        {
+            var ids = JsonSerializer.Deserialize<string[]>(componentIds) ?? [];
+            var labels = ids.Select(DiagnosticScopeMapper.NormalizeComponentId)
+                .Distinct(StringComparer.Ordinal).Select(id => (Id: id, Label: DiagnosticScopeMapper.GetComponentDisplayName(id)))
+                .Where(item => item.Id != item.Label).Select(item => item.Label).ToArray();
+            if (labels.Length > 0) return "Component check: " + string.Join(", ", labels);
+        }
+        catch (JsonException) { }
+        return "Selected component check";
+    }
+
+    internal static List<DiagnosticProofItem> CloudEvidence(object[] proof)
+    {
+        var readings = new List<DiagnosticProofItem>();
+        foreach (var item in proof.OfType<JsonElement>())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("metric_id", out var id) || id.ValueKind != JsonValueKind.String ||
+                !CloudMetricLabels.TryGetValue(id.GetString()!, out var label) ||
+                !item.TryGetProperty("value", out var reading) || reading.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String) continue;
+            var value = reading.GetString()!;
+            var state = status.GetString()!;
+            if (state is not ("high" or "elevated" or "normal" or "info" or "still needs attention") || value.Length > 80 ||
+                !Regex.IsMatch(value, @"^\d+(?:(?:[.,]\d+)?\s?(?:%|°C|ms)(?: (?:used|\(\d+(?:[.,]\d+)? / \d+(?:[.,]\d+)? GB\)))?| found)$",
+                    RegexOptions.CultureInvariant)) continue;
+            readings.Add(new DiagnosticProofItem { Label = label, Value = value, Status = state });
+        }
+        return readings;
+    }
 
     [HttpGet("sessions")]
     public async Task<IActionResult> GetSessions()

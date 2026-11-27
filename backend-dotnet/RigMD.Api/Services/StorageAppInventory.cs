@@ -40,7 +40,7 @@ public static class StorageAppInventory
             Guid.TryParseExact(keyName, "B", out _) && (noRemove is null or 0) && !protectedApp;
         return app with
         {
-            Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))),
+            Id = AppId(identity),
             ProductCode = supported ? keyName.ToUpperInvariant() : null,
             CanUninstall = supported,
             UninstallMethod = supported ? "windows_installer" : "none",
@@ -51,6 +51,8 @@ public static class StorageAppInventory
     }
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     private const int MaxEntries = 2048;
+
+    internal static string AppId(string identity) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
 
     public static StorageAppEntry? ReadEntry(Func<string, object?> read, string scope)
     {
@@ -67,6 +69,35 @@ public static class StorageAppInventory
     public static StorageAppSnapshot Capture(CancellationToken cancellationToken, string? verifyAppId = null, bool includeStore = true)
     {
         var apps = new List<StorageAppEntry>();
+        var partial = VisitDesktopApps(cancellationToken, (app, entry, hive, view, keyName) =>
+        {
+            app = Identify(app, RegistrationIdentity(hive, view, keyName), hive == RegistryHive.LocalMachine,
+                keyName, entry.GetValue("WindowsInstaller"), entry.GetValue("NoRemove"));
+            // MSI registrations never fall through to a registry-supplied executable.
+            if (entry.GetValue("WindowsInstaller") is not 1 && !app.CanUninstall)
+            {
+                var command = entry.GetValue("UninstallString", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                var noRemove = entry.GetValue("NoRemove");
+                if (app.Id == verifyAppId)
+                    app = RegisteredAppUninstaller.Identify(app, command, noRemove, VerifiedUninstallExecutable.Inspect, NativeUninstallRunner.DesktopUser);
+                else if (RegisteredAppUninstaller.Parse(app, command, noRemove) != null)
+                    app = app with { CanUninstall = true, UninstallMethod = "registered_exe", UninstallReason = "An official uninstall option is registered. RigMD must verify it before offering removal." };
+            }
+            apps.Add(app);
+        });
+        var store = includeStore ? StoreAppInventory.Capture(cancellationToken) : new StoreInventorySnapshot([], false);
+        var totalAvailable = apps.Count + store.Apps.Count;
+        apps.AddRange(store.Apps.Take(Math.Max(0, MaxEntries - apps.Count)));
+        partial |= store.Partial || totalAvailable > MaxEntries;
+        var ordered = apps.Distinct().OrderByDescending(app => app.EstimatedBytes ?? -1)
+            .ThenBy(app => app.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        return new(DateTimeOffset.UtcNow, ordered, partial,
+            (includeStore ? "Read from this PC’s Windows desktop registrations and current-account Windows packages. " : "Desktop apps read from this PC. Store apps are checked separately. ") + "No sample app list is included. Desktop sizes are installer estimates, not measured disk use or guaranteed savings. Portable apps, app data and some registrations may be missing. Usage history and removal safety are unknown; registrations do not establish which drive holds the data.");
+    }
+
+    internal static bool VisitDesktopApps(CancellationToken cancellationToken,
+        Action<StorageAppEntry, RegistryKey, RegistryHive, RegistryView, string> visit)
+    {
         var partial = false;
         var inspected = 0;
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
@@ -88,22 +119,7 @@ public static class StorageAppInventory
                         if (entry == null) { partial = true; continue; }
                         var app = ReadEntry(name => entry.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames),
                             hive == RegistryHive.LocalMachine ? "Machine registration" : "Current Windows account registration");
-                        if (app != null)
-                        {
-                            app = Identify(app, RegistrationIdentity(hive, view, keyName), hive == RegistryHive.LocalMachine,
-                                keyName, entry.GetValue("WindowsInstaller"), entry.GetValue("NoRemove"));
-                            // MSI registrations never fall through to a registry-supplied executable.
-                            if (entry.GetValue("WindowsInstaller") is not 1 && !app.CanUninstall)
-                            {
-                                var command = entry.GetValue("UninstallString", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
-                                var noRemove = entry.GetValue("NoRemove");
-                                if (app.Id == verifyAppId)
-                                    app = RegisteredAppUninstaller.Identify(app, command, noRemove, VerifiedUninstallExecutable.Inspect, NativeUninstallRunner.DesktopUser);
-                                else if (RegisteredAppUninstaller.Parse(app, command, noRemove) != null)
-                                    app = app with { CanUninstall = true, UninstallMethod = "registered_exe", UninstallReason = "An official uninstall option is registered. RigMD must verify it before offering removal." };
-                            }
-                            apps.Add(app);
-                        }
+                        if (app != null) visit(app, entry, hive, view, keyName);
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or SecurityException or IOException)
                     { partial = true; }
@@ -112,13 +128,6 @@ public static class StorageAppInventory
             catch (Exception error) when (error is UnauthorizedAccessException or SecurityException or IOException)
             { partial = true; }
         }
-        var store = includeStore ? StoreAppInventory.Capture(cancellationToken) : new StoreInventorySnapshot([], false);
-        var totalAvailable = apps.Count + store.Apps.Count;
-        apps.AddRange(store.Apps.Take(Math.Max(0, MaxEntries - apps.Count)));
-        partial |= store.Partial || totalAvailable > MaxEntries;
-        var ordered = apps.Distinct().OrderByDescending(app => app.EstimatedBytes ?? -1)
-            .ThenBy(app => app.Name, StringComparer.OrdinalIgnoreCase).ToArray();
-        return new(DateTimeOffset.UtcNow, ordered, partial,
-            (includeStore ? "Read from this PC’s Windows desktop registrations and current-account Windows packages. " : "Desktop apps read from this PC. Store apps are checked separately. ") + "No sample app list is included. Desktop sizes are installer estimates, not measured disk use or guaranteed savings. Portable apps, app data and some registrations may be missing. Usage history and removal safety are unknown; registrations do not establish which drive holds the data.");
+        return partial;
     }
 }

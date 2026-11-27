@@ -82,6 +82,12 @@ public class DeviceIndependentEvidenceTests
         var gpu = service.Diagnose(new() { Mode = "component", ComponentIds = ["gpu"], Hardware = hw });
         Assert.Equal("Unavailable", gpu.ConfidenceLabel);
         Assert.DoesNotContain(gpu.Proof, p => p.Status == "normal");
+        Assert.Contains(gpu.Proof, p => p.MetricId == "graphics_detection" && p.Status == "unknown");
+        hw.Gpu.AbsenceConfirmed = true;
+        gpu = service.Diagnose(new() { Mode = "component", ComponentIds = ["gpu"], Hardware = hw });
+        Assert.Equal(ComponentStatus.NotPresent, gpu.ComponentStatus);
+        Assert.Equal("NotApplicable", gpu.ConfidenceLabel);
+        Assert.Equal("No adapter reported", Assert.Single(gpu.Proof).Value);
     }
 
     [Fact]

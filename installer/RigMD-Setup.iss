@@ -9,11 +9,15 @@
 #ifndef ApiPublishDirectory
   #define ApiPublishDirectory "..\backend-dotnet\RigMD.Api\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 #endif
+#ifndef CpuSensorSourceDirectory
+  #define CpuSensorSourceDirectory "output\dependencies"
+#endif
 
 [Setup]
 AppId={{9A9D9ED6-7B03-4C84-8A3D-8F6E6A2E6B1D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}.0
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\RigMD
 DefaultGroupName=RigMD
@@ -65,6 +69,8 @@ Source: "uninstall-rigmd.ps1"; \
 
 Source: "CPU-SENSORS.md"; DestDir: "{app}\Support"; Flags: ignoreversion
 Source: "licenses\*.txt"; DestDir: "{app}\Support\Licenses"; Flags: ignoreversion
+Source: "{#CpuSensorSourceDirectory}\LibreHardwareMonitor-0.9.6-source.zip"; DestDir: "{app}\Support\Sources"; Flags: ignoreversion
+Source: "{#CpuSensorSourceDirectory}\PawnIO-Modules-0.1.6-source.zip"; DestDir: "{app}\Support\Sources"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; \

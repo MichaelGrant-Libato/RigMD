@@ -12,7 +12,7 @@ export interface AgentStatus {
 
 export interface ComponentPresenceInfo {
   componentId: string;
-  status: 'Present' | 'NotPresent';
+  status: 'Present' | 'NotPresent' | 'Unknown';
   isSelectable: boolean;
   badge: string;
   reason: string;
@@ -367,6 +367,10 @@ export interface DashboardSessionSummary {
   probable_cause?: string;
   action_category: string;
   confidence_label: string;
+  recommended_next_step?: string;
+  explanation_source?: string;
+  explanation_model?: string;
+  explanation_status?: string;
   created_at: string | null;
   display_date: string | null;
   days_ago: number | null;

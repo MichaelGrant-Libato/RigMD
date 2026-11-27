@@ -21,6 +21,7 @@ public class WmiGpuProvider : IGpuProvider
         };
 
         var candidates = new List<GpuStatsDto>();
+        var sawController = false;
 
         try
         {
@@ -28,8 +29,11 @@ public class WmiGpuProvider : IGpuProvider
             var resolvedDx = !string.IsNullOrEmpty(dxVersion) ? dxVersion : "Unknown";
 
             using var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, DriverDate, AdapterRAM, PNPDeviceID FROM Win32_VideoController");
-            foreach (var obj in searcher.Get())
+            using var controllers = searcher.Get();
+            foreach (ManagementObject controller in controllers)
             {
+                using var obj = controller;
+                sawController = true;
                 var name = (obj["Name"]?.ToString() ?? "").Trim();
                 if (string.IsNullOrWhiteSpace(name) || name.Contains("Microsoft Basic", StringComparison.OrdinalIgnoreCase))
                 {
@@ -91,6 +95,7 @@ public class WmiGpuProvider : IGpuProvider
 
                 candidates.Add(candidate);
             }
+            fallbackDto.AbsenceConfirmed = !sawController;
         }
         catch (Exception)
         {

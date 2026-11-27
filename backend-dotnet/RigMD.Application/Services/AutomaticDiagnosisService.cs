@@ -41,7 +41,8 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
         // 0. Hardware Presence Pre-Flight Gate (Prevent False Positives on Absent Parts)
         bool hasBattery = hw.Battery?.HasBattery == true;
-        bool hasGpu = hw.Gpu.HasGpu && !string.Equals(hw.Gpu.Name, "Unknown GPU", StringComparison.OrdinalIgnoreCase);
+        bool hasGpu = hw.Gpu.HasGpu && !string.IsNullOrWhiteSpace(hw.Gpu.Name) &&
+            !string.Equals(hw.Gpu.Name, "Unknown GPU", StringComparison.OrdinalIgnoreCase);
 
         string? absentComponentNote = null;
         if (mode == "component" && selectedComponents.Count > 0)
@@ -84,27 +85,26 @@ public sealed class AutomaticDiagnosisService : IAutomaticDiagnosisService
 
             if (selectedComponents.Contains("gpu") && !hasGpu && selectedComponents.Count == 1)
             {
+                var absent = hw.Gpu.AbsenceConfirmed;
                 return new AutomaticDiagnosisResult
                 {
-                    ComponentStatus = ComponentStatus.NotPresent,
+                    ComponentStatus = absent ? ComponentStatus.NotPresent : ComponentStatus.Present,
                     TargetScope = targetScopeLabels,
-                    PrimaryResult = "No graphics controller detected on this device",
-                    IncidentalWarning = null,
-                    DiagnosedCategory = "Component Not Present",
+                    PrimaryResult = absent ? "Windows reported no graphics adapter" : "Graphics detection unavailable",
+                    DiagnosedCategory = absent ? "Component Not Present" : "Graphics detection unavailable",
                     ActionCategory = "Monitor",
-                    ConfidenceLabel = "High",
-                    Explanation = "No graphics controller detected on this device via Win32_VideoController.",
+                    ConfidenceLabel = absent ? "NotApplicable" : "Unavailable",
+                    Explanation = absent ? "Windows reported no graphics adapter in the completed video-controller inventory."
+                        : "Windows could not identify the graphics adapter.",
                     RecommendedNextStep = "Verify display adapter status in Windows Device Manager.",
-                    Proof = new List<AutomaticDiagnosisProof>
+                    Proof = absent ? [new()
                     {
-                        new()
-                        {
-                            Label = "GPU / Graphics",
-                            Value = "Not Present",
-                            Status = "normal",
-                            Meaning = "No graphics adapter detected via Win32_VideoController."
-                        }
-                    }
+                        MetricId = "graphics_detection",
+                        Label = "Graphics adapter detection",
+                        Value = "No adapter reported",
+                        Status = "info",
+                        Meaning = "The completed Windows inventory returned no graphics adapter."
+                    }] : []
                 };
             }
         }

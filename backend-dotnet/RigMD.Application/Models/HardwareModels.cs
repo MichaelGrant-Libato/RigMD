@@ -78,6 +78,7 @@ public class GpuStatsDto
     public IReadOnlyList<GpuAdapterReading> Adapters { get; set; } = [];
     public string? AdapterId { get; set; }
     public bool HasGpu { get; set; } = true;
+    public bool AbsenceConfirmed { get; set; }
     public bool HasDedicatedGpu { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Driver { get; set; } = string.Empty;

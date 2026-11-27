@@ -44,33 +44,68 @@ public class DiagnosticResolutionTests
     }
 
     [Theory]
-    [InlineData("local", null)]
-    [InlineData("gemini", "gemini-test-version")]
-    public async Task ExplanationSourceIsReturnedAndPersisted_PerGeneratedResponse(string source, string? model)
+    [InlineData("local", null, "rate-limited")]
+    [InlineData("gemini", "gemini-test-version", "completed")]
+    public async Task SavedCheckIsAvailableBeforeExplanationAndPersistsOutcome(string source, string? model, string status)
     {
         var options = new DbContextOptionsBuilder<RigMdDbContext>().UseSqlite("DataSource=:memory:").Options;
         await using var db = new RigMdDbContext(options);
         await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var repo = new DiagnosticSessionRepository(db, new TestClient("local"));
-        var controller = new DiagnosticController(null!, repo, new TestProfile(new HardwareProfileDto()),
-            new ResolutionService(), new AutomaticDiagnosisService(), new TestExplainer(source, model));
+        var explainer = new TestExplainer(source, model, status);
+        var hardware = new HardwareProfileDto { Cpu = new() { UsagePercent = 95, UsageAvailable = true } };
+        var controller = new DiagnosticController(null!, repo, new TestProfile(hardware),
+            new ResolutionService(), new AutomaticDiagnosisService(), explainer);
         var response = Assert.IsType<OkObjectResult>(await controller.LocalDiagnosis(
             new DiagnosticController.LocalDiagnosisRequest { Mode = "component", ComponentIds = new[] { "cpu" } }, CancellationToken.None));
         var body = JsonSerializer.SerializeToElement(response.Value);
-        Assert.Equal(source, body.GetProperty("explanation_source").GetString());
+        Assert.Equal("local", body.GetProperty("explanation_source").GetString());
+        Assert.Equal(0, explainer.Calls);
+        var id = Guid.Parse(body.GetProperty("session_id").GetString()!);
+        var initial = (await repo.GetSessionAsync(id))!;
+        var localText = initial.AiExplanation;
+        Assert.NotEmpty(localText);
+        // A pending session represents a scan saved while the optional provider was enabled.
+        await repo.SaveExplanationAsync(id, "local", null, "pending");
+        Assert.IsType<OkObjectResult>(await controller.ExplainSavedCheck(id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.ExplainSavedCheck(id, CancellationToken.None));
+        Assert.Equal(1, explainer.Calls);
         db.ChangeTracker.Clear();
-        var saved = await repo.GetSessionAsync(Guid.Parse(body.GetProperty("session_id").GetString()!));
+        var saved = await repo.GetSessionAsync(id);
         Assert.Equal(source, saved!.ExplanationSource);
         Assert.Equal(model ?? "", saved.ExplanationModel);
+        Assert.Equal(status, saved.ExplanationStatus);
+        Assert.Equal(source == "gemini" ? "Simulated explanation for a provenance test." : localText, saved.AiExplanation);
     }
 
-    private sealed class TestExplainer(string source, string? model) : IAiExplainer
+    [Fact]
+    public void CloudEvidenceKeepsNumericMeasurementsAndDropsDeviceNamesAndPaths()
     {
+        var proof = JsonSerializer.Deserialize<JsonElement[]>("""
+            [
+              {"metric_id":"storage_usage","label":"Private name","value":"84.8% used","status":"high"},
+              {"metric_id":"graphics_devices","label":"Adapter","value":"Contoso Graphics","status":"info"},
+              {"metric_id":"storage_usage","label":"Storage","value":"C:\\private","status":"high"},
+              {"metric_id":"cpu_temperature","value":"0°C","status":"unknown"}
+            ]
+            """)!;
+        var reading = Assert.Single(DiagnosticController.CloudEvidence(proof.Cast<object>().ToArray()));
+        Assert.Equal("Storage space used", reading.Label);
+        Assert.Equal("84.8% used", reading.Value);
+    }
+
+    private sealed class TestExplainer(string source, string? model, string status) : IAiExplainer
+    {
+        public int Calls { get; private set; }
+
         public Task<string> GenerateExplanationAsync(RigMD.Domain.Rules.DiagnosticResult result, RigMD.Domain.Rules.DiagnosticSymptomPayload symptom)
             => Task.FromResult("Simulated explanation for a provenance test.");
         public async Task<DiagnosticExplanation> GenerateExplanationWithSourceAsync(RigMD.Domain.Rules.DiagnosticResult result, RigMD.Domain.Rules.DiagnosticSymptomPayload symptom)
-            => new(await GenerateExplanationAsync(result, symptom), source, model);
+        {
+            Calls++;
+            return new(await GenerateExplanationAsync(result, symptom), source, model, status);
+        }
     }
 
     [Theory]

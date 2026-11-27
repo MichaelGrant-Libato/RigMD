@@ -153,13 +153,15 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         return BuildPresenceProbe(deviceType, battery, gpu);
     }
 
-    private static HardwarePresenceProbeDto BuildPresenceProbe(
+    internal static HardwarePresenceProbeDto BuildPresenceProbe(
         string deviceType,
         BatteryStatsDto? battery,
         GpuStatsDto gpu)
     {
         bool hasBattery = battery?.HasBattery == true;
-        bool hasGpu = gpu.HasGpu && !string.Equals(gpu.Name, "Unknown GPU", StringComparison.OrdinalIgnoreCase);
+        bool hasGpu = gpu.HasGpu && !string.IsNullOrWhiteSpace(gpu.Name) &&
+            !string.Equals(gpu.Name, "Unknown GPU", StringComparison.OrdinalIgnoreCase);
+        bool gpuAbsent = !hasGpu && gpu.AbsenceConfirmed;
         bool hasDedicatedGpu = gpu.HasDedicatedGpu || string.Equals(gpu.Type, "Dedicated", StringComparison.OrdinalIgnoreCase);
 
         var probe = new HardwarePresenceProbeDto
@@ -172,7 +174,7 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
             GpuType = gpu.Type
         };
 
-        var alwaysPresentIds = new[] { "cpu", "memory", "storage", "os", "drivers", "network", "display" };
+        var alwaysPresentIds = new[] { "cpu", "memory", "storage", "os", "startup", "drivers", "network", "display" };
         foreach (var id in alwaysPresentIds)
         {
             probe.Components[id] = new ComponentPresenceInfoDto
@@ -186,14 +188,11 @@ public class WindowsSystemProfileService : IWindowsSystemProfileService
         probe.Components["gpu"] = new ComponentPresenceInfoDto
         {
             ComponentId = "gpu",
-            Status = hasGpu ? nameof(ComponentStatus.Present) : nameof(ComponentStatus.NotPresent),
-            IsSelectable = hasGpu,
-            Badge = hasDedicatedGpu
-                ? "Dedicated GPU"
-                : hasGpu
-                    ? "Integrated GPU"
-                    : "Not Present",
-            Reason = hasGpu ? null : "No graphics controller detected on this device"
+            Status = hasGpu ? nameof(ComponentStatus.Present) : gpuAbsent ? nameof(ComponentStatus.NotPresent) : "Unknown",
+            IsSelectable = !gpuAbsent,
+            Badge = hasGpu ? (hasDedicatedGpu ? "Dedicated GPU" : string.Equals(gpu.Type, "Integrated", StringComparison.OrdinalIgnoreCase) ? "Integrated GPU" : null)
+                : gpuAbsent ? "Not present" : "Detection unavailable",
+            Reason = hasGpu ? null : gpuAbsent ? "Windows reported no graphics adapter." : "Windows could not identify the graphics adapter."
         };
 
         probe.Components["battery"] = new ComponentPresenceInfoDto

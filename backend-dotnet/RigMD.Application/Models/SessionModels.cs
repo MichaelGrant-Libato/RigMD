@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace RigMD.Application.Models;
 
+public sealed record DriveHealthTarget(int Number, string Model, double SizeGb, string[] Volumes);
+
 public class DiagnosticSessionDto
 {
     [JsonPropertyName("session_id")]
@@ -56,6 +58,12 @@ public class DiagnosticSessionDto
 
     [JsonPropertyName("explanation_model")]
     public string ExplanationModel { get; set; } = string.Empty;
+
+    [JsonPropertyName("explanation_status")]
+    public string ExplanationStatus { get; set; } = string.Empty;
+
+    [JsonPropertyName("drive_health_targets")]
+    public IReadOnlyList<DriveHealthTarget> DriveHealthTargets { get; set; } = Array.Empty<DriveHealthTarget>();
 
     [JsonPropertyName("is_recurring")]
     public bool IsRecurring { get; set; }

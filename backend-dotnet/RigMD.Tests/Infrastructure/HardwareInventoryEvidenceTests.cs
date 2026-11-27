@@ -11,6 +11,21 @@ namespace RigMD.Tests.Infrastructure;
 public sealed class HardwareInventoryEvidenceTests
 {
     [Theory]
+    [InlineData(false, "Unknown", true, "Detection unavailable")]
+    [InlineData(true, "NotPresent", false, "Not present")]
+    public void GraphicsPreflightBlocksTheCheckOnlyWhenWindowsReportsAbsence(bool absenceConfirmed,
+        string status, bool selectable, string badge)
+    {
+        var probe = WindowsSystemProfileService.BuildPresenceProbe("Desktop", null,
+            new() { HasGpu = false, Name = "Unknown GPU", AbsenceConfirmed = absenceConfirmed });
+
+        Assert.Equal(status, probe.Components["gpu"].Status);
+        Assert.Equal(selectable, probe.Components["gpu"].IsSelectable);
+        Assert.Equal(badge, probe.Components["gpu"].Badge);
+        Assert.True(probe.Components["startup"].IsSelectable);
+    }
+
+    [Theory]
     [InlineData(1)] [InlineData(2)] [InlineData(6)]
     public void MemoryArrayCountsAreReportedInsteadOfAssumingFour(int total)
     {
