@@ -26,6 +26,20 @@ public sealed class DeviceDiagnosticsController(DeviceDiagnosticRunner runner,
         return RunAsync("installed apps", ct => Task.Run(() => InstalledAppInventory.Capture(ct), ct), token);
     }
 
+    [HttpGet("drivers")]
+    public Task<IActionResult> Drivers(CancellationToken token)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return RunAsync("driver inventory", WindowsSystemInventory.ReadDriversAsync, token);
+    }
+
+    [HttpGet("services")]
+    public Task<IActionResult> Services(CancellationToken token)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return RunAsync("service inventory", WindowsSystemInventory.ReadServicesAsync, token);
+    }
+
     [HttpGet("drives/{number:int:min(0)}/health")]
     public Task<IActionResult> DriveHealth(int number, CancellationToken token) =>
         RunAsync("drive health", ct => WindowsHardwareHealth.ReadDriveAsync(number, ct), token);

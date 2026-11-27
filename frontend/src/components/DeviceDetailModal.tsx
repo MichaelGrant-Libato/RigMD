@@ -3,11 +3,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Cpu, MemoryStick, HardDrive, Monitor, Wifi, Activity, Battery, Zap } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { chartReadings, formatAdapterLinkSpeed, formatMeasurement, isCurrent, latestDeviceSample, measurement, trafficScale, type DeviceFeed, type DeviceSample } from '../lib/deviceTelemetry';
+import { memorySlotSummary } from '../lib/hardwareInventory';
 import { formatTemperature, gpuTemperatureReading, selectedCpuTemperature } from '../lib/temperatureTelemetry';
 import type { HardwareStats } from '../types/rigmd';
 import { AppActivityPanel, BatteryHealthPanel, ConnectionTestPanel, DriveHealthPanel } from './DeviceDiagnosticPanels';
 import InstalledAppsPanel from './InstalledAppsPanel';
-import { memorySlotSummary } from '../lib/hardwareInventory';
+import SystemInventoryPanel from './SystemInventoryPanel';
+
+const storageViews = [['overview', 'Overview'], ['apps', 'Installed apps'], ['drivers', 'Drivers'], ['services', 'Services']] as const;
+type StorageView = typeof storageViews[number][0];
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS' | 'Device' | 'Battery' | 'Power';
 
@@ -97,7 +101,7 @@ function ActivityChart({ title, label, now, color, rows, upperBound, ticks }: {
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats, feed, onMemoryCheck }: DeviceDetailModalProps) {
   const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
   const [selectedGpuId, setSelectedGpuId] = useState('');
-  const [storageView, setStorageView] = useState<'overview' | 'apps'>('overview');
+  const [storageView, setStorageView] = useState<StorageView>('overview');
   const dialogRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const availableStorage = stats?.storage_drives;
@@ -244,7 +248,9 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     subtitle = text(stats.storage_type);
     const active = liveValue(diskLive?.activeTimePercent, '% active', 1, 'Idle', 100);
     const diskMedia = disk?.media_type && disk.media_type !== 'Fixed hard disk media' ? disk.media_type : null;
-    content = storageView === 'apps' ? <InstalledAppsPanel /> : <>
+    content = storageView === 'apps' ? <InstalledAppsPanel />
+      : storageView === 'drivers' || storageView === 'services' ? <SystemInventoryPanel key={storageView} kind={storageView} />
+      : <>
       {drives.length > 1 && (
         <div role="group" aria-label="Physical drives" className="flex flex-wrap gap-2 border-b border-[var(--rigmd-border)] pb-4">
           {drives.map((drive, index) => (
@@ -383,7 +389,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
           </div>
           {hardwareType === 'Storage' && (
             <div role="group" aria-label="Storage views" className="flex flex-wrap gap-2 border-b border-[var(--rigmd-border)] px-6 py-3">
-              {([['overview', 'Overview'], ['apps', 'Installed apps']] as const).map(([view, label]) => (
+              {storageViews.map(([view, label]) => (
                 <button type="button" key={view} aria-pressed={view === storageView} onClick={() => {
                   if (view === storageView) return;
                   setStorageView(view);
