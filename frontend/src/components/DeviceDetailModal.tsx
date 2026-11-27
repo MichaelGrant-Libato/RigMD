@@ -6,6 +6,7 @@ import { chartReadings, formatAdapterLinkSpeed, formatMeasurement, isCurrent, la
 import { formatTemperature, gpuTemperatureReading, selectedCpuTemperature } from '../lib/temperatureTelemetry';
 import type { HardwareStats } from '../types/rigmd';
 import { AppActivityPanel, BatteryHealthPanel, ConnectionTestPanel, DriveHealthPanel } from './DeviceDiagnosticPanels';
+import InstalledAppsPanel from './InstalledAppsPanel';
 import { memorySlotSummary } from '../lib/hardwareInventory';
 
 export type HardwareType = 'CPU' | 'Memory' | 'Storage' | 'GPU' | 'Network' | 'OS' | 'Device' | 'Battery' | 'Power';
@@ -96,13 +97,16 @@ function ActivityChart({ title, label, now, color, rows, upperBound, ticks }: {
 export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats, feed, onMemoryCheck }: DeviceDetailModalProps) {
   const [selectedDiskIndex, setSelectedDiskIndex] = useState(0);
   const [selectedGpuId, setSelectedGpuId] = useState('');
+  const [storageView, setStorageView] = useState<'overview' | 'apps'>('overview');
   const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const availableStorage = stats?.storage_drives;
 
   useEffect(() => {
     if (!isOpen) return;
     setSelectedDiskIndex(0);
     setSelectedGpuId('');
+    setStorageView('overview');
   }, [isOpen, hardwareType]);
 
   useEffect(() => {
@@ -240,7 +244,7 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
     subtitle = text(stats.storage_type);
     const active = liveValue(diskLive?.activeTimePercent, '% active', 1, 'Idle', 100);
     const diskMedia = disk?.media_type && disk.media_type !== 'Fixed hard disk media' ? disk.media_type : null;
-    content = <>
+    content = storageView === 'apps' ? <InstalledAppsPanel /> : <>
       {drives.length > 1 && (
         <div role="group" aria-label="Physical drives" className="flex flex-wrap gap-2 border-b border-[var(--rigmd-border)] pb-4">
           {drives.map((drive, index) => (
@@ -350,7 +354,8 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
   }
 
   const collectorName = hardwareType === 'GPU' ? 'Graphics' : hardwareType === 'CPU' ? 'CPU temperature' : hardwareType;
-  const collectorStatus = latest?.collectorStatus?.find(status => status.name === collectorName);
+  const showLiveStatus = hardwareType !== 'Storage' || storageView === 'overview';
+  const collectorStatus = showLiveStatus ? latest?.collectorStatus?.find(status => status.name === collectorName) : undefined;
   const statusLabel = collectorStatus?.state === 'live' ? 'Live'
     : collectorStatus?.state === 'collecting' ? 'Collecting…'
       : collectorStatus?.state === 'timed out' ? 'Reading timed out'
@@ -376,12 +381,25 @@ export default function DeviceDetailModal({ isOpen, onClose, hardwareType, stats
             <button type="button" aria-label="Close device details" onClick={onClose}
               className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"><X size={24} /></button>
           </div>
-          <div className="custom-scrollbar space-y-5 overflow-y-auto p-6">
+          {hardwareType === 'Storage' && (
+            <div role="group" aria-label="Storage views" className="flex flex-wrap gap-2 border-b border-[var(--rigmd-border)] px-6 py-3">
+              {([['overview', 'Overview'], ['apps', 'Installed apps']] as const).map(([view, label]) => (
+                <button type="button" key={view} aria-pressed={view === storageView} onClick={() => {
+                  if (view === storageView) return;
+                  setStorageView(view);
+                  bodyRef.current?.scrollTo({ top: 0 });
+                }} className={'rounded-lg px-3 py-2 text-sm font-semibold ' + (view === storageView
+                  ? 'bg-cyan-400/15 text-cyan-200'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200')}>{label}</button>
+              ))}
+            </div>
+          )}
+          <div ref={bodyRef} className="custom-scrollbar space-y-5 overflow-y-auto p-6">
             {collectorStatus && <p className="text-xs text-slate-400">
               {collectorStatus.name + ' · ' + statusLabel}
               {collectorStatus.lastReadAt && collectorStatus.state !== 'live' && ' · Last read at ' + timestamp(collectorStatus.lastReadAt)}
             </p>}
-            {feed?.disconnected && <p className="text-xs text-amber-200">Live readings disconnected. Reconnecting…</p>}
+            {showLiveStatus && feed?.disconnected && <p className="text-xs text-amber-200">Live readings disconnected. Reconnecting…</p>}
             {content}
           </div>
         </motion.div>

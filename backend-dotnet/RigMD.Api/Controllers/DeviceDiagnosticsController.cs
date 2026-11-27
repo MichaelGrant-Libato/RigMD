@@ -19,6 +19,13 @@ public sealed class DeviceDiagnosticsController(DeviceDiagnosticRunner runner,
     public Task<IActionResult> AppActivity(CancellationToken token) =>
         RunAsync("process activity", ProcessActivityReader.CaptureAsync, token);
 
+    [HttpGet("installed-apps")]
+    public Task<IActionResult> InstalledApps(CancellationToken token)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return RunAsync("installed apps", ct => Task.Run(() => InstalledAppInventory.Capture(ct), ct), token);
+    }
+
     [HttpGet("drives/{number:int:min(0)}/health")]
     public Task<IActionResult> DriveHealth(int number, CancellationToken token) =>
         RunAsync("drive health", ct => WindowsHardwareHealth.ReadDriveAsync(number, ct), token);
