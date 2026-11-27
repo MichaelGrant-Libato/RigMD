@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { release, releaseDownloadUrl, resolveReleaseDownload, resolveWebsiteDownload } from '../server/releasePolicy.js';
-import { isInstallerDownload, releaseAssetUrl, websiteDownloadRecordUrl } from '../src/lib/downloadRelease.js';
+import { isInstallerDownload, parseReleaseVersion, releaseAssetUrl, websiteDownloadRecordUrl } from '../src/lib/downloadRelease.js';
 import handler from '../api/download-url.js';
 
 test('a release is unavailable until explicitly enabled, and stale URL overrides cannot select an older installer', () => {
@@ -27,7 +27,8 @@ test('download configuration rejects mutation requests and never caches a versio
 });
 
 test('runtime release supplies the displayed version and exact link independently of the desktop build', async () => {
-  const version = '0.2.22';
+  const [major, minor, patch] = parseReleaseVersion(release.version);
+  const version = `${major}.${minor}.${patch + 1}`;
   const asset = `RigMD-Setup-v${version}.exe`;
   const record = { version, asset, sha256: 'a'.repeat(64), sourceRevision: 'b'.repeat(40), prerelease: true };
   const resolve = async (url, options) => {
