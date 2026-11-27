@@ -1,3 +1,5 @@
+param([string]$CpuSensorSourceDirectory = (Join-Path $PSScriptRoot "output\dependencies"))
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot =
@@ -63,9 +65,22 @@ $InstallerScript =
         "RigMD-Setup.iss"
 
 # Isolate compilation from a running development app. Published inputs retain the installer’s expected layout.
-$PackageBuildRoot = Join-Path $RepoRoot ("artifacts\package-build\" + $ReleaseVersion + "-" + [guid]::NewGuid().ToString("N") + "\")
+$PackageBuildRoot = Join-Path $PSScriptRoot ("output\package-build\" + $ReleaseVersion + "-" + [guid]::NewGuid().ToString("N") + "\")
 $DesktopPublishDirectory = Join-Path $PackageBuildRoot "Desktop\win-x64\publish"
 $ApiPublishDirectory = Join-Path $PackageBuildRoot "Api\win-x64\publish"
+$FrontendPublishDirectory = Join-Path $PackageBuildRoot "Frontend\wwwroot"
+
+$CpuSensorSourceDirectory = (Resolve-Path -LiteralPath $CpuSensorSourceDirectory).Path
+$CpuSensorSources = [ordered]@{
+    "LibreHardwareMonitor-0.9.6-source.zip" = "45DDAED7D4A8C74C5DC6613B3308E590B4B5301E595C36268F76E30E68879696"
+    "PawnIO-Modules-0.1.6-source.zip" = "CBD0BECD1058881704F278A0C5467F61C2A7B07383E3447AAFD72078F427C468"
+}
+foreach ($name in $CpuSensorSources.Keys) {
+    $archive = Join-Path $CpuSensorSourceDirectory $name
+    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -cne $CpuSensorSources[$name]) {
+        throw "CPU sensor source archive does not match the expected hash: $name"
+    }
+}
 
 $InnoCompiler = $null
 $CandidateCompilerPaths = @(
@@ -118,7 +133,7 @@ try
     $env:VITE_SUPABASE_URL = ""
     $env:VITE_SUPABASE_PUBLISHABLE_KEY = ""
     $env:VITE_SUPABASE_ANON_KEY = ""
-    & cmd.exe /c "npm run build"
+    & npm.cmd run build -- --outDir $FrontendPublishDirectory
     if ($LASTEXITCODE -ne 0)
     {
         throw "React frontend build failed."
@@ -130,6 +145,7 @@ finally
 }
 
 Write-Host "React frontend build completed."
+$FrontendIndexHash = (Get-FileHash -LiteralPath (Join-Path $FrontendPublishDirectory "index.html") -Algorithm SHA256).Hash
 $SourceSnapshot = Get-SourceSnapshot
 Write-Host ""
 
@@ -214,6 +230,30 @@ $ApiRuntimeConfig =
     Join-Path `
         $ApiPublishDirectory `
         "RigMD.Api.runtimeconfig.json"
+
+# Publish may include the checked-in UI. Stage the fresh frontend for both components.
+foreach ($pubDir in @($DesktopPublishDirectory, $ApiPublishDirectory)) {
+    $webRoot = Join-Path $pubDir "wwwroot"
+    if (Test-Path -LiteralPath $webRoot) {
+        $resolvedWebRoot = (Resolve-Path -LiteralPath $webRoot).Path
+        if ($resolvedWebRoot -ine [IO.Path]::GetFullPath($webRoot) -or
+            !$resolvedWebRoot.StartsWith($expectedBuildRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            ((Get-Item -LiteralPath $resolvedWebRoot).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Unexpected frontend staging directory: $resolvedWebRoot"
+        }
+        $component = (Get-Item -LiteralPath $pubDir).Parent.Parent.Name
+        $priorWebRoot = Join-Path $PackageBuildRoot "previous-$component-wwwroot"
+        Move-Item -LiteralPath $resolvedWebRoot -Destination $priorWebRoot
+    }
+    Copy-Item -LiteralPath $FrontendPublishDirectory -Destination $pubDir -Recurse -ErrorAction Stop
+    $index = Join-Path $webRoot "index.html"
+    if ((Get-FileHash -LiteralPath $index -Algorithm SHA256).Hash -cne $FrontendIndexHash) {
+        throw "The published frontend differs from the frontend built for this release."
+    }
+    if (!(Test-Path -LiteralPath (Join-Path $pubDir "LibreHardwareMonitorLib.dll") -PathType Leaf)) {
+        throw "The published component is missing the CPU sensor library: $pubDir"
+    }
+}
 
 $ApiFrontendIndex =
     Join-Path `
@@ -315,6 +355,7 @@ if ((Get-SourceSnapshot).Hash -ne $SourceSnapshot.Hash) {
 & $InnoCompiler `
     "/DDesktopPublishDirectory=$DesktopPublishDirectory" `
     "/DApiPublishDirectory=$ApiPublishDirectory" `
+    "/DCpuSensorSourceDirectory=$CpuSensorSourceDirectory" `
     $InstallerScript
 
 if ($LASTEXITCODE -ne 0)
@@ -340,7 +381,7 @@ if ($LASTEXITCODE -eq 0) {
     $gitStatus = @(& git -C $RepoRoot status --porcelain 2>$null)
     if ($LASTEXITCODE -eq 0) { $sourceDirty = $gitStatus.Count -gt 0 }
 } else { $sourceRevision = $null }
-$releaseManifest = [ordered]@{ version=$ReleaseVersion; builtAtUtc=[DateTimeOffset]::UtcNow.ToString("O"); sha256=$InstallerHash; bytes=(Get-Item $InstallerOutput).Length; sourceRevision=$sourceRevision; sourceDirty=$sourceDirty; sourceTreeSha256=$SourceSnapshot.Hash; signatureStatus=(Get-AuthenticodeSignature -LiteralPath $InstallerOutput).Status.ToString() }
+$releaseManifest = [ordered]@{ version=$ReleaseVersion; builtAtUtc=[DateTimeOffset]::UtcNow.ToString("O"); sha256=$InstallerHash; bytes=(Get-Item $InstallerOutput).Length; sourceRevision=$sourceRevision; sourceDirty=$sourceDirty; sourceTreeSha256=$SourceSnapshot.Hash; frontendIndexSha256=$FrontendIndexHash; cpuSensorSourceSha256=$CpuSensorSources; signatureStatus=(Get-AuthenticodeSignature -LiteralPath $InstallerOutput).Status.ToString() }
 $SourceSnapshot.Files | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $PSScriptRoot "output\source-files.json") -Encoding UTF8
 $releaseManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "output\release-manifest.json") -Encoding UTF8
 

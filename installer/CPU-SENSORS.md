@@ -19,5 +19,10 @@ unavailable sensor is shown as unavailable.
   https://github.com/namazso/PawnIO.Modules/tree/4aa792beb020a14c8261072e9786d2dfb38489d9
 
 The upstream source archives include their copyright notices and build files.
+For a release build, place `LibreHardwareMonitor-0.9.6-source.zip` and
+`PawnIO-Modules-0.1.6-source.zip` in `installer/output/dependencies`, or
+pass their directory to `build-installer.ps1 -CpuSensorSourceDirectory`.
+The build verifies both archive hashes and includes the archives under
+`Support/Sources`.
 The official PawnIO driver is available separately from its publisher at
 https://github.com/namazso/PawnIO.Setup/releases/tag/2.2.0
