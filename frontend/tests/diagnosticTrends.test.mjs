@@ -206,11 +206,13 @@ test('every supported part and problem stays selectable with an explicit zero el
   assert.equal(trendCheckCount(model.groups, 'component'), 0);
   const parts = getTrendScopeOptions(model.groups, 'component');
   const problems = getTrendScopeOptions(model.groups, 'scenario');
-  assert.equal(parts.length, 9);
-  assert.equal(problems.length, 10);
+  assert.equal(parts.length, TREND_COMPONENT_IDS.length);
+  assert.equal(problems.length, TREND_SCENARIO_IDS.length);
   assert.ok([...parts, ...problems].every(option => option.count === 0));
   assert.ok(parts.some(option => option.value === 'component:gpu'));
   assert.ok(problems.some(option => option.value === 'scenario:app-crashes'));
+  assert.ok(parts.some(option => option.value === 'component:startup'));
+  assert.ok(problems.some(option => option.value === 'scenario:rapid-battery-drain'));
 });
 
 test('saved combination scopes stay separate and follow-ups are not counted as new check sessions', () => {

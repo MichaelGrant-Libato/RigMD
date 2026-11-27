@@ -30,14 +30,11 @@ import {
   MemoryStick,
   Wifi,
   Battery,
-  Fan,
   Gauge,
   HardDrive,
   Monitor,
   Power,
   Thermometer,
-  Usb,
-  Volume2,
   RefreshCw,
   ScanSearch,
   Database,
@@ -154,7 +151,6 @@ interface DiagnosisModeOption {
   id: DiagnosisMode;
   title: string;
   description: string;
-  action: string;
   icon: LucideIcon;
 }
 
@@ -175,17 +171,12 @@ interface DiagnosisScenario {
 const AGENT_ID =
   import.meta.env.VITE_AGENT_ID;
 
-void Fan;
-void Usb;
-void Volume2;
-
 const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
   {
     id: 'full',
     title: 'Full computer check',
     description:
-      'Check the main parts of your computer for possible problems.',
-    action: 'Check all parts',
+      'Review available readings across this computer.',
     icon: Stethoscope,
   },
 
@@ -193,8 +184,7 @@ const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
     id: 'component',
     title: 'Check specific parts',
     description:
-      'Choose the parts you want to check, such as memory or storage.',
-    action: 'Choose parts',
+      'Review findings for the parts you select.',
     icon: Microchip,
   },
 
@@ -202,8 +192,7 @@ const DIAGNOSIS_MODES: DiagnosisModeOption[] = [
     id: 'scenario',
     title: 'Check a problem',
     description:
-      'Start from a common problem such as slow performance, overheating, startup trouble, or display issues.',
-    action: 'Choose a problem',
+      'Start with a symptom you have noticed.',
     icon: Layers,
   },
 ];
@@ -226,7 +215,7 @@ const COMPONENT_GROUPS: {
 
       {
         id: 'memory',
-        title: 'Working memory',
+        title: 'Memory (RAM)',
         description:
           'Space used by running apps, separate from your saved files.',
         icon: MemoryStick,
@@ -234,9 +223,9 @@ const COMPONENT_GROUPS: {
 
       {
         id: 'gpu',
-        title: 'Graphics and screens',
+        title: 'Graphics adapter',
         description:
-          'The part that draws pictures on your screen and its Windows software.',
+          'Adapter details, available temperature, and related device warnings.',
         icon: Monitor,
       },
 
@@ -262,33 +251,21 @@ const COMPONENT_GROUPS: {
         icon: Activity,
       },
 
-      /*
       {
         id: 'startup',
-        title: 'Startup / Boot',
+        title: 'Startup',
         description:
-          'Startup-related system evidence and configuration.',
+          'Startup-related readings, with Windows boot history available on the result.',
         icon: Power,
       },
-      */
 
       {
         id: 'drivers',
-        title: 'Device software',
+        title: 'Device drivers',
         description:
           'Warnings about connected devices and the software they need.',
         icon: AlertTriangle,
       },
-
-      /*
-      {
-        id: 'thermal',
-        title: 'Thermals / Fan',
-        description:
-          'Available thermal and workload-related evidence.',
-        icon: Fan,
-      },
-      */
 
       {
         id: 'battery',
@@ -314,31 +291,12 @@ const COMPONENT_GROUPS: {
 
       {
         id: 'display',
-        title: 'Display',
+        title: 'Connected displays',
         description:
-          'Display adapter and graphics-related information.',
+          'Screens Windows reports and available display-related device warnings.',
         icon: Monitor,
       },
 
-      /*
-      {
-        id: 'peripherals',
-        title: 'USB / Peripherals',
-        description:
-          'Connected device and peripheral-related information.',
-        icon: Usb,
-      },
-      */
-
-      /*
-      {
-        id: 'audio',
-        title: 'Audio',
-        description:
-          'Audio-device and related driver evidence.',
-        icon: Volume2,
-      },
-      */
     ],
   },
 ];
@@ -348,7 +306,7 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     id: 'slow-system',
     title: 'Slow System',
     description:
-      'The Device feels sluggish, freezes, or struggles during normal use.',
+      'Windows or apps respond slowly most of the time.',
     icon: Gauge,
   },
 
@@ -404,7 +362,7 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     id: 'app-crashes',
     title: 'Application Crashes',
     description:
-      'Applications freeze, close unexpectedly, or fail during normal use.',
+      'An app closes unexpectedly or repeatedly fails.',
     icon: Activity,
   },
 
@@ -412,7 +370,7 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     id: 'stuttering-freezing',
     title: 'Stuttering / Freezing',
     description:
-      'Apps, mouse movement, video, or general system activity periodically freezes.',
+      'The pointer, video, or desktop briefly pauses and then resumes.',
     icon: Gauge,
   },
 
@@ -422,6 +380,12 @@ const DIAGNOSIS_SCENARIOS: DiagnosisScenario[] = [
     description:
       'File access, saving, loading, or available drive space appears problematic.',
     icon: HardDrive,
+  },
+  {
+    id: 'rapid-battery-drain',
+    title: 'Battery drains quickly',
+    description: 'Battery life drops faster than expected while unplugged.',
+    icon: Battery,
   },
 ];
 
@@ -738,6 +702,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
     useState<HardwarePresenceProbe | null>(
       null,
     );
+  const [preflightFailed, setPreflightFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -745,6 +710,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
     apiGet<HardwarePresenceProbe>(
       '/api/diagnosis/preflight',
       {
+        timeout: 8000,
         headers: {
           'X-Client-ID':
             AGENT_ID || 'local',
@@ -777,6 +743,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
         }
       })
       .catch((err) => {
+        if (active) setPreflightFailed(true);
         console.warn(
           'Pre-flight hardware probe warning:',
           err,
@@ -805,23 +772,6 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
       return probe.components[
         componentId
       ];
-    }
-
-    if (
-      componentId === 'battery' &&
-      snapshot?.hardware &&
-      snapshot.hardware.battery ===
-        null
-    ) {
-      return {
-        componentId: 'battery',
-        status: 'NotPresent',
-        isSelectable: false,
-        badge:
-          'Not Present (Desktop PC)',
-        reason:
-          'No battery detected on this device',
-      };
     }
 
     return undefined;
@@ -875,9 +825,6 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
     ) ??
     DIAGNOSIS_MODES[0];
 
-  const ActiveModeIcon =
-    activeMode.icon;
-
   const selectedComponentDetails =
     selectedComponents
       .filter(
@@ -897,12 +844,10 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
         Boolean,
       ) as DiagnosisComponent[];
 
-  const selectedScenario =
-    DIAGNOSIS_SCENARIOS.find(
-      (scenario) =>
-        scenario.id ===
-        selectedScenarioId,
-    );
+  const availableScenarios = isComponentDisabled('battery')
+    ? DIAGNOSIS_SCENARIOS.filter(scenario => scenario.id !== 'rapid-battery-drain')
+    : DIAGNOSIS_SCENARIOS;
+  const selectedScenario = availableScenarios.find(scenario => scenario.id === selectedScenarioId);
 
   const diagnosisBusy =
     diagnosisStage ===
@@ -921,9 +866,10 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
           'component'
         ? selectedComponentDetails.length >
           0
-        : Boolean(
-            selectedScenarioId,
-          );
+        : Boolean(selectedScenario);
+  const selectionPrompt = diagnosisMode === 'component'
+    ? 'Choose at least one part'
+    : 'Choose a problem';
 
   const runButtonLabel =
     diagnosisStage ===
@@ -966,7 +912,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
 
   const selectedScopeLabel =
     diagnosisMode === 'full'
-      ? 'Entire Device'
+      ? 'Available Windows readings'
       : diagnosisMode ===
           'component'
         ? selectedComponentDetails
@@ -1000,7 +946,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
   const selectDiagnosisMode = (
     mode: DiagnosisMode,
   ) => {
-    if (diagnosisBusy) {
+    if (diagnosisBusy || mode === diagnosisMode) {
       return;
     }
 
@@ -1164,7 +1110,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
           {
             mode: diagnosisMode,
             componentIds: safeComponentIds,
-            scenarioId: diagnosisMode === 'scenario' ? selectedScenarioId : null,
+            scenarioId: diagnosisMode === 'scenario' ? selectedScenario?.id : null,
           },
           {
             headers: { 'X-Client-ID': AGENT_ID || 'local' },
@@ -1580,9 +1526,9 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
         animate="visible"
         exit="exit"
         transition={pageTransition}
-        className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 lg:px-6"
+        className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-4 lg:px-6"
       >
-        <div className="mx-auto grid w-full max-w-[1512px] grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="mx-auto w-full max-w-[1320px]">
           <div className="min-w-0 space-y-5">
             <motion.section
               variants={cardFadeUp}
@@ -1598,25 +1544,14 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                   </div>
 
                   <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-xl font-bold text-white">
-                        Check your computer
-                      </h2>
-
-                      <span className="rounded-full border border-teal-300/25 bg-teal-300/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-teal-200">
-                        Recommended
-                      </span>
-                    </div>
-
-                    <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-400">
-                      Choose a full check, specific parts, or a problem you have noticed.
-                    </p>
+                    <h2 className="text-lg font-bold text-white">Choose a check</h2>
+                    <p className="mt-1 text-sm text-slate-400">Review the whole computer, select parts, or start with a symptom.</p>
                   </div>
                 </div>
               </div>
 
-              <div className="p-5">
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="p-4 sm:p-5">
+                <div role="group" aria-label="Check type" className="grid grid-cols-1 gap-3 md:grid-cols-3">
                   {DIAGNOSIS_MODES.map((mode) => {
                     const selected =
                       diagnosisMode === mode.id;
@@ -1628,6 +1563,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                       <motion.button
                         key={mode.id}
                         type="button"
+                        aria-pressed={selected}
                         disabled={diagnosisBusy}
                         onClick={() =>
                           selectDiagnosisMode(
@@ -1644,42 +1580,20 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                             ? undefined
                             : buttonTap
                         }
-                        className={`flex min-h-[234px] flex-col items-start justify-start rounded-xl border p-5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`flex min-w-0 items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-60 ${
                           selected
                             ? selectedCardStyle
                             : unselectedCardStyle
                         }`}
                       >
-                        <span className="flex w-full items-center justify-between gap-3">
-                          <span
-                            className={`flex h-11 w-11 items-center justify-center rounded-lg border ${iconBoxStyle(
-                              selected,
-                            )}`}
-                          >
-                            <Icon size={21} />
-                          </span>
-
-                          {selected && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-cyan-200">
-                              <Check size={12} />
-                              Selected
-                            </span>
-                          )}
+                        <span className={`grid size-9 shrink-0 place-items-center rounded-lg border ${iconBoxStyle(selected)}`}>
+                          <Icon size={18} aria-hidden="true" />
                         </span>
-
-                        <span className="mt-5 flex w-full flex-1 flex-col">
-                          <span className="block text-base font-bold text-white">
-                            {mode.title}
-                          </span>
-
-                          <span className="mt-2 block min-h-[48px] text-sm leading-relaxed text-slate-400">
-                            {mode.description}
-                          </span>
-
-                          <span className="mt-auto pt-4 block text-xs font-bold uppercase tracking-wider text-cyan-300">
-                            {mode.action}
-                          </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-bold text-white">{mode.title}</span>
+                          <span className="mt-1 block text-xs leading-relaxed text-slate-400">{mode.description}</span>
                         </span>
+                        {selected && <Check size={15} aria-hidden="true" className="shrink-0 text-cyan-200" />}
                       </motion.button>
                     );
                   })}
@@ -1699,7 +1613,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                         </p>
 
                         <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                          Checks the parts RigMD can read. No questions to answer first.
+                          Reviews processor activity, memory use, storage space, and available graphics, device, and network readings. The result lists anything RigMD could not verify.
                         </p>
                       </div>
                     </div>
@@ -1712,17 +1626,17 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <h3 className="font-bold text-white">
-                          Choose components
+                          Choose parts
                         </h3>
 
                         <p className="mt-1 text-sm text-slate-400">
-                          Choose the parts to check. Parts that were not detected cannot be selected.
+                          Select the parts you want to review.
                         </p>
                       </div>
 
                       <button
                         type="button"
-                        disabled={diagnosisBusy}
+                        disabled={diagnosisBusy || selectableComponentIds.length === 0}
                         onClick={selectAllComponents}
                         className="rounded-lg border border-teal-300/30 bg-teal-300/10 px-3 py-2 text-xs font-bold text-teal-200 transition hover:bg-teal-300/15 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1735,11 +1649,14 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                             ),
                         )
                           ? 'Clear all'
-                          : 'Select all'}
+                          : 'Select available parts'}
                       </button>
                     </div>
 
-                    <div className="mt-5 space-y-5">
+                    {preflightFailed && <p role="status" className="mt-3 text-xs text-amber-200">
+                      Hardware detection is unavailable. You can still choose parts to check.
+                    </p>}
+                    <div className="mt-4 space-y-4">
                       {COMPONENT_GROUPS.map(
                         (group) => (
                           <div key={group.group}>
@@ -1747,7 +1664,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                               {group.group}
                             </p>
 
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                            <div role="group" aria-label={group.group} className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                               {group.items.map(
                                 (component) => {
                                   const presence =
@@ -1771,10 +1688,9 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
 
                                   return (
                                     <motion.button
-                                      key={
-                                        component.id
-                                      }
+                                      key={component.id}
                                       type="button"
+                                      aria-pressed={selected}
                                       disabled={
                                         diagnosisBusy ||
                                         isNotPresent
@@ -1790,7 +1706,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                           ? undefined
                                           : buttonTap
                                       }
-                                      className={`flex min-h-[106px] items-start gap-3 rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed ${
+                                      className={`flex min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed ${
                                         isNotPresent
                                           ? 'border-slate-700/45 bg-[#0c1219] text-slate-500 opacity-75'
                                           : selected
@@ -1809,6 +1725,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                       >
                                         <Icon
                                           size={18}
+                                          aria-hidden="true"
                                         />
                                       </span>
 
@@ -1826,16 +1743,10 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                             }
                                           </span>
 
-                                          {isNotPresent ? (
+                                          {presence?.badge && (isNotPresent || presence.status === 'Unknown') ? (
                                             <span className="shrink-0 rounded-full border border-amber-400/35 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                                              {presence?.badge ||
-                                                'Not Present (Desktop PC)'}
+                                              {presence.badge}
                                             </span>
-                                          ) : selected ? (
-                                            <Check
-                                              size={15}
-                                              className="shrink-0 text-teal-300"
-                                            />
                                           ) : presence?.badge ? (
                                             <span className="shrink-0 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
                                               {
@@ -1843,6 +1754,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                               }
                                             </span>
                                           ) : null}
+                                          {selected && <Check size={15} aria-hidden="true" className="shrink-0 text-teal-300" />}
                                         </span>
 
                                         <span className="mt-1 block text-xs leading-relaxed text-slate-400">
@@ -1851,10 +1763,9 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                           }
                                         </span>
 
-                                        {isNotPresent && (
+                                        {presence?.reason && (isNotPresent || presence.status === 'Unknown') && (
                                           <span className="mt-1.5 block text-[11px] font-medium text-amber-300/85">
-                                            {presence?.reason ||
-                                              'No battery detected on this device'}
+                                            {presence.reason}
                                           </span>
                                         )}
                                       </span>
@@ -1875,16 +1786,16 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                   <div className="mt-5 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-card-soft)] p-5">
                     <div>
                       <h3 className="font-bold text-white">
-                        Choose a scenario
+                        Choose a problem
                       </h3>
 
                       <p className="mt-1 text-sm text-slate-400">
-                        Choose the problem you are experiencing.
+                        Pick the symptom closest to what you’re seeing.
                       </p>
                     </div>
 
-                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                      {DIAGNOSIS_SCENARIOS.map(
+                    <div role="group" aria-label="Problems to check" className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {availableScenarios.map(
                         (scenario) => {
                           const selected =
                             selectedScenarioId ===
@@ -1897,6 +1808,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                             <motion.button
                               key={scenario.id}
                               type="button"
+                              aria-pressed={selected}
                               disabled={
                                 diagnosisBusy
                               }
@@ -1910,7 +1822,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                   ? undefined
                                   : buttonTap
                               }
-                              className={`flex min-h-[110px] items-start gap-3 rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                              className={`flex min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-60 ${
                                 selected
                                   ? selectedCardStyle
                                   : unselectedCardStyle
@@ -1923,6 +1835,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                               >
                                 <Icon
                                   size={18}
+                                  aria-hidden="true"
                                 />
                               </span>
 
@@ -1935,6 +1848,7 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                                   {selected && (
                                     <Check
                                       size={15}
+                                      aria-hidden="true"
                                       className="shrink-0 text-teal-300"
                                     />
                                   )}
@@ -1953,65 +1867,6 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
                     </div>
                   </div>
                 )}
-
-                <div className="mt-5 flex flex-col gap-3 rounded-xl border border-[var(--rigmd-border)] bg-[#0d151d] p-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                      Parts to check
-                    </p>
-
-                    <p className="mt-1 text-sm font-semibold text-white">
-                      {selectedScopeLabel ||
-                        'Choose what to check'}
-                    </p>
-                  </div>
-
-                  <motion.button
-                    type="button"
-                    disabled={
-                      !canRunDiagnosis ||
-                      diagnosisBusy
-                    }
-                    onClick={
-                      handleRunDiagnosis
-                    }
-                    whileHover={
-                      canRunDiagnosis &&
-                      !diagnosisBusy
-                        ? hoverLift
-                        : undefined
-                    }
-                    whileTap={
-                      canRunDiagnosis &&
-                      !diagnosisBusy
-                        ? buttonTap
-                        : undefined
-                    }
-                    className="flex min-w-[230px] items-center justify-center gap-2 rounded-xl bg-[#2dd4bf] px-5 py-3.5 text-sm font-bold text-[#041014] transition hover:bg-[#5eead4] disabled:cursor-not-allowed disabled:bg-slate-700/35 disabled:text-slate-400"
-                  >
-                    {diagnosisBusy ? (
-                      <RefreshCw
-                        size={17}
-                        className="animate-spin"
-                      />
-                    ) : (
-                      <Zap size={17} />
-                    )}
-
-                    {runButtonLabel}
-                  </motion.button>
-                </div>
-
-                {!canRunDiagnosis &&
-                  diagnosisMode !==
-                    'full' && (
-                    <p className="mt-2 text-right text-xs text-slate-400">
-                      {diagnosisMode ===
-                      'component'
-                        ? 'Choose at least one part to check.'
-                        : 'Choose a problem to check.'}
-                    </p>
-                  )}
               </div>
             </motion.section>
 
@@ -2513,289 +2368,31 @@ export default function NewDiagnosisView({onDiagnosisComplete, initialComponentI
               </motion.section>
             )}
           </div>
-
-          <aside className="self-start overflow-hidden rounded-2xl border border-[var(--rigmd-border)] bg-[#101821] xl:block">
-            <div className="border-b border-[var(--rigmd-border-soft)] p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                Your check
-              </p>
-
-              <div className="mt-4 flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-400/22 bg-cyan-400/10 text-cyan-300">
-                  <ActiveModeIcon
-                    size={20}
-                  />
-                </div>
-
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-bold text-white">
-                    {activeMode.title}
-                  </h3>
-
-                  <p className="text-xs text-slate-400">
-                    Selected mode
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3 p-4">
-              <div
-                className={`rounded-lg border p-3.5 ${softTileStyle}`}
-              >
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Scope
-                </p>
-
-                {diagnosisMode ===
-                'component' ? (
-                  selectedComponentDetails.length >
-                  0 ? (
-                    <div className="mt-3 space-y-2">
-                      {selectedComponentDetails
-                        .slice(0, 5)
-                        .map(
-                          (
-                            component,
-                          ) => (
-                            <div
-                              key={
-                                component.id
-                              }
-                              className="flex items-center gap-2 rounded-lg border border-teal-300/18 bg-teal-300/[0.045] px-3 py-2 text-xs font-semibold text-slate-200"
-                            >
-                              <Check
-                                size={
-                                  13
-                                }
-                                className="text-teal-300"
-                              />
-
-                              {
-                                component.title
-                              }
-                            </div>
-                          ),
-                        )}
-
-                      {selectedComponentDetails.length >
-                        5 && (
-                        <p className="text-xs text-slate-400">
-                          +
-                          {selectedComponentDetails.length -
-                            5}{' '}
-                          more
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-400">
-                      No components selected.
-                    </p>
-                  )
-                ) : diagnosisMode ===
-                  'scenario' ? (
-                  <div className="mt-3">
-                    {selectedScenario ? (
-                      <div className="flex items-center gap-2 rounded-lg border border-cyan-300/18 bg-cyan-300/[0.055] px-3 py-3 text-sm font-semibold text-slate-100">
-                        <Check
-                          size={15}
-                          className="text-cyan-300"
-                        />
-
-                        {
-                          selectedScenario.title
-                        }
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-400">
-                        No scenario selected.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-cyan-300/18 bg-cyan-300/[0.055] px-3 py-3 text-sm font-semibold text-slate-100">
-                    <Check
-                      size={15}
-                      className="text-cyan-300"
-                    />
-                    Entire Device
-                  </div>
-                )}
-              </div>
-
-              <div
-                className={`rounded-lg border p-3.5 ${softTileStyle}`}
-              >
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Status
-                </p>
-
-                <div className="mt-2 flex items-center gap-2">
-                  {diagnosisBusy ? (
-                    <RefreshCw
-                      size={15}
-                      className="animate-spin text-cyan-300"
-                    />
-                  ) : diagnosisStage ===
-                    'completed' ? (
-                    <CheckCircle2
-                      size={15}
-                      className="text-emerald-300"
-                    />
-                  ) : diagnosisStage ===
-                    'failed' ? (
-                    <AlertTriangle
-                      size={15}
-                      className="text-red-300"
-                    />
-                  ) : (
-                    <Activity
-                      size={15}
-                      className="text-slate-400"
-                    />
-                  )}
-
-                  <p className="text-sm font-semibold text-white">
-                    {diagnosisStage ===
-                    'idle'
-                      ? 'Ready'
-                      : diagnosisStage ===
-                          'requesting'
-                        ? 'Requesting scan'
-                        : diagnosisStage ===
-                            'scanning'
-                          ? 'Scanning Device'
-                          : diagnosisStage ===
-                              'loading-evidence'
-                            ? 'Loading readings'
-                            : diagnosisStage ===
-                                'analyzing'
-                              ? 'Analyzing'
-                              : diagnosisStage ===
-                                  'completed'
-                                ? 'Scan completed'
-                                : 'Scan failed'}
-                  </p>
-                </div>
-              </div>
-
-              {snapshot && (
-                <div
-                  className={`rounded-lg border p-3.5 ${softTileStyle}`}
-                >
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Latest readings
-                  </p>
-
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-400">
-                        Memory
-                      </span>
-
-                      <span className="font-semibold text-white">
-                        {Number(
-                          snapshot.hardware.ram
-                            .usagePercent,
-                        ).toFixed(
-                          1,
-                        )}
-                        %
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-400">
-                        Storage
-                      </span>
-
-                      <span className="font-semibold text-white">
-                        {snapshot.hardware
-                          .primaryStorageType ||
-                          'Detected'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-400">
-                        GPU
-                      </span>
-
-                      <span className="max-w-[180px] truncate font-semibold text-white">
-                        {snapshot.hardware.gpu
-                          .name ||
-                          'Detected'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+        </div>
+        <div className="pointer-events-none sticky bottom-0 z-20 mx-auto mt-3 w-full max-w-[1320px] pt-2">
+          <div role="region" aria-label="Run check"
+            className="pointer-events-auto flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--rigmd-border)] bg-[#101821] px-4 py-3 shadow-lg">
+            <p role="status" className="min-w-0 flex-1 break-words text-sm font-semibold text-slate-200" title={selectedScopeLabel}>
+              {!canRunDiagnosis ? selectionPrompt
+                : diagnosisMode === 'component' && selectedComponentDetails.length > 2
+                  ? selectedComponentDetails.length + ' parts selected'
+                  : selectedScopeLabel}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {(diagnosisMode !== 'full' || diagnosisStage !== 'idle') && (
+                <button type="button" disabled={diagnosisBusy} onClick={resetDiagnosis}
+                  className="rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:opacity-50">
+                  Start over
+                </button>
               )}
-
-              {report && (
-                <div
-                  className={`rounded-lg border p-3.5 ${softTileStyle}`}
-                >
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Diagnosis
-                  </p>
-
-                  <p className="mt-2 text-sm font-bold leading-relaxed text-white">
-                    {
-                      getCheckOverview(report).title
-                    }
-                  </p>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="rounded-md border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        Action
-                      </p>
-
-                      <p
-                        className={`mt-1 text-xs font-bold ${getActionTone(report.action_category).text}`}
-                      >
-                        {friendlyActionLabel(
-                          report.action_category,
-                        )}
-                      </p>
-                    </div>
-
-                    <div className="rounded-md border border-[var(--rigmd-border-soft)] bg-[var(--rigmd-card)] p-2">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        Evidence availability
-                      </p>
-
-                      <p className="mt-1 text-xs font-bold text-white">
-                        {
-                          getCheckEvidenceLabel(report)
-                        }
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <motion.button
-                type="button"
-                onClick={
-                  resetDiagnosis
-                }
-                disabled={
-                  diagnosisBusy
-                }
-                whileTap={
-                  diagnosisBusy
-                    ? undefined
-                    : buttonTap
-                }
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-4 py-3 text-sm font-bold text-cyan-300 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <RefreshCw size={15} />
-                Start over
+              <motion.button type="button" disabled={!canRunDiagnosis || diagnosisBusy}
+                onClick={handleRunDiagnosis} whileTap={canRunDiagnosis && !diagnosisBusy ? buttonTap : undefined}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#2dd4bf] px-3 py-2 text-sm font-bold text-[#041014] transition hover:bg-[#5eead4] focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700/35 disabled:text-slate-400">
+                {diagnosisBusy ? <RefreshCw size={16} aria-hidden="true" className="animate-spin" /> : <Zap size={16} aria-hidden="true" />}
+                {runButtonLabel}
               </motion.button>
             </div>
-          </aside>
+          </div>
         </div>
       </motion.div>
     </>

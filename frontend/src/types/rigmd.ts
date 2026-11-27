@@ -12,7 +12,7 @@ export interface AgentStatus {
 
 export interface ComponentPresenceInfo {
   componentId: string;
-  status: 'Present' | 'NotPresent';
+  status: 'Present' | 'NotPresent' | 'Unknown';
   isSelectable: boolean;
   badge: string;
   reason: string;

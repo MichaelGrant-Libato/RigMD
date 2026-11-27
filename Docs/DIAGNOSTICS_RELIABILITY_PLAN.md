@@ -55,6 +55,8 @@ Use `Run-RigMD.cmd` for the follow-up checkout. Run a check with a finding that 
 
 Open a Slow Boot, Rapid Battery Drain, or crash check to find its Windows follow-up panel. A storage warning with a recorded drive mapping offers Drive Health for that physical drive. These panels display supplemental readings at the time you open them. The original readings and action history remain available for comparison. The report includes the recorded explanation source, when available, and the saved next step.
 
+In **Check My Device**, use **Check specific parts → Startup** or **Check a problem → Battery drains quickly**. The battery problem appears when Windows detects a battery or battery detection is unavailable. Verify that the run bar shows the selection and remains within reach while scrolling. An unavailable graphics lookup still lets you run a graphics check.
+
 For the **SRS**, describe optional cloud explanations, the available measurement sources, and the point at which an action needs approval. For the **SDD**, describe the saved local result, the separate explanation request, and the saved check's evidence boundaries. For the **STD**, include failing and signed-out cloud cases, missing boot records, drive remapping, a laptop battery report, crash time windows, and matching exported fields. Record each native test's Windows build and app commit.
 
 An authenticated staging check, hardware comparisons on additional devices, and clean-install and upgrade acceptance still require test access or equipment. This branch is a launcher test build for review.

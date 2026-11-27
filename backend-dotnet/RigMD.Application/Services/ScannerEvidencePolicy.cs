@@ -34,13 +34,15 @@ internal static class ScannerEvidencePolicy
         else
         {
             if ((Includes("gpu") || Includes("display") || scenario == "no-display") &&
+                !input.Hardware.Gpu.AbsenceConfirmed &&
                 (!input.Hardware.Gpu.HasGpu || string.IsNullOrWhiteSpace(input.Hardware.Gpu.Name) || input.Hardware.Gpu.Name == "Unknown GPU"))
             {
                 proof.RemoveAll(p => p.Label == "GPU / Graphics" && p.Value == "Not Present");
                 Missing("graphics_detection", "Graphics adapter detection", "Graphics metadata was unavailable. This does not establish that the adapter is physically absent.");
             }
             if (result.ComponentStatus == ComponentStatus.NotPresent &&
-                (selected.SetEquals(["battery"]) || scenario == "rapid-battery-drain") && input.Hardware.Battery?.QuerySucceeded == true)
+                (((selected.SetEquals(["battery"]) || scenario == "rapid-battery-drain") && input.Hardware.Battery?.QuerySucceeded == true) ||
+                    (selected.SetEquals(["gpu"]) && input.Hardware.Gpu.AbsenceConfirmed)))
             {
                 foreach (var reading in proof)
                 {

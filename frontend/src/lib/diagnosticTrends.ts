@@ -23,8 +23,8 @@ export const TREND_CHECK_TYPES = [
   { id: 'scenario', label: 'Problem checks' },
 ] as const;
 // Match the current visible scan choices; also retain saved combined/legacy selections.
-export const TREND_COMPONENT_IDS = ['cpu', 'memory', 'gpu', 'storage', 'os', 'drivers', 'battery', 'network', 'display'];
-export const TREND_SCENARIO_IDS = ['slow-system', 'slow-boot', 'blue-screen-crash', 'driver-error', 'no-display', 'overheating-loud-fan', 'network-problem', 'app-crashes', 'stuttering-freezing', 'storage-problem'];
+export const TREND_COMPONENT_IDS = ['cpu', 'memory', 'gpu', 'storage', 'os', 'startup', 'drivers', 'battery', 'network', 'display'];
+export const TREND_SCENARIO_IDS = ['slow-system', 'slow-boot', 'blue-screen-crash', 'driver-error', 'no-display', 'overheating-loud-fan', 'network-problem', 'app-crashes', 'stuttering-freezing', 'storage-problem', 'rapid-battery-drain'];
 export interface TrendSelection {
   device: string;
   checkType: TrendCheckType;
