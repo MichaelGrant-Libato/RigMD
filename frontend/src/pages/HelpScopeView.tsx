@@ -16,35 +16,35 @@ import { accordionReveal, buttonTap, cardFadeUp, cardTransition, hoverLift, page
 const supportedItems = [
   {
     title: 'Slow Boot',
-    description: 'Identify probable causes of extended startup times and recommend maintenance or troubleshooting steps.',
+    description: 'Review startup durations recorded by Windows when available. Use Task Manager to check individual startup apps.',
   },
   {
     title: 'System Freezing',
-    description: 'Connect freeze patterns with RAM pressure, thermal behavior, storage state, or driver-related causes.',
+    description: 'Review memory, temperature, storage, and device warnings around a freezing symptom.',
   },
   {
     title: 'Blue Screen Symptoms',
-    description: 'Map BSOD-style symptoms and driver clues to probable internal causes and action categories.',
+    description: 'Review matching Windows stop-error and restart records, alongside available diagnostic readings.',
   },
   {
-    title: 'Driver Conflicts',
-    description: 'Use reported behavior and Device Manager-style warning signs to guide update or rollback decisions.',
+    title: 'Driver and Device Warnings',
+    description: 'Review Windows device status codes and recorded driver configuration events.',
   },
   {
     title: 'Storage Warning Indicators',
-    description: 'Interpret disk usage, slow file access, and storage-related warnings for maintenance planning.',
+    description: 'Review volume usage and reported drive warnings. Open Drive Health for available physical-drive counters.',
   },
   {
     title: 'Application Crashes',
-    description: 'Correlate repeated app crashes with software conflicts, memory pressure, or driver problems.',
+    description: 'Review application crash records and their dates. Use the event details to guide further investigation.',
   },
   {
     title: 'Display-Related Behavior',
-    description: 'Triage flickering, black-screen, rendering, and no-display symptoms against GPU or driver causes.',
+    description: 'Check whether Windows detects the display and reports graphics device errors. Use the functional check for the picture, connection, and input.',
   },
   {
-    title: 'Basic No-Power Triage',
-    description: 'Guide users through observable no-power symptoms before recommending physical inspection.',
+    title: 'Battery Drain',
+    description: 'Review charge and, where Windows provides a battery report, compare full-charge capacity and recent energy use.',
   },
 ];
 
@@ -59,7 +59,7 @@ const unsupportedItems = [
   },
   {
     title: 'Replace or Repair Parts',
-    description: 'RigMD provides advisory support only. It does not perform repairs or hardware replacements.',
+    description: 'Physical repairs and part replacement require hands-on service. RigMD can guide supported Windows maintenance with approval.',
   },
   {
     title: 'Recommend Purchases',
@@ -107,7 +107,7 @@ const faqs = [
   {
     question: 'Does RigMD send my data anywhere?',
     answer:
-      'RigMD uses your local app and configured backend services for diagnostic workflows. Avoid entering passwords, private files, or sensitive personal information into free-text fields.',
+      'RigMD saves diagnostic history on this PC. With Gemini enabled and a verified account connected, selected readings may be sent for a cloud explanation. Choose Local-only mode to keep explanations on this PC.',
   },
   {
     question: 'What should I do if my result says Escalate?',
@@ -127,7 +127,7 @@ const faqs = [
   {
     question: 'How do I interpret the confidence label?',
     answer:
-      'Confidence describes how strongly the available answers and system signals support the probable result. It is not a professional confirmation.',
+      'The evidence label describes which readings were available for the check. The details identify any missing measurements.',
   },
 ];
 

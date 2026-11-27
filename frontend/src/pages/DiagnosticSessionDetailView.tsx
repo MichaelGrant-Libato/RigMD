@@ -8,7 +8,7 @@ import CheckNextSteps from '../components/CheckNextSteps';
 import ResultDetails from '../components/ResultDetails';
 import { getCheckOverview, getCheckAdvice, getCheckEvidenceLabel, getCheckCoverageNotice } from '../lib/checkPresentation';
 import { getFindingChanges } from '../lib/findingChanges';
-import { explanationSourceLabel } from '../lib/diagnosticReadingVisuals';
+import { explanationSourceLabel, explanationStatusLabel } from '../lib/diagnosticReadingVisuals';
 import { plainDiagnosticText, friendlyActionCategory, friendlyToolName, friendlyVerification } from '../lib/diagnosticLanguage';
 import {
   useCallback,
@@ -39,7 +39,7 @@ import {
 } from '../lib/motion';
 
 import { apiFetch } from '../lib/api';
-import { RecentChangesPanel } from '../components/DeviceDiagnosticPanels';
+import { BatteryHealthPanel, BootHistoryPanel, DriveHealthPanel, RecentChangesPanel, RecordedCrashEventsPanel } from '../components/DeviceDiagnosticPanels';
 
 import type { AutonomyResult } from '../services/autonomyService';
 import {
@@ -86,6 +86,8 @@ interface SessionDetail {
   ai_explanation?: string;
   explanation_source?: string;
   explanation_model?: string;
+  explanation_status?: string;
+  drive_health_targets?: Array<{ number: number; model: string; volumes: string[] }>;
   recommended_next_step?: string;
   primary_result?: string;
   proof?: SessionDetail['resolution_proof'];
@@ -114,6 +116,14 @@ interface Props {
   onOpenMemoryCheck?: () => void;
   onOpenSession?: (id: string) => void;
 }
+
+const functionalChecks = new Map([
+  ['os_integrity', 'Use the Windows check to review available system-file actions. Review the preview before approving a repair.'],
+  ['audio_playback', 'Open Windows Settings → System → Sound. Select the affected device and test playback or microphone input.'],
+  ['peripheral_function', 'Try the affected device in another known-working port. Retest the device with a known-working cable when applicable.'],
+  ['display_picture', 'Open Windows Settings → System → Display. Confirm the affected screen shows a picture and check the input and cable.'],
+  ['fan_operation', 'Check that the vents are clear and review the device maker’s cooling guidance if the symptom persists.'],
+]);
 
 
 
@@ -195,6 +205,36 @@ export default function DiagnosticSessionDetailView({
     useState<string | null>(
       null,
     );
+
+  const waitingForExplanation = session?.session_id === sessionId && session.explanation_status === 'pending';
+  const functionalReadings = session?.proof?.filter(reading => reading.status === 'unknown' && functionalChecks.has(reading.metric_id ?? '')) ?? [];
+  const [explanationReadError, setExplanationReadError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!waitingForExplanation) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const deadline = Date.now() + 32_000;
+    async function loadExplanation() {
+      try {
+        const response = await apiFetch(`/api/diagnosis/sessions/${sessionId}/explanation`, { method: 'POST' });
+        if (disposed) return;
+        if (response.status === 409 && Date.now() < deadline) {
+          timer = setTimeout(() => void loadExplanation(), 1100);
+          return;
+        }
+        if (!response.ok) throw new Error('Cloud explanation could not be read.');
+        const next: Pick<SessionDetail, 'ai_explanation' | 'explanation_source' | 'explanation_model' | 'explanation_status'> = await response.json();
+        if (!disposed) setSession(current => current?.session_id === sessionId ? { ...current, ...next } : current);
+      } catch {
+        if (!disposed) setExplanationReadError(sessionId);
+      }
+    }
+    timer = setTimeout(() => void loadExplanation(), 150);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, waitingForExplanation]);
 
   useEffect(() => {
     if (loading) return;
@@ -501,7 +541,28 @@ export default function DiagnosticSessionDetailView({
               </CheckNextSteps>
               <ProblemFeedback key={`feedback-${sessionId}`} sessionId={sessionId} />
               <FollowUpHistory key={`rechecks-${sessionId}`} observations={session.follow_up_history} status={session.follow_up_history_status} />
+              {(session.scenario_id === 'slow-boot' || parseComponentIds(session.component_ids).includes('startup')) &&
+                <BootHistoryPanel key={`boot-${sessionId}`} />}
+              {(session.scenario_id === 'rapid-battery-drain' || parseComponentIds(session.component_ids).includes('battery')) &&
+                session.component_status !== 'NotPresent' && <BatteryHealthPanel key={`battery-${sessionId}`} />}
+              {session.proof?.some(reading => ['storage_usage', 'storage_health'].includes(reading.metric_id ?? '') && reading.status === 'high') &&
+                (session.drive_health_targets?.length
+                  ? session.drive_health_targets.map(drive => <DriveHealthPanel key={`${sessionId}-${drive.number}`}
+                      sessionId={sessionId} number={drive.number} model={drive.model} volumes={drive.volumes} />)
+                  : <p className="text-sm text-slate-400">Open My Device Info → Storage to choose a drive and read its current health counters.</p>)}
+              {session.proof?.some(reading => ['application_crash_history', 'system_crash_history'].includes(reading.metric_id ?? '')) &&
+                <RecordedCrashEventsPanel key={`crashes-${sessionId}`} sessionId={sessionId} />}
               <RecentChangesPanel sessionId={sessionId} />
+              {functionalReadings.length > 0 &&
+                <details className="rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
+                  <summary className="cursor-pointer font-semibold text-slate-200">Checks you can complete</summary>
+                  <ul className="mt-3 space-y-3 text-sm">
+                    {functionalReadings.map(reading => <li key={reading.metric_id}>
+                        <span className="font-medium text-slate-100">{reading.label}</span>
+                        <p className="text-slate-300">{functionalChecks.get(reading.metric_id ?? '')}</p>
+                      </li>)}
+                  </ul>
+                </details>}
               <ResultDetails label="Original check" title="Original check">
               <div data-testid="original-check-details">
                 <motion.section
@@ -667,6 +728,11 @@ export default function DiagnosticSessionDetailView({
                 <details className="mt-4 rounded-xl border border-[var(--rigmd-border)] bg-[var(--rigmd-bg)] p-4">
                   <summary className="cursor-pointer font-semibold text-slate-200">Technical result details</summary>
                   <p className="mt-3 text-xs text-slate-400">Explanation source: {explanationSourceLabel(session.explanation_source, session.explanation_model)}</p>
+                  {explanationStatusLabel(session.explanation_status) && <p role="status" className="mt-1 text-sm text-slate-300">
+                    {explanationReadError === sessionId && session.explanation_status === 'pending'
+                      ? 'Could not retrieve the updated explanation status.'
+                      : explanationStatusLabel(session.explanation_status)}
+                  </p>}
 
                   <p className="mt-2 break-words text-sm text-slate-300">{session.diagnosed_category}: {session.primary_result}</p>
                   <p className="mt-2 text-sm leading-relaxed text-slate-300">

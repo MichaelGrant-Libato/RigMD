@@ -18,6 +18,20 @@ const stats = { device_name: 'Test Laptop', os_version: 'Windows 11', ram: { tot
 const dashboard = { server_time: time, totals: { total_sessions: 100, this_month_count: 95, escalated_count: 0 }, recurring_issues_count: 6, warning_signs_active_count: 0 };
 const report = (overrides = {}) => buildReportText({ stats, dashboard, hardwareUpdatedAt: new Date('2026-10-23T12:36:00Z'), sessions: [original], historyUnavailable: false, generatedAt: new Date(time), ...overrides });
 
+test('report text and print HTML preserve the saved recommendation and explanation provenance', () => {
+  const saved = { ...original, recommended_next_step: 'Review the C drive before choosing cleanup.',
+    explanation_source: 'gemini', explanation_model: 'gemini-test', explanation_status: 'completed' };
+  const document = buildReportDocument({ stats, dashboard, hardwareUpdatedAt: null, sessions: [saved],
+    selectedSession: saved, historyUnavailable: false });
+  for (const text of [reportDocumentText(document), buildReportHtml(document)]) {
+    assert.ok(text.includes(saved.recommended_next_step));
+    assert.ok(text.includes('Gemini (gemini-test)'));
+  }
+
+  const fallback = { ...saved, explanation_source: 'local', explanation_model: null, explanation_status: 'rate-limited' };
+  assert.match(report({ selectedSession: fallback }), /A cloud usage limit was reached\./);
+});
+
 for (const [timezone, cases] of [
   ['Asia/Singapore', [
     ['2026-10-26T15:59:59.999Z', '2026-10-26'],

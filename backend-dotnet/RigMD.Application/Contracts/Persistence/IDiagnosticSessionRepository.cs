@@ -64,6 +64,8 @@ public interface IDiagnosticSessionRepository
     /// <summary>Marks a session as needing a follow-up resolution check.</summary>
     Task<bool> MarkNeedsRecheckAsync(Guid sessionId);
     Task SaveExplanationSourceAsync(Guid sessionId, string source, string? model) => Task.CompletedTask;
+    Task SaveExplanationAsync(Guid sessionId, string source, string? model, string? status, string? text = null, bool onlyPending = false)
+        => SaveExplanationSourceAsync(sessionId, source, model);
 
     /// <summary>Returns aggregate counts for the dashboard summary card.</summary>
     Task<object> GetDashboardSummaryAsync();

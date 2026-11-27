@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -52,17 +53,30 @@ public class GeminiAiExplainer : IAiExplainer
         DiagnosticSymptomPayload symptomPayload)
         => (await GenerateExplanationWithSourceAsync(result, symptomPayload)).Text;
 
+    public Task<DiagnosticExplanation> GenerateExplanationWithSourceAsync(
+        DiagnosticResult result,
+        DiagnosticSymptomPayload symptomPayload) =>
+        GenerateExplanationWithSourceAsync(result, symptomPayload, CancellationToken.None);
+
     public async Task<DiagnosticExplanation> GenerateExplanationWithSourceAsync(
         DiagnosticResult result,
-        DiagnosticSymptomPayload symptomPayload)
+        DiagnosticSymptomPayload symptomPayload,
+        CancellationToken token)
     {
+        async Task<DiagnosticExplanation> Fallback(string status) =>
+            (await _offlineFallback.GenerateExplanationWithSourceAsync(result, symptomPayload)) with { Status = status };
+
         var proxyUrl = ResolveProxyUrl();
+        if (proxyUrl == null) return await Fallback("local-only");
         var proxy = RigMdAgentRuntimeSettingsStore.GetTrustedCloudProxyUri(proxyUrl);
-        var accessToken = proxy != null && _cloudSession != null ? await _cloudSession.GetAccessTokenAsync() : null;
-        if (proxy == null || accessToken == null)
-        {
-            return await _offlineFallback.GenerateExplanationWithSourceAsync(result, symptomPayload);
-        }
+        if (proxy == null) return await Fallback("service-unavailable");
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(TimeSpan.FromSeconds(25));
+        var accessToken = _cloudSession != null ? await _cloudSession.GetAccessTokenAsync(budget.Token) : null;
+        if (accessToken == null)
+            return await Fallback(budget.IsCancellationRequested ? "timed-out"
+                : _cloudSession?.Status is { Reconnecting: true } or { SignedIn: true } ? "service-unavailable"
+                : "sign-in-required");
 
         var prompt = BuildPrompt(result, symptomPayload);
         var requestBody = new
@@ -91,25 +105,34 @@ public class GeminiAiExplainer : IAiExplainer
             ? new[] { configuredModel }.Concat(CandidateModels).Distinct(StringComparer.OrdinalIgnoreCase)
             : CandidateModels;
 
+        var fallbackStatus = "service-unavailable";
         foreach (var model in models)
         {
             try
             {
-                using var cts = new System.Threading.CancellationTokenSource(RigMdAgentRuntimeSettingsStore.CloudRequestTimeout);
                 using var request = new HttpRequestMessage(HttpMethod.Post, $"{proxy}?model={Uri.EscapeDataString(model)}");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
                 request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-                using var response = await _httpClient.SendAsync(request, cts.Token);
+                using var response = await _httpClient.SendAsync(request, budget.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    if ((int)response.StatusCode is 401 or 403) await _cloudSession!.RejectAccessTokenAsync(accessToken);
-                    if ((int)response.StatusCode is not (400 or 404)) break;
+                    var code = (int)response.StatusCode;
+                    _logger.LogWarning("Gemini explanation request returned HTTP {StatusCode} for {Model}.", code, model);
+                    if (code is 401 or 403)
+                    {
+                        await _cloudSession!.RejectAccessTokenAsync(accessToken);
+                        return await Fallback("sign-in-required");
+                    }
+                    if (code == 429) return await Fallback("rate-limited");
+                    if (code == 504) return await Fallback("timed-out");
+                    if (code is not (400 or 404)) break;
                     continue;
                 }
 
-                var responseJson = await response.Content.ReadAsStringAsync(cts.Token);
+                var responseJson = await response.Content.ReadAsStringAsync(budget.Token);
                 using var doc = JsonDocument.Parse(responseJson);
+                fallbackStatus = "incomplete";
 
                 if (doc.RootElement.TryGetProperty("candidates", out var candidates) &&
                     candidates.GetArrayLength() > 0)
@@ -130,23 +153,27 @@ public class GeminiAiExplainer : IAiExplainer
                     {
                         var modeLabel = "Authenticated Gemini Cloud Proxy";
                         _logger.LogInformation("[AI] Diagnostic explanation generated via {Mode} (Model: {Model})", modeLabel, model);
-                        return generated;
+                        return generated with { Status = "completed" };
                     }
 
                     _logger.LogWarning("[AI] Gemini returned no completed explanation for model {Model}; trying next candidate or offline fallback.", model);
                 }
             }
-            catch (Exception ex)
+            catch (OperationCanceledException) when (budget.IsCancellationRequested)
+            {
+                return await Fallback("timed-out");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or System.IO.IOException or OperationCanceledException)
             {
                 _logger.LogWarning(
-                    ex,
-                    "GeminiAiExplainer failed on model {Model}; trying next candidate or offline fallback.",
-                    model);
+                    "Gemini explanation failed on model {Model} ({ErrorType}).",
+                    model, ex.GetType().Name);
+                fallbackStatus = "service-unavailable";
             }
         }
 
         _logger.LogInformation("[AI] Generating diagnostic explanation via Built-in Offline Fallback Engine");
-        return await _offlineFallback.GenerateExplanationWithSourceAsync(result, symptomPayload);
+        return await Fallback(fallbackStatus);
     }
 
     internal static string? ReadModelVersion(JsonElement response)

@@ -10,6 +10,28 @@ namespace RigMD.Tests.Infrastructure;
 public class DiagnosticSessionRepositoryTests
 {
     [Fact]
+    public void DriveHealthTargetsUseRecordedVolumeMappings()
+    {
+        var targets = DiagnosticSessionRepository.ReadDriveHealthTargets("""
+            [
+                {"DiskIndex":0,"Model":"First","SizeGb":240,"Volumes":[{"Drive":"C:","TotalGb":180,"UsagePercent":70}]},
+                {"DiskIndex":1,"Model":"Second","SizeGb":480,"Volumes":[{"Drive":"D:","TotalGb":400,"UsagePercent":84.8}]},
+                {"DiskIndex":2,"Model":"Third","SizeGb":120,"IsFailingSmart":true},
+                {"Model":"Unmapped","SizeGb":120,"Volumes":[{"Drive":"F:","TotalGb":100,"UsagePercent":99}]}
+            ]
+            """);
+        Assert.Collection(targets, first =>
+        {
+            Assert.Equal(1, first.Number);
+            Assert.Equal(["D:"], first.Volumes);
+        }, second =>
+        {
+            Assert.Equal(2, second.Number);
+            Assert.Empty(second.Volumes);
+        });
+    }
+
+    [Fact]
     public async Task DeviceIdentityIsSavedSeparatelyForNewChecksAndLegacyFollowups()
     {
         await using var db = GetMemoryContext();

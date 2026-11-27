@@ -9,6 +9,7 @@ public sealed record WindowsChange(DateTimeOffset At, string Kind, string Detail
 public sealed record ChangeCoverage(string Source, string State);
 public sealed record WindowsChanges(DateTimeOffset Since, DateTimeOffset CheckedAt, bool LimitedWindow,
     WindowsChange[] Changes, ChangeCoverage[] Coverage);
+public sealed record RecordedCrashEvents(DateTimeOffset Since, DateTimeOffset Until, WindowsChange[] Events, ChangeCoverage Coverage);
 
 public static class RecentWindowsChanges
 {
@@ -38,6 +39,36 @@ public static class RecentWindowsChanges
             .OrderByDescending(entry => entry.At).Take(100).ToArray(), sections.Select(section => section.Coverage).ToArray());
     }
 
+    internal static (DateTimeOffset Start, DateTimeOffset End)? CrashWindow(object[] savedProof, bool application, DateTimeOffset now)
+    {
+        var metric = application ? "application_crash_history" : "system_crash_history";
+        foreach (var row in savedProof.OfType<JsonElement>())
+        {
+            if (row.ValueKind == JsonValueKind.Object &&
+                row.TryGetProperty("metric_id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == metric &&
+                row.TryGetProperty("window_start", out var start) && start.ValueKind == JsonValueKind.String && start.TryGetDateTimeOffset(out var from) &&
+                row.TryGetProperty("window_end", out var end) && end.ValueKind == JsonValueKind.String && end.TryGetDateTimeOffset(out var to) &&
+                from < to && to <= now && to - from <= TimeSpan.FromDays(8))
+                return (from, to);
+        }
+        return null;
+    }
+
+    internal static RecordedCrashEvents ReadCrashRecords(DateTimeOffset start, DateTimeOffset end, bool application, CancellationToken token)
+    {
+        var criterion = application
+            ? "(EventID=1000 and Provider[@Name='Application Error']) or (EventID=1001 and Provider[@Name='Windows Error Reporting']) or (EventID=1002 and Provider[@Name='Application Hang']) or (EventID=1026 and Provider[@Name='.NET Runtime'])"
+            : "(EventID=41 and Provider[@Name='Microsoft-Windows-Kernel-Power']) or (EventID=1001 and (Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] or Provider[@Name='BugCheck'])) or (EventID=6008 and Provider[@Name='EventLog'])";
+        var log = application ? "Application" : "System";
+        var section = ReadEvents(log, log, criterion, EventStamp(start),
+            record => Describe(record, record.ProviderName ?? "Windows event", application ? "AppName" : "BugcheckCode"),
+            token, until: EventStamp(end));
+        return new(start, end, section.Events, section.Coverage);
+    }
+
+    private static string EventStamp(DateTimeOffset time) =>
+        time.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
+
     private static string Describe(EventRecord record, string label, string field)
     {
         var suffix = $" (event {record.Id}).";
@@ -54,13 +85,14 @@ public static class RecentWindowsChanges
     }
 
     private static (WindowsChange[] Events, ChangeCoverage Coverage) ReadEvents(string kind, string log, string criterion,
-        string stamp, Func<EventRecord, string> describe, CancellationToken token)
+        string stamp, Func<EventRecord, string> describe, CancellationToken token, string? until = null)
     {
         var entries = new List<WindowsChange>();
         try
         {
+            var end = until == null ? "" : $" and @SystemTime <= '{until}'";
             var query = new EventLogQuery(log, PathType.LogName,
-                $"*[System[({criterion}) and TimeCreated[@SystemTime >= '{stamp}']]]") { ReverseDirection = true };
+                $"*[System[({criterion}) and TimeCreated[@SystemTime >= '{stamp}'{end}]]") { ReverseDirection = true };
             using var reader = new EventLogReader(query);
             while (entries.Count < 25)
             {

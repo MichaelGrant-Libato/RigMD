@@ -19,7 +19,7 @@ The system combines:
    Structured scoring, evidence, action categories, confidence levels, recurring-pattern analysis, and warning-sign detection.
 
 3. **Controlled Remediation Engine**
-   Approved remediation actions, safety checks, resolution rechecking, verification, rollback, and pivot behavior.
+   Approved remediation actions, safety checks, action evidence, and separate resolution rechecks. Recovery options depend on the action.
 
 4. **Offline-First Persistence**
    Local SQLite is the source of truth. Legacy direct PostgreSQL history import is disabled; optional cloud AI/account access uses the authenticated proxy.
@@ -209,7 +209,7 @@ RigMD/
 
 ## 4. Controlled Remediation & Safety
 
-RigMD employs a controlled, closed-loop remediation engine that executes explicitly approved actions, verifies resolutions, and safely handles rollbacks or pivots upon failure. Remediation actions are strictly classified into three safety tiers (Low-risk, Configuration-changing, and High-risk), ensuring that destructive or unverified operations require explicit user consent or remain advisory-only; see [`Docs/REMEDIATION_POLICY.md`](./Docs/REMEDIATION_POLICY.md) for full details.
+RigMD previews supported actions and executes them after explicit approval. Follow-up checks record whether the original condition changed. See [the remediation policy](./Docs/REMEDIATION_POLICY.md) for action-specific safety tiers, verification, and recovery.
 
 ### Currently Implemented Approval-Required Actions
 
@@ -370,7 +370,7 @@ Current automated test coverage includes:
 
 ### 1. Database & Offline Operation
 * **Local SQLite is the Source of Truth:** RigMD automatically creates and upgrades its local SQLite database on launch at `%LocalAppData%\RigMD\rigmd.db` with WAL (Write-Ahead Logging) enabled.
-* **No `DATABASE_URL` Required:** RigMD operates 100% offline out-of-the-box. If a Supabase `DATABASE_URL` is provided, optional cloud sync occurs in the background without blocking local diagnoses.
+* **Local history:** RigMD keeps saved checks in SQLite on this Windows account. Cloud account connection provides access to optional Gemini assistance.
 
 ### 2. Port 5273 Already in Use
 * If an orphaned `RigMD.Api.exe` process is still running from a previous debugger session, kill it in PowerShell:
@@ -383,5 +383,5 @@ Current automated test coverage includes:
 * **Zero User Configuration:** RigMD automatically routes through the team's secure Vercel serverless proxy (`https://www.rig-md.com/api/gemini`) where `GEMINI_API_KEY` is securely stored in Vercel Environment Variables. Users do not need to obtain or paste API keys.
 * **Dual-Mode Engine in Settings:** Users can toggle between **"Use Gemini when available"** (cloud AI proxy with silent local fallback) and **"Local-only mode"** (100% offline).
 * **Cloud access:** The desktop Gemini clients use the authenticated proxy/session path. Provider credentials stay on the server. Local diagnostic history remains local and is not imported through a shared database connection string.
-* **Guaranteed Offline Reliability:** If the cloud proxy times out, encounters a rate limit (429), or the PC has no internet, RigMD automatically and silently switches to its built-in offline ReAct diagnostic engine with zero errors.
+* **Cloud explanation status:** RigMD saves the Windows check and built-in guidance first. With Gemini enabled, findings that need review can receive a cloud explanation on the saved result. Technical result details shows the explanation source and the fallback reason when recorded.
 

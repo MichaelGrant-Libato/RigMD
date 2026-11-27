@@ -130,11 +130,18 @@ function ReadingFields({ fields }: { fields: [string, string][] }) {
       <dd className="text-sm font-medium text-white">{value}</dd></div>)}</dl>;
 }
 
-export function DriveHealthPanel({ number, model }: { number: number; model: string }) {
-  return <DiagnosticPanel<DriveHealth> title="Drive Health" path={'drives/' + number + '/health'} button="Read drive health"
-    description="Read the reliability counters Windows exposes for this physical drive.">
+export function DriveHealthPanel({ number, model, sessionId, volumes }: {
+  number: number; model: string; sessionId?: string; volumes?: string[];
+}) {
+  const path = (sessionId ? 'checks/' + encodeURIComponent(sessionId) + '/' : '') + 'drives/' + number + '/health';
+  return <DiagnosticPanel<DriveHealth> title={sessionId ? 'Drive Health · ' + model : 'Drive Health'} path={path} button="Read drive health"
+    description={sessionId && volumes?.length
+      ? 'Read current reliability counters for the physical drive that held ' + volumes.join(', ') + ' at the saved check.'
+      : 'Read the reliability counters Windows exposes for this physical drive.'}>
     {reading => reading.state === 'permission denied'
       ? <p className="text-sm text-amber-200">Windows denied access to this drive’s reliability counters.</p>
+      : reading.state === 'drive changed'
+        ? <p className="text-sm text-amber-200">This drive no longer matches the one in the saved check. Open Storage in My Device Info to view the current drives.</p>
       : reading.state !== 'measured'
         ? <p className="text-sm text-slate-300">Windows did not expose reliability counters for this drive.</p>
         : <>
@@ -150,6 +157,36 @@ export function DriveHealthPanel({ number, model }: { number: number; model: str
   </DiagnosticPanel>;
 }
 
+interface BootHistory {
+  state: string;
+  records: Array<{ recordedAt: string; durationMs: number; mainPathMs?: number | null; postBootMs?: number | null }>;
+}
+
+export function BootHistoryPanel() {
+  return <DiagnosticPanel<BootHistory> title="Boot History" path="boot-history" button="Read boot history"
+    description="Review recent startup durations recorded by Windows on this PC.">
+    {reading => <>
+      {!reading.records.length && <p className="text-sm text-slate-300">{reading.state === 'permission denied'
+        ? 'Windows denied access to the boot history.'
+        : reading.state === 'no records'
+          ? 'Windows returned no usable boot records.'
+          : 'Windows boot history is unavailable.'}</p>}
+      {reading.state === 'partial' && <p className="text-sm text-amber-200">Windows returned part of the boot history.</p>}
+      {reading.records.length > 0 && <ul className="divide-y divide-white/10">
+        {reading.records.map((row, index) => <li key={row.recordedAt + index} className="space-y-2 py-2">
+          <p className="text-xs text-slate-400">{observed(row.recordedAt)}</p>
+          <ReadingFields fields={[
+            ['Boot duration', formatMeasurement(row.durationMs / 1000, ' s', 1)],
+            ['Main startup', formatMeasurement(row.mainPathMs != null ? row.mainPathMs / 1000 : null, ' s', 1)],
+            ['Post-boot', formatMeasurement(row.postBootMs != null ? row.postBootMs / 1000 : null, ' s', 1)],
+          ]} />
+        </li>)}
+      </ul>}
+      <p className="text-xs text-slate-400">Use Task Manager → Startup apps to review individual app impact.</p>
+    </>}
+  </DiagnosticPanel>;
+}
+
 interface BatteryHealth { state: string; capturedAt: string;
   batteries: Array<{ name: string; designMwh?: number | null; fullChargeMwh?: number | null; cycleCount?: number | null }>;
   recent: Array<{ at: string; remainingMwh?: number | null; drainedMwh?: number | null }>;
@@ -157,9 +194,10 @@ interface BatteryHealth { state: string; capturedAt: string;
 
 export function BatteryHealthPanel() {
   return <DiagnosticPanel<BatteryHealth> title="Battery Health" path="battery-health" button="Read battery report"
-    description="Compare the battery’s original capacity with its current full-charge capacity and recent use.">
+    description="Compare the battery’s original capacity with its current full-charge capacity and recent energy use on this PC.">
     {reading => reading.state !== 'measured' ? <p className="text-sm text-slate-300">Windows could not provide a battery report for this PC.</p> : <>
       <p className="text-xs text-slate-400">{observed(reading.capturedAt)}</p>
+      <p className="text-xs text-slate-400">Charge is the energy available now. Full-charge capacity shows how much the battery can currently hold. Recent use shows recorded energy levels or discharge over time.</p>
       {reading.batteries.map((battery, index) => <div key={index} className="space-y-2">
         <h4 className="text-sm font-semibold text-white">{battery.name}</h4>
         <ReadingFields fields={[
@@ -187,6 +225,31 @@ interface Changes {
   coverage: Array<{ source: string; state: string }>;
 }
 
+type WindowsEvent = Changes['changes'][number];
+
+function WindowsEvents({ events }: { events: WindowsEvent[] }) {
+  return <ul className="max-h-64 divide-y divide-white/10 overflow-y-auto">
+    {events.map((event, index) => <li key={index} className="py-2 text-sm text-slate-200">
+      <span className="font-medium">{event.kind}</span>{' · ' + observed(event.at)}
+      <p className="mt-1 break-words text-slate-400">{event.detail}</p>
+    </li>)}
+  </ul>;
+}
+
+export function RecordedCrashEventsPanel({ sessionId }: { sessionId: string }) {
+  return <DiagnosticPanel<{ since: string; until: string; coverage: Changes['coverage'][number]; events: WindowsEvent[] }>
+    title="Crash Records" path={'checks/' + encodeURIComponent(sessionId) + '/crash-events'}
+    button="Read crash records" description="Review the Windows events still available for the time window of this saved check.">
+    {reading => <>
+      <p className="text-xs text-slate-400">{observed(reading.since) + ' to ' + observed(reading.until)}</p>
+      <p className="text-xs text-slate-400">{reading.coverage.source + ' log · ' + reading.coverage.state}</p>
+      {reading.events.length > 0 ? <WindowsEvents events={reading.events} /> : <p className="text-sm text-slate-300">
+        {reading.coverage.state === 'unavailable' ? 'Windows could not read the event log.' : 'No matching records were returned for this window.'}
+      </p>}
+    </>}
+  </DiagnosticPanel>;
+}
+
 export function RecentChangesPanel({ sessionId }: { sessionId: string }) {
   return <DiagnosticPanel<Changes> key={sessionId} title="What Changed?" path={'changes/' + encodeURIComponent(sessionId)}
     button="Review changes" description="Look for updates, driver configuration, and crashes recorded since this check on this PC.">
@@ -198,12 +261,7 @@ export function RecentChangesPanel({ sessionId }: { sessionId: string }) {
         <summary className="cursor-pointer py-1">Sources checked</summary>
         <ul>{reading.coverage.map(row => <li key={row.source}>{row.source} · {row.state}</li>)}</ul>
       </details>
-      {reading.changes.length ? <ul className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-        {reading.changes.map((change, index) => <li key={index} className="py-2 text-sm text-slate-200">
-          <span className="font-medium">{change.kind}</span>{' · ' + observed(change.at)}
-          <p className="mt-1 break-words text-slate-400">{change.detail}</p>
-        </li>)}
-      </ul> : <p className="text-sm text-slate-300">{reading.coverage.every(row => row.state === 'unavailable')
+      {reading.changes.length ? <WindowsEvents events={reading.changes} /> : <p className="text-sm text-slate-300">{reading.coverage.every(row => row.state === 'unavailable')
         ? 'The Windows activity sources were unavailable.' : 'The sources that responded returned no matching events.'}</p>}
     </>}
   </DiagnosticPanel>;
