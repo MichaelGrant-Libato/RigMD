@@ -1,5 +1,5 @@
 #define MyAppName "RigMD"
-#define MyAppVersion "0.2.20"
+#define MyAppVersion "0.2.22"
 #define MyAppPublisher "RigMD"
 #define MyAppExeName "RigMD.Desktop.exe"
 
